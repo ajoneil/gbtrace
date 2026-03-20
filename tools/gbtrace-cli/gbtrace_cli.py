@@ -149,6 +149,14 @@ def cmd_diff(args):
     fields_b = set(df_b.columns) - {"cy"}
     common_fields = sorted(fields_a & fields_b)
 
+    # Apply field filters
+    if args.fields:
+        include = set(args.fields.split(","))
+        common_fields = [f for f in common_fields if f in include]
+    if args.exclude:
+        exclude = set(args.exclude.split(","))
+        common_fields = [f for f in common_fields if f not in exclude]
+
     if not common_fields:
         print("ERROR: No common fields to compare.")
         return 1
@@ -354,6 +362,10 @@ def main():
                         help="Max divergence points to show in detail (default: 10)")
     p_diff.add_argument("--context", type=int, default=2,
                         help="Context entries before/after each divergence (default: 2)")
+    p_diff.add_argument("--fields",
+                        help="Only compare these fields (comma-separated, e.g. pc,a,f)")
+    p_diff.add_argument("--exclude",
+                        help="Exclude these fields from comparison (comma-separated, e.g. ime,ly)")
 
     # info
     p_info = sub.add_parser("info", help="Show trace file summary")
