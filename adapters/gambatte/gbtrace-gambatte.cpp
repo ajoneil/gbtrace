@@ -1,10 +1,11 @@
 // gbtrace-gambatte: Adapter that uses libgambatte to produce .gbtrace files.
 //
 // Links against libgambatte (gambatte-speedrun) without any source modifications.
-// Uses the public traceCallback API to capture per-instruction CPU state.
+// Uses the public traceCallback API to capture per-instruction CPU state,
+// and externalRead (peek) for IO registers (PPU, timer, interrupts).
 //
 // Usage:
-//   gbtrace-gambatte --rom test.gb [--output trace.gbtrace] [--frames 3000] [--model dmg]
+//   gbtrace-gambatte --rom test.gb --profile cpu_basic.toml [--output trace.gbtrace]
 //
 // Build:
 //   See Makefile in this directory.
@@ -13,44 +14,169 @@
 
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
+#include <fstream>
+#include <sstream>
 #include <string>
+#include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
+// --- Field configuration ---
+
+// Map of field name -> IO register address for fields read via externalRead.
+// CPU register fields are read from the trace callback data array instead.
+static const std::unordered_map<std::string, unsigned short> IO_FIELD_ADDR = {
+    {"lcdc", 0xFF40}, {"stat", 0xFF41}, {"scy",  0xFF42}, {"scx",  0xFF43},
+    {"ly",   0xFF44}, {"lyc",  0xFF45}, {"wy",   0xFF4A}, {"wx",   0xFF4B},
+    {"bgp",  0xFF47}, {"obp0", 0xFF48}, {"obp1", 0xFF49}, {"dma",  0xFF46},
+    {"div",  0xFF04}, {"tima", 0xFF05}, {"tma",  0xFF06}, {"tac",  0xFF07},
+    {"if_",  0xFF0F}, {"ie",   0xFFFF},
+    {"sb",   0xFF01}, {"sc",   0xFF02},
+};
+
+// Fields available from the trace callback data array.
+// Maps field name -> (array index, is_16bit).
+struct CallbackField { int index; bool is_16bit; };
+static const std::unordered_map<std::string, CallbackField> CALLBACK_FIELDS = {
+    {"pc", {1, true}},  {"sp", {2, true}},
+    {"a",  {3, false}}, {"b",  {4, false}}, {"c",  {5, false}},
+    {"d",  {6, false}}, {"e",  {7, false}}, {"f",  {8, false}},
+    {"h",  {9, false}}, {"l",  {10, false}},
+};
+
+// --- Profile ---
+
+struct Profile {
+    std::string name;
+    std::string trigger;
+    std::vector<std::string> fields; // ordered, including "cy"
+};
+
+static Profile parse_profile(const std::string &path) {
+    Profile prof;
+    prof.trigger = "instruction";
+    prof.fields.push_back("cy");
+
+    std::ifstream f(path);
+    if (!f.is_open()) {
+        std::fprintf(stderr, "Error: cannot open profile '%s'\n", path.c_str());
+        std::exit(1);
+    }
+
+    // Minimal TOML parser — enough for our profile format.
+    // Handles: name = "value", trigger = "value", group = ["f1", "f2"]
+    std::string line;
+    while (std::getline(f, line)) {
+        // Strip comments
+        auto hash = line.find('#');
+        if (hash != std::string::npos) line = line.substr(0, hash);
+
+        // Look for key = value
+        auto eq = line.find('=');
+        if (eq == std::string::npos) continue;
+
+        std::string key = line.substr(0, eq);
+        std::string val = line.substr(eq + 1);
+
+        // Trim whitespace
+        auto trim = [](std::string &s) {
+            while (!s.empty() && std::isspace(s.front())) s.erase(0, 1);
+            while (!s.empty() && std::isspace(s.back())) s.pop_back();
+        };
+        trim(key);
+        trim(val);
+
+        if (key == "name") {
+            // Strip quotes
+            if (val.size() >= 2 && val.front() == '"' && val.back() == '"')
+                val = val.substr(1, val.size() - 2);
+            prof.name = val;
+        } else if (key == "trigger") {
+            if (val.size() >= 2 && val.front() == '"' && val.back() == '"')
+                val = val.substr(1, val.size() - 2);
+            prof.trigger = val;
+        } else if (val.front() == '[') {
+            // Parse array of strings: ["f1", "f2", ...]
+            auto start = val.find('[');
+            auto end = val.find(']');
+            if (start != std::string::npos && end != std::string::npos) {
+                std::string inner = val.substr(start + 1, end - start - 1);
+                std::istringstream ss(inner);
+                std::string token;
+                while (std::getline(ss, token, ',')) {
+                    trim(token);
+                    if (token.size() >= 2 && token.front() == '"' && token.back() == '"')
+                        token = token.substr(1, token.size() - 2);
+                    if (!token.empty() && token != "cy") {
+                        prof.fields.push_back(token);
+                    }
+                }
+            }
+        }
+    }
+
+    return prof;
+}
+
 // --- Globals for trace callback context ---
-// (traceCallback is a raw function pointer with void* data, so we use globals)
 
 static FILE *g_output = nullptr;
 static gambatte::GB *g_gb = nullptr;
+static Profile g_profile;
 
-// Convert a sample offset to T-cycles.
-// In normal speed: 1 sample = 4 T-cycles.
-// In CGB double speed: 1 sample = 8 T-cycles, but the Game Boy still runs
-// at the same wall clock rate, so we always multiply by 4 for the trace
-// (the spec uses T-cycles at 4.194304 MHz).
+// Pre-computed list of what to emit per entry, for fast callback execution.
+struct FieldEmitter {
+    std::string name;
+    enum Source { CALLBACK_8, CALLBACK_16, IO_READ, OPCODE, IME } source;
+    int cb_index;           // for CALLBACK_8/16
+    unsigned short io_addr; // for IO_READ
+};
+static std::vector<FieldEmitter> g_emitters;
+
+static void build_emitters(const Profile &prof) {
+    g_emitters.clear();
+    for (const auto &field : prof.fields) {
+        if (field == "cy") continue; // handled separately
+
+        FieldEmitter em;
+        em.name = field;
+
+        if (field == "op") {
+            em.source = FieldEmitter::OPCODE;
+        } else if (field == "ime") {
+            em.source = FieldEmitter::IME;
+        } else if (auto it = CALLBACK_FIELDS.find(field); it != CALLBACK_FIELDS.end()) {
+            em.source = it->second.is_16bit ? FieldEmitter::CALLBACK_16 : FieldEmitter::CALLBACK_8;
+            em.cb_index = it->second.index;
+        } else if (auto it2 = IO_FIELD_ADDR.find(field); it2 != IO_FIELD_ADDR.end()) {
+            em.source = FieldEmitter::IO_READ;
+            em.io_addr = it2->second;
+        } else {
+            std::fprintf(stderr, "Warning: unknown field '%s', skipping\n", field.c_str());
+            continue;
+        }
+        g_emitters.push_back(em);
+    }
+}
+
+// --- Formatting helpers ---
+
 static inline unsigned long long samples_to_tcycles(unsigned long long samples) {
     return samples * 4;
 }
 
-static std::string hex8(int val) {
-    char buf[8];
-    std::snprintf(buf, sizeof(buf), "0x%02X", val & 0xFF);
-    return buf;
+// Write a hex8 value directly to the output buffer.
+static inline void fput_hex8(FILE *out, int val) {
+    std::fprintf(out, "\"0x%02X\"", val & 0xFF);
 }
 
-static std::string hex16(int val) {
-    char buf[8];
-    std::snprintf(buf, sizeof(buf), "0x%04X", val & 0xFFFF);
-    return buf;
+static inline void fput_hex16(FILE *out, int val) {
+    std::fprintf(out, "\"0x%04X\"", val & 0xFFFF);
 }
 
-// Trace callback — fired before each instruction.
-// The void* points to an array of values:
-//   [0] = cycleOffset (sample-based)
-//   [1] = PC, [2] = SP
-//   [3] = A, [4] = B, [5] = C, [6] = D, [7] = E, [8] = F, [9] = H, [10] = L
-//   [11] = prefetched (bool)
-//   [12] = opcode << 16 | operandHigh << 8 | operandLow
-//   [13] = LY
+// --- Trace callback ---
+
 static void trace_callback(void *data) {
     int *r = static_cast<int *>(data);
 
@@ -58,35 +184,36 @@ static void trace_callback(void *data) {
     unsigned long long total_samples = g_gb->timeNow() + cycle_offset;
     unsigned long long tcycles = samples_to_tcycles(total_samples);
 
-    int pc = r[1];
-    int sp = r[2];
-    int a  = r[3];
-    int b  = r[4];
-    int c  = r[5];
-    int d  = r[6];
-    int e  = r[7];
-    int f  = r[8];
-    int h  = r[9];
-    int l  = r[10];
-    int opcode = (r[12] >> 16) & 0xFF;
+    std::fprintf(g_output, "{\"cy\":%llu", tcycles);
 
-    std::fprintf(g_output,
-        "{\"cy\":%llu,\"pc\":\"%s\",\"sp\":\"%s\","
-        "\"a\":\"%s\",\"f\":\"%s\","
-        "\"b\":\"%s\",\"c\":\"%s\","
-        "\"d\":\"%s\",\"e\":\"%s\","
-        "\"h\":\"%s\",\"l\":\"%s\","
-        "\"op\":\"%s\"}\n",
-        tcycles,
-        hex16(pc).c_str(), hex16(sp).c_str(),
-        hex8(a).c_str(), hex8(f).c_str(),
-        hex8(b).c_str(), hex8(c).c_str(),
-        hex8(d).c_str(), hex8(e).c_str(),
-        hex8(h).c_str(), hex8(l).c_str(),
-        hex8(opcode).c_str());
+    for (const auto &em : g_emitters) {
+        std::fprintf(g_output, ",\"%s\":", em.name.c_str());
+        switch (em.source) {
+        case FieldEmitter::CALLBACK_8:
+            fput_hex8(g_output, r[em.cb_index]);
+            break;
+        case FieldEmitter::CALLBACK_16:
+            fput_hex16(g_output, r[em.cb_index]);
+            break;
+        case FieldEmitter::IO_READ:
+            fput_hex8(g_output, g_gb->externalRead(em.io_addr));
+            break;
+        case FieldEmitter::OPCODE:
+            fput_hex8(g_output, (r[12] >> 16) & 0xFF);
+            break;
+        case FieldEmitter::IME:
+            // IME isn't directly exposed; read from callback data isn't available.
+            // For now, emit false. TODO: find a way to read IME from gambatte.
+            std::fprintf(g_output, "false");
+            break;
+        }
+    }
+
+    std::fprintf(g_output, "}\n");
 }
 
-// Compute SHA-256 of a file (shelling out to sha256sum for simplicity).
+// --- SHA-256 ---
+
 static std::string sha256_file(const std::string &path) {
     std::string cmd = "sha256sum \"" + path + "\"";
     FILE *pipe = popen(cmd.c_str(), "r");
@@ -95,7 +222,6 @@ static std::string sha256_file(const std::string &path) {
     std::string result;
     if (std::fgets(buf, sizeof(buf), pipe)) {
         result = buf;
-        // sha256sum outputs "hash  filename\n"
         auto space = result.find(' ');
         if (space != std::string::npos)
             result = result.substr(0, space);
@@ -104,42 +230,56 @@ static std::string sha256_file(const std::string &path) {
     return result;
 }
 
-static void write_header(FILE *out, const std::string &rom_sha256,
+// --- Header ---
+
+static void write_header(FILE *out, const Profile &prof,
+                          const std::string &rom_sha256,
                           const std::string &model) {
     std::fprintf(out,
         "{\"_header\":true,\"format_version\":\"0.1.0\","
         "\"emulator\":\"gambatte-speedrun\",\"emulator_version\":\"r730+\","
         "\"rom_sha256\":\"%s\",\"model\":\"%s\","
-        "\"boot_rom\":\"skip\",\"profile\":\"cpu_basic\","
-        "\"fields\":[\"cy\",\"pc\",\"sp\",\"a\",\"f\",\"b\",\"c\",\"d\",\"e\",\"h\",\"l\",\"op\"],"
-        "\"trigger\":\"instruction\"}\n",
-        rom_sha256.c_str(), model.c_str());
+        "\"boot_rom\":\"skip\",\"profile\":\"%s\","
+        "\"fields\":[",
+        rom_sha256.c_str(), model.c_str(), prof.name.c_str());
+
+    for (size_t i = 0; i < prof.fields.size(); i++) {
+        if (i > 0) std::fprintf(out, ",");
+        std::fprintf(out, "\"%s\"", prof.fields[i].c_str());
+    }
+
+    std::fprintf(out, "],\"trigger\":\"%s\"}\n", prof.trigger.c_str());
 }
+
+// --- Main ---
 
 static void print_usage(const char *argv0) {
     std::fprintf(stderr,
-        "Usage: %s --rom <file.gb> [options]\n"
+        "Usage: %s --rom <file.gb> --profile <profile.toml> [options]\n"
         "\n"
         "Options:\n"
-        "  --rom <path>       ROM file to run (required)\n"
-        "  --output <path>    Output trace file (default: stdout)\n"
-        "  --frames <n>       Stop after N frames (default: 3000)\n"
-        "  --model <model>    dmg or cgb (default: dmg)\n",
+        "  --rom <path>         ROM file to run (required)\n"
+        "  --profile <path>     Capture profile TOML file (required)\n"
+        "  --output <path>      Output trace file (default: stdout)\n"
+        "  --frames <n>         Stop after N frames (default: 3000)\n"
+        "  --model <model>      dmg or cgb (default: dmg)\n",
         argv0);
 }
 
 int main(int argc, char *argv[]) {
     std::string rom_path;
+    std::string profile_path;
     std::string output_path;
     int max_frames = 3000;
     std::string model = "DMG-B";
     unsigned load_flags = gambatte::GB::LoadFlag::NO_BIOS;
 
-    // Parse args
     for (int i = 1; i < argc; i++) {
         std::string arg = argv[i];
         if (arg == "--rom" && i + 1 < argc) {
             rom_path = argv[++i];
+        } else if (arg == "--profile" && i + 1 < argc) {
+            profile_path = argv[++i];
         } else if (arg == "--output" && i + 1 < argc) {
             output_path = argv[++i];
         } else if (arg == "--frames" && i + 1 < argc) {
@@ -156,10 +296,17 @@ int main(int argc, char *argv[]) {
         }
     }
 
-    if (rom_path.empty()) {
+    if (rom_path.empty() || profile_path.empty()) {
         print_usage(argv[0]);
         return 1;
     }
+
+    // Load profile
+    g_profile = parse_profile(profile_path);
+    build_emitters(g_profile);
+
+    std::fprintf(stderr, "Profile: %s (%zu fields)\n",
+                 g_profile.name.c_str(), g_profile.fields.size());
 
     // Open output
     if (output_path.empty() || output_path == "-") {
@@ -172,7 +319,6 @@ int main(int argc, char *argv[]) {
         }
     }
 
-    // Set up a 64KB write buffer for performance
     static char output_buf[64 * 1024];
     std::setvbuf(g_output, output_buf, _IOFBF, sizeof(output_buf));
 
@@ -187,16 +333,12 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
-    // Write header
+    // Write header and set callback
     std::string rom_hash = sha256_file(rom_path);
-    write_header(g_output, rom_hash, model);
-
-    // Set trace callback
+    write_header(g_output, g_profile, rom_hash, model);
     gb.setTraceCallback(trace_callback);
 
-    // Run emulation frame by frame
-    // runFor takes audio samples; Game Boy produces 35112 samples per frame
-    // (at 2097152 Hz / ~59.73 fps)
+    // Run
     static const std::size_t SAMPLES_PER_FRAME = 35112;
     std::vector<gambatte::uint_least32_t> video_buf(160 * 144, 0);
     std::vector<gambatte::uint_least32_t> audio_buf(SAMPLES_PER_FRAME * 2 + 2064, 0);
@@ -207,13 +349,11 @@ int main(int argc, char *argv[]) {
         std::ptrdiff_t result = gb.runFor(
             video_buf.data(), 160,
             audio_buf.data(), samples);
-
         if (result >= 0) {
             frames++;
         }
     }
 
-    // Cleanup
     std::fflush(g_output);
     if (g_output != stdout) {
         std::fclose(g_output);
