@@ -1,5 +1,5 @@
 receipts/
 target/
-gambatte-speedrun/
+adapters/gambatte/gambatte-speedrun/
 adapters/gambatte/build/
 tools/gbtrace-cli/.venv/
