@@ -1,0 +1,7 @@
+[profile]
+name = "cpu_basic"
+description = "CPU registers per instruction. Suitable for blargg cpu_instrs."
+trigger = "instruction"
+
+[fields]
+cpu = ["pc", "sp", "a", "f", "b", "c", "d", "e", "h", "l", "op"]
