@@ -1,0 +1,9 @@
+[profile]
+name = "timer_edge"
+description = "Timer-focused trace for TIMA reload edge cases."
+trigger = "instruction"
+
+[fields]
+cpu = ["pc", "a", "f"]
+timer = ["div", "tima", "tma", "tac"]
+interrupt = ["if_", "ie"]
