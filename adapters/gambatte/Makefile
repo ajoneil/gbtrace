@@ -7,7 +7,7 @@
 # Then point GAMBATTE_DIR at the gambatte_core directory:
 #   make GAMBATTE_DIR=/path/to/gambatte-speedrun/gambatte_core
 
-GAMBATTE_DIR ?= ../../../gambatte-speedrun/gambatte_core
+GAMBATTE_DIR ?= gambatte-speedrun/gambatte_core
 
 CXX ?= g++
 CXXFLAGS = -O2 -std=c++17 -Wall -Wextra
