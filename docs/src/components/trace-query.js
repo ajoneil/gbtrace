@@ -1,4 +1,5 @@
 import { LitElement, html, css } from 'lit';
+import { displayVal, normalizeInput } from '../lib/format.js';
 
 const SEMANTIC_CONDITIONS = [
   { label: 'HBlank', query: 'ppu enters mode 0', needs: 'stat' },
@@ -11,6 +12,8 @@ const SEMANTIC_CONDITIONS = [
   { label: 'VBlank IRQ', query: 'interrupt 0', needs: 'if_' },
   { label: 'STAT IRQ', query: 'interrupt 1', needs: 'if_' },
   { label: 'Timer IRQ', query: 'interrupt 2', needs: 'if_' },
+  { label: 'Serial IRQ', query: 'interrupt 3', needs: 'if_' },
+  { label: 'Joypad IRQ', query: 'interrupt 4', needs: 'if_' },
 ];
 
 export class TraceQuery extends LitElement {
@@ -53,7 +56,77 @@ export class TraceQuery extends LitElement {
       color: var(--accent);
       font-weight: 600;
     }
+    .chip.selected {
+      border-color: var(--yellow);
+      color: var(--yellow);
+    }
 
+    /* --- Field detail bar --- */
+    .field-detail {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 12px;
+      margin-bottom: 12px;
+      background: var(--bg-surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      font-size: 0.8rem;
+    }
+    .field-detail .field-name {
+      font-family: var(--mono);
+      font-weight: 600;
+      color: var(--accent);
+    }
+    .field-detail .op-chip {
+      padding: 3px 10px;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      color: var(--text-muted);
+      cursor: pointer;
+      font-size: 0.75rem;
+    }
+    .field-detail .op-chip:hover {
+      border-color: var(--accent);
+      color: var(--accent);
+    }
+    .field-detail .op-chip.active {
+      background: var(--accent-subtle);
+      border-color: var(--accent);
+      color: var(--accent);
+    }
+    .field-detail input {
+      width: 100px;
+      padding: 3px 8px;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      color: var(--text);
+      font-family: var(--mono);
+      font-size: 0.8rem;
+    }
+    .field-detail input:focus {
+      outline: none;
+      border-color: var(--accent);
+    }
+    .field-detail input::placeholder { color: var(--text-muted); }
+    .field-detail .close-btn {
+      margin-left: auto;
+      padding: 2px 8px;
+      background: none;
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      color: var(--text-muted);
+      cursor: pointer;
+      font-size: 0.75rem;
+    }
+    .field-detail .close-btn:hover {
+      border-color: var(--red);
+      color: var(--red);
+    }
+
+    /* --- Results --- */
     .results-header {
       display: flex;
       align-items: center;
@@ -80,7 +153,6 @@ export class TraceQuery extends LitElement {
       border-color: var(--accent);
       color: var(--accent);
     }
-
     .results-list {
       max-height: 240px;
       overflow-y: auto;
@@ -115,19 +187,24 @@ export class TraceQuery extends LitElement {
       gap: 8px;
       flex-wrap: wrap;
     }
-    .result-field {
-      color: var(--text);
-    }
-    .result-field .fname {
-      color: var(--text-muted);
-    }
+    .result-field { color: var(--text); }
+    .result-field .fname { color: var(--text-muted); }
 
     .error { color: var(--red); margin-top: 8px; font-size: 0.8rem; }
+    .truncated {
+      padding: 6px 12px;
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      text-align: center;
+    }
   `;
 
   static properties = {
     store: { type: Object },
     fields: { type: Array },
+    _selectedField: { state: true },
+    _fieldOp: { state: true },
+    _fieldValue: { state: true },
     _activeQuery: { state: true },
     _activeLabel: { state: true },
     _matches: { state: true },
@@ -140,6 +217,9 @@ export class TraceQuery extends LitElement {
     super();
     this.store = null;
     this.fields = [];
+    this._selectedField = null;
+    this._fieldOp = null;
+    this._fieldValue = '';
     this._activeQuery = null;
     this._activeLabel = null;
     this._matches = null;
@@ -161,24 +241,51 @@ export class TraceQuery extends LitElement {
           ${semanticAvailable.map(c => html`
             <span
               class="chip ${this._activeQuery === c.query ? 'active' : ''}"
-              @click=${() => this._toggle(c.query, c.label)}
+              @click=${() => this._toggleSemantic(c.query, c.label)}
             >${c.label}</span>
           `)}
         </div>
       ` : ''}
 
-      <div class="section-label">Field changes</div>
+      <div class="section-label">Fields</div>
       <div class="chips">
-        ${traceFields.map(f => {
-          const q = `${f} changes`;
-          return html`
-            <span
-              class="chip ${this._activeQuery === q ? 'active' : ''}"
-              @click=${() => this._toggle(q, `${f} changes`)}
-            >${f}</span>
-          `;
-        })}
+        ${traceFields.map(f => html`
+          <span
+            class="chip ${this._selectedField === f ? 'selected' : ''} ${this._activeField === f ? 'active' : ''}"
+            @click=${() => this._selectField(f)}
+          >${f}</span>
+        `)}
       </div>
+
+      ${this._selectedField ? html`
+        <div class="field-detail">
+          <span class="field-name">${this._selectedField}</span>
+          <span
+            class="op-chip ${this._fieldOp === 'changes' ? 'active' : ''}"
+            @click=${() => this._runFieldOp('changes')}
+          >changes</span>
+          <span
+            class="op-chip ${this._fieldOp === 'equals' ? 'active' : ''}"
+            @click=${() => this._runFieldOp('equals')}
+          >equals</span>
+          <span
+            class="op-chip ${this._fieldOp === 'changes_to' ? 'active' : ''}"
+            @click=${() => this._runFieldOp('changes_to')}
+          >changes to</span>
+          <input
+            type="text"
+            placeholder="value"
+            .value=${this._fieldValue}
+            @input=${e => this._fieldValue = e.target.value}
+            @keydown=${e => {
+              if (e.key === 'Enter') {
+                this._runFieldOp(this._fieldValue ? (this._fieldOp || 'equals') : 'changes');
+              }
+            }}
+          >
+          <button class="close-btn" @click=${() => this._closeField()}>x</button>
+        </div>
+      ` : ''}
 
       ${this._error ? html`<p class="error">${this._error}</p>` : ''}
 
@@ -204,25 +311,93 @@ export class TraceQuery extends LitElement {
                 </span>
               </div>
             `)}
+            ${this._matches.length > this._matchEntries.length ? html`
+              <div class="truncated">
+                ... and ${(this._matches.length - this._matchEntries.length).toLocaleString()} more
+              </div>
+            ` : ''}
           </div>
         ` : ''}
       ` : ''}
     `;
   }
 
+  get _activeField() {
+    if (!this._activeQuery || !this._selectedField) return null;
+    if (this._activeQuery.startsWith(this._selectedField + ' ') ||
+        this._activeQuery.startsWith(this._selectedField + '=')) {
+      return this._selectedField;
+    }
+    return null;
+  }
+
   _summaryFields(entry) {
-    // Show a few key fields inline
-    const show = ['pc', 'a', 'f', 'sp', 'stat', 'ly', 'lcdc', 'if_'];
+    const show = ['pc', 'a', 'f', 'sp', 'op', 'stat', 'ly', 'lcdc', 'if_', 'ie', 'ime',
+                  'b', 'c', 'd', 'e', 'h', 'l', 'scy', 'scx', 'wy', 'wx',
+                  'bgp', 'obp0', 'obp1', 'div', 'tima', 'tma', 'tac', 'sb', 'sc'];
     const available = show.filter(f => (this.fields || []).includes(f) && entry[f] !== undefined);
-    return available.slice(0, 5).map(f =>
-      html`<span class="result-field"><span class="fname">${f}</span>=${entry[f]}</span>`
+    return available.slice(0, 6).map(f =>
+      html`<span class="result-field"><span class="fname">${f}</span>=${displayVal(entry[f])}</span>`
     );
   }
 
-  _toggle(query, label) {
+  _selectField(field) {
+    if (this._selectedField === field && this._fieldOp === 'changes') {
+      // Already showing changes for this field — close it
+      this._closeField();
+      this._clear();
+    } else {
+      this._selectedField = field;
+      this._fieldValue = '';
+      // Default to "changes" immediately
+      this._runFieldOp('changes');
+    }
+  }
+
+  _closeField() {
+    this._selectedField = null;
+    this._fieldOp = null;
+    this._fieldValue = '';
+  }
+
+  _runFieldOp(op) {
+    const field = this._selectedField;
+    if (!field) return;
+
+    this._fieldOp = op;
+    const val = normalizeInput(this._fieldValue);
+    const displayV = displayVal(val);
+    let query, label;
+
+    switch (op) {
+      case 'changes':
+        query = `${field} changes`;
+        label = `${field} changes`;
+        break;
+      case 'equals':
+        if (!val) return;
+        query = `${field}=${val}`;
+        label = `${field} = ${displayV}`;
+        break;
+      case 'changes_to':
+        if (!val) return;
+        query = `${field} changes to ${val}`;
+        label = `${field} changes to ${displayV}`;
+        break;
+      default:
+        return;
+    }
+
+    this._runQuery(query, label);
+  }
+
+  _toggleSemantic(query, label) {
     if (this._activeQuery === query) {
       this._clear();
     } else {
+      this._selectedField = null;
+      this._fieldOp = null;
+      this._fieldValue = '';
       this._runQuery(query, label);
     }
   }
@@ -239,7 +414,6 @@ export class TraceQuery extends LitElement {
     try {
       this._matches = this.store.query(queryStr);
 
-      // Fetch entry data for the results list (cap at 500 to avoid OOM)
       const cap = Math.min(this._matches.length, 500);
       const entries = [];
       for (let i = 0; i < cap; i++) {

@@ -1,4 +1,5 @@
 import { LitElement, html, css } from 'lit';
+import { displayVal } from '../lib/format.js';
 
 const ROW_HEIGHT = 24;
 const OVERSCAN = 10;
@@ -107,7 +108,7 @@ export class TraceTable extends LitElement {
             ${this._visibleRows.map(r => html`
               <div class="row ${this._isHighlighted(r.index) ? 'highlight' : ''}">
                 <span>${r.index}</span>
-                ${this.fields.map(f => html`<span>${r.data[f] ?? ''}</span>`)}
+                ${this.fields.map(f => html`<span>${displayVal(r.data[f])}</span>`)}
               </div>
             `)}
           </div>
