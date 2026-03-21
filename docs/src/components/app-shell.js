@@ -87,7 +87,7 @@ export class AppShell extends LitElement {
           .filename=${this._filename}
         ></trace-header>
 
-        <trace-query .store=${this._store}></trace-query>
+        <trace-query .store=${this._store} .fields=${fields}></trace-query>
 
         <trace-table
           .store=${this._store}
