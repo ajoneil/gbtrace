@@ -371,11 +371,18 @@ export class TraceQuery extends LitElement {
   }
 
   _summaryFields(entry) {
-    const show = ['pc', 'a', 'f', 'sp', 'op', 'stat', 'ly', 'lcdc', 'if_', 'ie', 'ime',
-                  'b', 'c', 'd', 'e', 'h', 'l', 'scy', 'scx', 'wy', 'wx',
-                  'bgp', 'obp0', 'obp1', 'div', 'tima', 'tma', 'tac', 'sb', 'sc'];
-    const available = show.filter(f => (this.fields || []).includes(f) && entry[f] !== undefined);
-    return available.slice(0, 6).map(f =>
+    // Show the searched field first, then all trace fields (excluding cy)
+    const traceFields = (this.fields || []).filter(f => f !== 'cy' && entry[f] !== undefined);
+
+    // Put the searched field at the front if there is one
+    const searchedField = this._selectedField;
+    if (searchedField && traceFields.includes(searchedField)) {
+      const idx = traceFields.indexOf(searchedField);
+      traceFields.splice(idx, 1);
+      traceFields.unshift(searchedField);
+    }
+
+    return traceFields.map(f =>
       html`<span class="result-field"><span class="fname">${f}</span>=${displayVal(entry[f])}</span>`
     );
   }
