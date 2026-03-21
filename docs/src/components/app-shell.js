@@ -234,9 +234,10 @@ export class AppShell extends LitElement {
             </span>
             ${this._diffStats.fields.length > 0 ? html`
               <span class="diff-fields">
-                diffs in ${this._diffStats.fields.map(([name, count]) => html`
-                  <span class="diff-field">${name}<span style="color:var(--text-muted)">(${count.toLocaleString()})</span></span>
-                `)}
+                diffs in ${this._diffStats.fields.map(([name, count]) => {
+                  const pct = ((count / this._diffStats.total) * 100).toFixed(1);
+                  return html`<span class="diff-field">${name}<span style="color:var(--text-muted)">(${pct}%)</span></span>`;
+                })}
               </span>
             ` : ''}
           ` : ''}
