@@ -37,19 +37,21 @@ export class TraceQuery extends LitElement {
       color: var(--text-muted);
       text-transform: uppercase;
       letter-spacing: 0.05em;
-      margin-bottom: 6px;
+      padding: 4px 0;
+      white-space: nowrap;
     }
-    .chips {
+    .chip-row {
       display: flex;
       flex-wrap: wrap;
-      gap: 6px;
-      margin-bottom: 12px;
+      gap: 5px;
+      align-items: center;
+      margin-bottom: 6px;
     }
     .chip {
-      padding: 5px 12px;
+      padding: 3px 9px;
       background: var(--bg);
       border: 1px solid var(--border);
-      border-radius: 14px;
+      border-radius: 10px;
       color: var(--text-muted);
       cursor: pointer;
       font-size: 0.78rem;
@@ -251,8 +253,8 @@ export class TraceQuery extends LitElement {
         ${this._renderSemanticGroups(semanticAvailable)}
       ` : ''}
 
-      <div class="section-label">Fields</div>
-      <div class="chips">
+      <div class="chip-row">
+        <span class="section-label">Fields</span>
         ${traceFields.map(f => html`
           <span
             class="chip ${this._selectedField === f ? 'selected' : ''} ${this._activeField === f ? 'active' : ''}"
@@ -331,8 +333,8 @@ export class TraceQuery extends LitElement {
     return groups.map(group => {
       const items = conditions.filter(c => c.group === group);
       return html`
-        <div class="section-label">${group}</div>
-        <div class="chips">
+        <div class="chip-row">
+          <span class="section-label">${group}</span>
           ${items.map(c => html`
             <span
               class="chip ${this._activeQuery === c.query ? 'active' : ''}"
