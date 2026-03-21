@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use std::process;
 
 use clap::{Parser, Subcommand};
-use gbtrace::{AnyTraceReader, ParquetTraceWriter, TraceEntry, TraceWriter};
+use gbtrace::{AnyTraceReader, Condition, ConditionEvaluator, ParquetTraceWriter, TraceEntry, TraceWriter};
 use serde_json::Value;
 
 #[derive(Parser)]
@@ -278,34 +278,23 @@ fn cmd_convert(input: &PathBuf, output: Option<PathBuf>) -> i32 {
 }
 
 // ---------------------------------------------------------------------------
-// Shared: condition matching
+// Shared: condition parsing (delegates to gbtrace::query)
 // ---------------------------------------------------------------------------
 
-/// A parsed field=value condition.
-struct Condition {
-    field: String,
-    value: String,
+fn parse_cli_condition(s: &str) -> Result<Condition, String> {
+    gbtrace::query::parse_condition(s)
 }
 
-fn parse_condition(s: &str) -> Result<Condition, String> {
-    let eq = s.find('=').ok_or_else(|| format!("invalid condition '{s}': expected field=value"))?;
-    let field = s[..eq].trim().to_string();
-    let value = s[eq + 1..].trim().to_string();
-    if field.is_empty() || value.is_empty() {
-        return Err(format!("invalid condition '{s}': field and value must be non-empty"));
+fn parse_cli_conditions(parts: &[String]) -> Result<Condition, String> {
+    let conditions: Vec<Condition> = parts
+        .iter()
+        .map(|s| gbtrace::query::parse_condition(s))
+        .collect::<Result<Vec<_>, _>>()?;
+    if conditions.len() == 1 {
+        Ok(conditions.into_iter().next().unwrap())
+    } else {
+        Ok(Condition::All(conditions))
     }
-    Ok(Condition { field, value })
-}
-
-/// Parse a comma-separated list of conditions: "field1=val1,field2=val2"
-fn parse_conditions(s: &str) -> Result<Vec<Condition>, String> {
-    s.split(',').map(|part| parse_condition(part.trim())).collect()
-}
-
-fn entry_matches(entry: &TraceEntry, conditions: &[Condition]) -> bool {
-    conditions.iter().all(|c| {
-        entry.get(&c.field).map_or(false, |v| value_to_string(v) == c.value)
-    })
 }
 
 // ---------------------------------------------------------------------------
@@ -433,7 +422,7 @@ fn cmd_query(input: &PathBuf, conditions: &[String], max: usize, context: usize)
         return 1;
     }
 
-    let parsed: Vec<Condition> = match conditions.iter().map(|s| parse_condition(s)).collect() {
+    let condition = match parse_cli_conditions(conditions) {
         Ok(c) => c,
         Err(e) => { eprintln!("Error: {e}"); return 1; }
     };
@@ -444,12 +433,12 @@ fn cmd_query(input: &PathBuf, conditions: &[String], max: usize, context: usize)
     };
 
     let fields = reader.header().fields.clone();
+    let mut evaluator = ConditionEvaluator::new(condition);
 
     // Ring buffer for context-before entries
     let mut ring: Vec<(u64, TraceEntry)> = Vec::new();
     let mut matches_found: usize = 0;
     let mut entry_idx: u64 = 0;
-    // Track how many context-after lines remain to print
     let mut context_after_remaining: usize = 0;
     let mut displayed_matches: usize = 0;
 
@@ -460,7 +449,7 @@ fn cmd_query(input: &PathBuf, conditions: &[String], max: usize, context: usize)
         };
 
         let cy = entry.cy().unwrap_or(0);
-        let is_match = entry_matches(&entry, &parsed);
+        let is_match = evaluator.evaluate(&entry);
 
         if context > 0 {
             ring.push((entry_idx, entry.clone()));
@@ -476,10 +465,9 @@ fn cmd_query(input: &PathBuf, conditions: &[String], max: usize, context: usize)
                     println!("  ---");
                 }
 
-                // Print context-before from ring (excluding current entry)
                 if context > 0 {
                     for (idx, ctx_entry) in &ring {
-                        if *idx == entry_idx { continue; } // skip current, print separately
+                        if *idx == entry_idx { continue; }
                         let ctx_cy = ctx_entry.cy().unwrap_or(0);
                         print!("  [{idx}] cy={ctx_cy:<10}");
                         print_entry_fields(ctx_entry, &fields);
@@ -536,7 +524,7 @@ fn cmd_trim(input: &PathBuf, output: Option<PathBuf>, until: Option<String>, aft
     }
 
     let condition_str = until.as_deref().or(after.as_deref()).unwrap();
-    let conditions = match parse_conditions(condition_str) {
+    let condition = match parse_cli_condition(condition_str) {
         Ok(c) => c,
         Err(e) => { eprintln!("Error: {e}"); return 1; }
     };
@@ -556,6 +544,7 @@ fn cmd_trim(input: &PathBuf, output: Option<PathBuf>, until: Option<String>, aft
         Err(e) => { eprintln!("Error creating output: {e}"); return 1; }
     };
 
+    let mut evaluator = ConditionEvaluator::new(condition);
     let mut written: u64 = 0;
     let mut total: u64 = 0;
     let mut found_match = false;
@@ -567,7 +556,7 @@ fn cmd_trim(input: &PathBuf, output: Option<PathBuf>, until: Option<String>, aft
         };
         total += 1;
 
-        let is_match = !found_match && entry_matches(&entry, &conditions);
+        let is_match = !found_match && evaluator.evaluate(&entry);
         if is_match {
             found_match = true;
             let cy = entry.cy().unwrap_or(0);
