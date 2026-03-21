@@ -1,7 +1,9 @@
 /**
  * In-memory trace store for the browser.
  *
- * Holds the parsed header and all entries. Exposed to JS via wasm-bindgen.
+ * Wraps the library's columnar `ColumnStore` directly — no intermediate
+ * `Vec<TraceEntry>` conversion. Memory usage is roughly 8 bytes × fields × entries
+ * for numeric fields and 1 byte per bool field.
  */
 export class TraceStore {
     __destroy_into_raw() {
@@ -68,8 +70,7 @@ export class TraceStore {
         return takeFromExternrefTable0(ret[0]);
     }
     /**
-     * Load a trace from raw bytes (detects gzip automatically).
-     * Accepts .gbtrace (JSONL) or .gbtrace.gz (gzipped JSONL).
+     * Load a trace from raw bytes (detects format automatically).
      * @param {Uint8Array} data
      */
     constructor(data) {
