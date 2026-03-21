@@ -1,3 +1,4 @@
+pub mod column_store;
 pub mod diff;
 pub mod entry;
 pub mod error;
@@ -10,6 +11,7 @@ pub mod writer;
 #[cfg(feature = "parquet")]
 pub mod parquet;
 
+pub use column_store::{ColumnStore, EntryView};
 pub use diff::{AlignmentStrategy, DiffConfig, DiffResult, DivergenceClass, MultiDiffResult, TraceDiffer};
 pub use entry::TraceEntry;
 pub use error::Error;

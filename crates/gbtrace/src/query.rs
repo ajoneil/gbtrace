@@ -222,7 +222,7 @@ fn entry_field_str_raw(v: &Value) -> String {
 }
 
 /// Parse a number from user input. Always treats as hex (with or without 0x prefix).
-fn parse_number(s: &str) -> Option<u64> {
+pub fn parse_number(s: &str) -> Option<u64> {
     let s = s.trim();
     let hex = s.strip_prefix("0x").or_else(|| s.strip_prefix("0X")).unwrap_or(s);
     u64::from_str_radix(hex, 16).ok()
