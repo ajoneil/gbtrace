@@ -69,6 +69,9 @@ export class TraceChart extends LitElement {
 
   static properties = {
     store: { type: Object },
+    storeB: { type: Object },
+    nameA: { type: String },
+    nameB: { type: String },
     field: { type: String },
     highlightIndices: { type: Object },
     cursorIndex: { type: Number },
@@ -81,6 +84,9 @@ export class TraceChart extends LitElement {
   constructor() {
     super();
     this.store = null;
+    this.storeB = null;
+    this.nameA = '';
+    this.nameB = '';
     this.field = null;
     this.highlightIndices = null;
     this.cursorIndex = null;
@@ -108,7 +114,7 @@ export class TraceChart extends LitElement {
   }
 
   updated(changed) {
-    if (changed.has('store') || changed.has('field')) {
+    if (changed.has('store') || changed.has('storeB') || changed.has('field')) {
       if (this.store && this.field) {
         this._viewStart = 0;
         this._viewEnd = this.store.entryCount();
@@ -165,7 +171,7 @@ export class TraceChart extends LitElement {
 
     const rect = canvas.parentElement.getBoundingClientRect();
     const dpr = window.devicePixelRatio || 1;
-    const cssWidth = rect.width - 16; // padding
+    const cssWidth = rect.width - 16;
     canvas.style.width = `${cssWidth}px`;
     canvas.width = cssWidth * dpr;
     canvas.height = CHART_HEIGHT * dpr;
@@ -177,8 +183,6 @@ export class TraceChart extends LitElement {
     const h = CHART_HEIGHT;
     const plotW = w - PADDING.left - PADDING.right;
     const plotH = h - PADDING.top - PADDING.bottom;
-
-    // Clear
     ctx.clearRect(0, 0, w, h);
 
     const start = this._viewStart;
@@ -186,40 +190,48 @@ export class TraceChart extends LitElement {
     const buckets = Math.min(plotW, end - start);
     if (buckets <= 0) return;
 
-    let summary;
+    let summaryA;
     try {
-      summary = this.store.fieldSummary(this.field, start, end, buckets);
-    } catch (e) {
-      return;
+      summaryA = this.store.fieldSummary(this.field, start, end, buckets);
+    } catch (e) { return; }
+
+    let summaryB = null;
+    if (this.storeB) {
+      try {
+        summaryB = this.storeB.fieldSummary(this.field, start, end, buckets);
+      } catch (e) { /* storeB may not have this field */ }
     }
 
-    // Find global min/max for Y axis
+    // Global min/max across both traces
     let yMin = Infinity, yMax = -Infinity;
     for (let i = 0; i < buckets; i++) {
-      const mn = summary[i * 2];
-      const mx = summary[i * 2 + 1];
-      if (mn < yMin) yMin = mn;
-      if (mx > yMax) yMax = mx;
+      const mnA = summaryA[i * 2], mxA = summaryA[i * 2 + 1];
+      if (mnA < yMin) yMin = mnA;
+      if (mxA > yMax) yMax = mxA;
+      if (summaryB) {
+        const mnB = summaryB[i * 2], mxB = summaryB[i * 2 + 1];
+        if (mnB < yMin) yMin = mnB;
+        if (mxB > yMax) yMax = mxB;
+      }
     }
     if (yMin === yMax) { yMin -= 1; yMax += 1; }
 
     const toX = (bucket) => PADDING.left + (bucket / buckets) * plotW;
     const toY = (val) => PADDING.top + plotH - ((val - yMin) / (yMax - yMin)) * plotH;
 
-    // Draw highlight regions
+    // Highlights
     if (this.highlightIndices?.size > 0) {
       ctx.fillStyle = 'rgba(88,166,255,0.08)';
       const range = end - start;
       for (const idx of this.highlightIndices) {
         if (idx >= start && idx < end) {
-          const bkt = ((idx - start) / range) * buckets;
-          const x = toX(bkt);
+          const x = toX(((idx - start) / range) * buckets);
           ctx.fillRect(x - 0.5, PADDING.top, 1, plotH);
         }
       }
     }
 
-    // Draw selection range
+    // Selection
     if (this._selStart !== null && this._selEnd !== null) {
       ctx.fillStyle = 'rgba(88,166,255,0.15)';
       const x1 = Math.min(this._selStart, this._selEnd);
@@ -227,35 +239,30 @@ export class TraceChart extends LitElement {
       ctx.fillRect(x1, PADDING.top, x2 - x1, plotH);
     }
 
-    // Draw min/max area
-    ctx.beginPath();
-    for (let i = 0; i < buckets; i++) {
-      const x = toX(i);
-      const y = toY(summary[i * 2 + 1]); // max
-      if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
-    }
-    for (let i = buckets - 1; i >= 0; i--) {
-      const x = toX(i);
-      const y = toY(summary[i * 2]); // min
-      ctx.lineTo(x, y);
-    }
-    ctx.closePath();
-    ctx.fillStyle = 'rgba(88,166,255,0.2)';
-    ctx.fill();
+    if (summaryB) {
+      // --- Dual trace mode ---
+      // Draw diff background: red tint where values differ
+      for (let i = 0; i < buckets; i++) {
+        const midA = (summaryA[i * 2] + summaryA[i * 2 + 1]) / 2;
+        const midB = (summaryB[i * 2] + summaryB[i * 2 + 1]) / 2;
+        if (midA !== midB) {
+          const x = toX(i);
+          const bw = toX(i + 1) - x || 1;
+          ctx.fillStyle = 'rgba(248,81,73,0.1)';
+          ctx.fillRect(x, PADDING.top, bw, plotH);
+        }
+      }
 
-    // Draw midline
-    ctx.beginPath();
-    for (let i = 0; i < buckets; i++) {
-      const x = toX(i);
-      const mid = (summary[i * 2] + summary[i * 2 + 1]) / 2;
-      const y = toY(mid);
-      if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+      // Trace A: blue
+      this._drawTrace(ctx, summaryA, buckets, toX, toY, 'rgba(88,166,255,0.15)', '#58a6ff');
+      // Trace B: yellow
+      this._drawTrace(ctx, summaryB, buckets, toX, toY, 'rgba(210,153,34,0.15)', '#d29922');
+    } else {
+      // --- Single trace mode ---
+      this._drawTrace(ctx, summaryA, buckets, toX, toY, 'rgba(88,166,255,0.2)', '#58a6ff');
     }
-    ctx.strokeStyle = '#58a6ff';
-    ctx.lineWidth = 1;
-    ctx.stroke();
 
-    // Cursor line from hovered table row
+    // Cursor line
     if (this.cursorIndex != null && this.cursorIndex >= start && this.cursorIndex < end) {
       const frac = (this.cursorIndex - start) / (end - start);
       const cx = PADDING.left + frac * plotW;
@@ -268,32 +275,40 @@ export class TraceChart extends LitElement {
       ctx.stroke();
       ctx.setLineDash([]);
 
-      // Show the value at cursor
-      const val = this.store.entry(this.cursorIndex);
-      if (val) {
-        const yVal = val[this.field];
-        if (yVal != null && typeof yVal === 'number') {
-          const cy = toY(yVal);
-          ctx.fillStyle = '#f0883e';
+      const valA = this.store.entry(this.cursorIndex);
+      if (valA) {
+        const yv = valA[this.field];
+        if (yv != null && typeof yv === 'number') {
+          ctx.fillStyle = '#58a6ff';
           ctx.beginPath();
-          ctx.arc(cx, cy, 3, 0, Math.PI * 2);
+          ctx.arc(cx, toY(yv), 3, 0, Math.PI * 2);
           ctx.fill();
+        }
+      }
+      if (this.storeB) {
+        const valB = this.storeB.entry(this.cursorIndex);
+        if (valB) {
+          const yv = valB[this.field];
+          if (yv != null && typeof yv === 'number') {
+            ctx.fillStyle = '#d29922';
+            ctx.beginPath();
+            ctx.arc(cx, toY(yv), 3, 0, Math.PI * 2);
+            ctx.fill();
+          }
         }
       }
     }
 
-    // Y axis labels
+    // Y axis
     ctx.fillStyle = '#8b949e';
     ctx.font = '10px monospace';
     ctx.textAlign = 'right';
     ctx.textBaseline = 'middle';
-
     const yTicks = 5;
     for (let i = 0; i <= yTicks; i++) {
       const val = yMin + (i / yTicks) * (yMax - yMin);
       const y = toY(val);
       ctx.fillText(displayVal(Math.round(val)), PADDING.left - 4, y);
-      // Grid line
       ctx.strokeStyle = 'rgba(139,148,158,0.15)';
       ctx.lineWidth = 0.5;
       ctx.beginPath();
@@ -302,7 +317,7 @@ export class TraceChart extends LitElement {
       ctx.stroke();
     }
 
-    // X axis labels
+    // X axis
     ctx.textAlign = 'center';
     ctx.textBaseline = 'top';
     const xTicks = Math.min(6, buckets);
@@ -311,6 +326,48 @@ export class TraceChart extends LitElement {
       const x = PADDING.left + (i / xTicks) * plotW;
       ctx.fillText(idx.toLocaleString(), x, h - PADDING.bottom + 6);
     }
+
+    // Legend for dual mode
+    if (summaryB) {
+      ctx.font = '10px monospace';
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'top';
+      const lx = PADDING.left + 4;
+      const ly = PADDING.top + 2;
+      ctx.fillStyle = '#58a6ff';
+      ctx.fillRect(lx, ly, 10, 2);
+      ctx.fillText(this.nameA || 'A', lx + 14, ly - 4);
+      ctx.fillStyle = '#d29922';
+      ctx.fillRect(lx, ly + 12, 10, 2);
+      ctx.fillText(this.nameB || 'B', lx + 14, ly + 8);
+    }
+  }
+
+  /** Draw a single trace's area fill + midline. */
+  _drawTrace(ctx, summary, buckets, toX, toY, fillColor, strokeColor) {
+    ctx.beginPath();
+    for (let i = 0; i < buckets; i++) {
+      const x = toX(i);
+      const y = toY(summary[i * 2 + 1]);
+      if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    }
+    for (let i = buckets - 1; i >= 0; i--) {
+      ctx.lineTo(toX(i), toY(summary[i * 2]));
+    }
+    ctx.closePath();
+    ctx.fillStyle = fillColor;
+    ctx.fill();
+
+    ctx.beginPath();
+    for (let i = 0; i < buckets; i++) {
+      const x = toX(i);
+      const mid = (summary[i * 2] + summary[i * 2 + 1]) / 2;
+      const y = toY(mid);
+      if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    }
+    ctx.strokeStyle = strokeColor;
+    ctx.lineWidth = 1;
+    ctx.stroke();
   }
 
   _pixelToIndex(clientX) {

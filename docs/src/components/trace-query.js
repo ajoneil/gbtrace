@@ -215,6 +215,8 @@ export class TraceQuery extends LitElement {
 
   static properties = {
     store: { type: Object },
+    storeB: { type: Object },
+    compareMode: { type: Boolean },
     fields: { type: Array },
     _selectedField: { state: true },
     _fieldOp: { state: true },
@@ -231,6 +233,8 @@ export class TraceQuery extends LitElement {
   constructor() {
     super();
     this.store = null;
+    this.storeB = null;
+    this.compareMode = false;
     this.fields = [];
     this._selectedField = null;
     this._fieldOp = null;
@@ -283,6 +287,12 @@ export class TraceQuery extends LitElement {
       ${this._selectedField ? html`
         <div class="field-detail">
           <span class="field-name">${this._selectedField}</span>
+          ${this.compareMode ? html`
+            <span
+              class="op-chip ${this._fieldOp === 'differs' ? 'active' : ''}"
+              @click=${() => this._runFieldOp('differs')}
+            >differs</span>
+          ` : ''}
           <span
             class="op-chip ${this._fieldOp === 'changes' ? 'active' : ''}"
             @click=${() => this._runFieldOp('changes')}
@@ -404,8 +414,8 @@ export class TraceQuery extends LitElement {
   }
 
   _selectField(field) {
-    if (this._selectedField === field && this._fieldOp === 'changes') {
-      // Already showing changes for this field — close it
+    const defaultOp = this.compareMode ? 'differs' : 'changes';
+    if (this._selectedField === field && this._fieldOp === defaultOp) {
       this._closeField();
       this._clear();
       this._emitFieldSelected(null);
@@ -413,8 +423,7 @@ export class TraceQuery extends LitElement {
       this._selectedField = field;
       this._fieldValue = '';
       this._emitFieldSelected(field);
-      // Default to "changes" immediately
-      this._runFieldOp('changes');
+      this._runFieldOp(defaultOp);
     }
   }
 
@@ -433,6 +442,12 @@ export class TraceQuery extends LitElement {
     const val = normalizeInput(this._fieldValue);
     const displayV = displayVal(val);
     let query, label;
+
+    if (op === 'differs') {
+      // Compare mode: find entries where field differs between traces
+      this._runDiffQuery(field);
+      return;
+    }
 
     switch (op) {
       case 'changes':
@@ -515,6 +530,53 @@ export class TraceQuery extends LitElement {
     this._error = null;
     this._flagModes = {};
     this._emitHighlight();
+  }
+
+  _runDiffQuery(field) {
+    if (!this.store || !this.storeB) return;
+    this._error = null;
+    this._activeQuery = `diff:${field}`;
+    this._activeLabel = `${field} differs`;
+    this._matches = null;
+    this._matchEntries = [];
+    this._currentMatch = -1;
+
+    try {
+      const count = Math.min(this.store.entryCount(), this.storeB.entryCount());
+      const indices = [];
+      // Compare in chunks for performance
+      const chunkSize = 1000;
+      for (let start = 0; start < count; start += chunkSize) {
+        const len = Math.min(chunkSize, count - start);
+        const aEntries = this.store.entriesRange(start, len);
+        const bEntries = this.storeB.entriesRange(start, len);
+        for (let i = 0; i < len; i++) {
+          if (aEntries[i][field] !== bEntries[i][field]) {
+            indices.push(start + i);
+          }
+        }
+      }
+      this._matches = indices;
+
+      const cap = Math.min(indices.length, 500);
+      const entries = [];
+      for (let i = 0; i < cap; i++) {
+        entries.push(this.store.entry(indices[i]));
+      }
+      this._matchEntries = entries;
+
+      if (indices.length > 0) {
+        this._currentMatch = 0;
+        this._emitHighlight();
+        this._emitJump(indices[0]);
+      } else {
+        this._emitHighlight();
+      }
+    } catch (err) {
+      this._error = `${err.message || err}`;
+      this._activeQuery = null;
+      this._activeLabel = null;
+    }
   }
 
   _emitHighlight() {
