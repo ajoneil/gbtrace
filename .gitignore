@@ -2,4 +2,7 @@ receipts/
 target/
 adapters/gambatte/gambatte-speedrun/
 adapters/gambatte/build/
+adapters/sameboy/SameBoy/
+adapters/sameboy/gbtrace-sameboy
+adapters/sameboy/boot_roms/
 tools/gbtrace-cli/.venv/

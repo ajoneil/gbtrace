@@ -125,6 +125,31 @@ def cmd_convert(args):
         print(f"Converted {len(df):,} entries to {output}")
 
 
+def _skip_boot_entries(df: pl.DataFrame, name: str) -> pl.DataFrame:
+    """Remove entries before PC first reaches 0x0100 (game entry point after boot).
+
+    This filters out boot ROM execution so traces with different boot ROM
+    configurations can still be compared from the point the game starts.
+    """
+    if "pc" not in df.columns or len(df) == 0:
+        return df
+
+    # Find the first row where pc == "0x0100"
+    mask = df["pc"] == "0x0100"
+    if not mask.any():
+        print(f"  WARNING: {name} has no entry with pc=0x0100, cannot skip boot")
+        return df
+
+    first_idx = mask.arg_true()[0]
+    skipped = first_idx
+    df = df.slice(first_idx)
+
+    if skipped > 0:
+        print(f"  Skipped {skipped:,} boot entries from {name}")
+
+    return df
+
+
 def cmd_diff(args):
     """Compare two trace files and report divergences."""
     header_a, df_a = read_trace(args.trace_a)
@@ -137,12 +162,36 @@ def cmd_diff(args):
     print(f"Comparing: {name_a} vs {name_b}")
     print(f"  Entries:  {len(df_a):,} vs {len(df_b):,}")
 
+    boot_a = header_a.get("boot_rom", "?")
+    boot_b = header_b.get("boot_rom", "?")
+    if boot_a != boot_b:
+        print(f"  Boot ROM: {name_a}={boot_a}  {name_b}={boot_b}")
+        if args.skip_boot:
+            print(f"  Aligning at program start (--skip-boot)")
+        else:
+            print(f"  HINT: use --skip-boot to ignore boot ROM differences")
+
     rom_a = header_a.get("rom_sha256", "")
     rom_b = header_b.get("rom_sha256", "")
     if rom_a != rom_b:
         print(f"  WARNING: ROM hashes differ!")
         print(f"    {name_a}: {rom_a[:16]}...")
         print(f"    {name_b}: {rom_b[:16]}...")
+
+    # Skip boot entries if requested
+    if args.skip_boot:
+        df_a = _skip_boot_entries(df_a, name_a)
+        df_b = _skip_boot_entries(df_b, name_b)
+
+        # Rebase cycle counts so both traces start from cy=0 at program entry.
+        # Without this, different boot ROM durations would prevent cycle alignment.
+        if len(df_a) > 0 and len(df_b) > 0 and "cy" in df_a.columns:
+            base_a = df_a["cy"][0]
+            base_b = df_b["cy"][0]
+            if base_a != base_b:
+                df_a = df_a.with_columns((pl.col("cy") - base_a).alias("cy"))
+                df_b = df_b.with_columns((pl.col("cy") - base_b).alias("cy"))
+                print(f"  Rebased cycle counts: {name_a} -{base_a}, {name_b} -{base_b}")
 
     # Determine common fields (excluding cy which is used for alignment)
     fields_a = set(df_a.columns) - {"cy"}
@@ -366,6 +415,8 @@ def main():
                         help="Only compare these fields (comma-separated, e.g. pc,a,f)")
     p_diff.add_argument("--exclude",
                         help="Exclude these fields from comparison (comma-separated, e.g. ime,ly)")
+    p_diff.add_argument("--skip-boot", action="store_true",
+                        help="Ignore boot ROM entries (skip to first pc=0x0100)")
 
     # info
     p_info = sub.add_parser("info", help="Show trace file summary")
