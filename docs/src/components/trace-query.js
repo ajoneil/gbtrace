@@ -542,33 +542,20 @@ export class TraceQuery extends LitElement {
     this._currentMatch = -1;
 
     try {
-      const count = Math.min(this.store.entryCount(), this.storeB.entryCount());
-      const indices = [];
-      // Compare in chunks for performance
-      const chunkSize = 1000;
-      for (let start = 0; start < count; start += chunkSize) {
-        const len = Math.min(chunkSize, count - start);
-        const aEntries = this.store.entriesRange(start, len);
-        const bEntries = this.storeB.entriesRange(start, len);
-        for (let i = 0; i < len; i++) {
-          if (aEntries[i][field] !== bEntries[i][field]) {
-            indices.push(start + i);
-          }
-        }
-      }
-      this._matches = indices;
+      // Run the comparison entirely in WASM — no JS-side entry deserialization
+      this._matches = this.store.diffField(this.storeB, field);
 
-      const cap = Math.min(indices.length, 500);
+      const cap = Math.min(this._matches.length, 500);
       const entries = [];
       for (let i = 0; i < cap; i++) {
-        entries.push(this.store.entry(indices[i]));
+        entries.push(this.store.entry(this._matches[i]));
       }
       this._matchEntries = entries;
 
-      if (indices.length > 0) {
+      if (this._matches.length > 0) {
         this._currentMatch = 0;
         this._emitHighlight();
-        this._emitJump(indices[0]);
+        this._emitJump(this._matches[0]);
       } else {
         this._emitHighlight();
       }
