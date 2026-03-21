@@ -70,6 +70,25 @@ export class TraceStore {
         return takeFromExternrefTable0(ret[0]);
     }
     /**
+     * Downsample a field for chart display.
+     * Returns a Float64Array of [min0, max0, min1, max1, ...] for `buckets` buckets
+     * covering entries from `start` to `end`.
+     * @param {string} field
+     * @param {number} start
+     * @param {number} end
+     * @param {number} buckets
+     * @returns {Float64Array}
+     */
+    fieldSummary(field, start, end, buckets) {
+        const ptr0 = passStringToWasm0(field, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.tracestore_fieldSummary(this.__wbg_ptr, ptr0, len0, start, end, buckets);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return takeFromExternrefTable0(ret[0]);
+    }
+    /**
      * Load a trace from raw bytes (detects format automatically).
      * @param {Uint8Array} data
      */
@@ -138,6 +157,10 @@ function __wbg_get_imports() {
             const ret = arg0.length;
             return ret;
         },
+        __wbg_length_550d8a396009cd38: function(arg0) {
+            const ret = arg0.length;
+            return ret;
+        },
         __wbg_new_49d5571bd3f0c4d4: function() {
             const ret = new Map();
             return ret;
@@ -154,11 +177,18 @@ function __wbg_get_imports() {
             const ret = new Uint32Array(arg0 >>> 0);
             return ret;
         },
+        __wbg_new_with_length_eae667475c36c4e4: function(arg0) {
+            const ret = new Float64Array(arg0 >>> 0);
+            return ret;
+        },
         __wbg_set_1be21701d704e71d: function(arg0, arg1, arg2) {
             arg0.set(getArrayU32FromWasm0(arg1, arg2));
         },
         __wbg_set_282384002438957f: function(arg0, arg1, arg2) {
             arg0[arg1 >>> 0] = arg2;
+        },
+        __wbg_set_636d1e3e4286e068: function(arg0, arg1, arg2) {
+            arg0.set(getArrayF64FromWasm0(arg1, arg2));
         },
         __wbg_set_6be42768c690e380: function(arg0, arg1, arg2) {
             arg0[arg1] = arg2;
@@ -197,6 +227,11 @@ const TraceStoreFinalization = (typeof FinalizationRegistry === 'undefined')
     ? { register: () => {}, unregister: () => {} }
     : new FinalizationRegistry(ptr => wasm.__wbg_tracestore_free(ptr >>> 0, 1));
 
+function getArrayF64FromWasm0(ptr, len) {
+    ptr = ptr >>> 0;
+    return getFloat64ArrayMemory0().subarray(ptr / 8, ptr / 8 + len);
+}
+
 function getArrayU32FromWasm0(ptr, len) {
     ptr = ptr >>> 0;
     return getUint32ArrayMemory0().subarray(ptr / 4, ptr / 4 + len);
@@ -208,6 +243,14 @@ function getDataViewMemory0() {
         cachedDataViewMemory0 = new DataView(wasm.memory.buffer);
     }
     return cachedDataViewMemory0;
+}
+
+let cachedFloat64ArrayMemory0 = null;
+function getFloat64ArrayMemory0() {
+    if (cachedFloat64ArrayMemory0 === null || cachedFloat64ArrayMemory0.byteLength === 0) {
+        cachedFloat64ArrayMemory0 = new Float64Array(wasm.memory.buffer);
+    }
+    return cachedFloat64ArrayMemory0;
 }
 
 function getStringFromWasm0(ptr, len) {
@@ -315,6 +358,7 @@ function __wbg_finalize_init(instance, module) {
     wasm = instance.exports;
     wasmModule = module;
     cachedDataViewMemory0 = null;
+    cachedFloat64ArrayMemory0 = null;
     cachedUint32ArrayMemory0 = null;
     cachedUint8ArrayMemory0 = null;
     wasm.__wbindgen_start();

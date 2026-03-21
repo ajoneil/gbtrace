@@ -90,6 +90,60 @@ impl TraceStore {
         }
         self.store.cy(index) as f64
     }
+
+    /// Downsample a field for chart display.
+    /// Returns a Float64Array of [min0, max0, min1, max1, ...] for `buckets` buckets
+    /// covering entries from `start` to `end`.
+    #[wasm_bindgen(js_name = fieldSummary)]
+    pub fn field_summary(
+        &self,
+        field: &str,
+        start: usize,
+        end: usize,
+        buckets: usize,
+    ) -> Result<js_sys::Float64Array, JsError> {
+        let col_idx = self.store.field_col(field)
+            .ok_or_else(|| JsError::new(&format!("unknown field: {field}")))?;
+        let col = self.store.column(col_idx);
+        let total = self.store.entry_count();
+        let end = end.min(total);
+        let start = start.min(end);
+        let range = end - start;
+
+        if range == 0 || buckets == 0 {
+            return Ok(js_sys::Float64Array::new_with_length(0));
+        }
+
+        let mut out = Vec::with_capacity(buckets * 2);
+        for b in 0..buckets {
+            let b_start = start + (b * range) / buckets;
+            let b_end = start + ((b + 1) * range) / buckets;
+            if b_start >= b_end {
+                // Empty bucket — repeat last value or 0
+                let v = if b_start > 0 {
+                    col.get_numeric(b_start.min(total - 1)) as f64
+                } else {
+                    0.0
+                };
+                out.push(v);
+                out.push(v);
+                continue;
+            }
+            let mut min = f64::MAX;
+            let mut max = f64::MIN;
+            for i in b_start..b_end {
+                let v = col.get_numeric(i) as f64;
+                if v < min { min = v; }
+                if v > max { max = v; }
+            }
+            out.push(min);
+            out.push(max);
+        }
+
+        let arr = js_sys::Float64Array::new_with_length(out.len() as u32);
+        arr.copy_from(&out);
+        Ok(arr)
+    }
 }
 
 impl TraceStore {

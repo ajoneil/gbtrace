@@ -4,6 +4,7 @@ import './test-picker.js';
 import './trace-header.js';
 import './trace-table.js';
 import './trace-query.js';
+import './trace-chart.js';
 
 export class AppShell extends LitElement {
   static styles = css`
@@ -72,6 +73,7 @@ export class AppShell extends LitElement {
     _header: { state: true },
     _filename: { state: true },
     _highlightIndices: { state: true },
+    _chartField: { state: true },
   };
 
   constructor() {
@@ -80,6 +82,7 @@ export class AppShell extends LitElement {
     this._header = null;
     this._filename = null;
     this._highlightIndices = null;
+    this._chartField = null;
   }
 
   render() {
@@ -106,6 +109,7 @@ export class AppShell extends LitElement {
       <div class="sections"
         @highlight-changed=${this._onHighlightChanged}
         @jump-to-index=${this._onJumpToIndex}
+        @field-selected=${this._onFieldSelected}
       >
         <trace-header
           .header=${this._header}
@@ -114,6 +118,14 @@ export class AppShell extends LitElement {
         ></trace-header>
 
         <trace-query .store=${this._store} .fields=${fields}></trace-query>
+
+        ${this._chartField ? html`
+          <trace-chart
+            .store=${this._store}
+            .field=${this._chartField}
+            .highlightIndices=${this._highlightIndices}
+          ></trace-chart>
+        ` : ''}
 
         <trace-table
           .store=${this._store}
@@ -141,6 +153,10 @@ export class AppShell extends LitElement {
     if (table) table.scrollToIndex(e.detail.index);
   }
 
+  _onFieldSelected(e) {
+    this._chartField = e.detail.field;
+  }
+
   _reset() {
     if (this._store) {
       this._store.free();
@@ -149,6 +165,7 @@ export class AppShell extends LitElement {
     this._header = null;
     this._filename = null;
     this._highlightIndices = null;
+    this._chartField = null;
   }
 }
 

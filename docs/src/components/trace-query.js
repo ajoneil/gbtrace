@@ -408,9 +408,11 @@ export class TraceQuery extends LitElement {
       // Already showing changes for this field — close it
       this._closeField();
       this._clear();
+      this._emitFieldSelected(null);
     } else {
       this._selectedField = field;
       this._fieldValue = '';
+      this._emitFieldSelected(field);
       // Default to "changes" immediately
       this._runFieldOp('changes');
     }
@@ -420,6 +422,7 @@ export class TraceQuery extends LitElement {
     this._selectedField = null;
     this._fieldOp = null;
     this._fieldValue = '';
+    this._emitFieldSelected(null);
   }
 
   _runFieldOp(op) {
@@ -525,6 +528,13 @@ export class TraceQuery extends LitElement {
   _emitJump(index) {
     this.dispatchEvent(new CustomEvent('jump-to-index', {
       detail: { index },
+      bubbles: true, composed: true,
+    }));
+  }
+
+  _emitFieldSelected(field) {
+    this.dispatchEvent(new CustomEvent('field-selected', {
+      detail: { field },
       bubbles: true, composed: true,
     }));
   }

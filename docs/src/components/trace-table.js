@@ -82,8 +82,8 @@ export class TraceTable extends LitElement {
     store: { type: Object },
     fields: { type: Array },
     highlightIndices: { type: Object },  // Set<number>
-    _scrollTop: { state: true },
     _visibleRows: { state: true },
+    _rowsTop: { state: true },
   };
 
   constructor() {
@@ -91,13 +91,14 @@ export class TraceTable extends LitElement {
     this.store = null;
     this.fields = [];
     this.highlightIndices = null;
-    this._scrollTop = 0;
     this._visibleRows = [];
+    this._rowsTop = 0;
   }
 
   updated(changed) {
     if (changed.has('store') || changed.has('fields')) {
-      this._updateVisibleRows();
+      // Wait for the DOM to be ready before measuring
+      this.updateComplete.then(() => this._syncFromDom());
     }
   }
 
@@ -126,31 +127,29 @@ export class TraceTable extends LitElement {
     `;
   }
 
-  get _rowsTop() {
-    if (!this._visibleRows.length) return 0;
-    return this._visibleRows[0].index * ROW_HEIGHT;
-  }
-
   _isHighlighted(index) {
     return this.highlightIndices?.has(index) ?? false;
   }
 
-  _onScroll(e) {
-    this._scrollTop = e.target.scrollTop;
-    this._updateVisibleRows();
+  _onScroll() {
+    this._syncFromDom();
   }
 
-  _updateVisibleRows() {
+  /** Single source of truth: read scroll position from the actual DOM element. */
+  _syncFromDom() {
     if (!this.store) { this._visibleRows = []; return; }
 
     const scrollEl = this.renderRoot?.querySelector('.scroll-area');
-    const containerHeight = scrollEl?.clientHeight || 500;
-    const startIdx = Math.max(0, Math.floor(this._scrollTop / ROW_HEIGHT) - OVERSCAN);
+    if (!scrollEl) { this._visibleRows = []; return; }
+
+    const scrollTop = scrollEl.scrollTop;
+    const containerHeight = scrollEl.clientHeight;
+    const startIdx = Math.max(0, Math.floor(scrollTop / ROW_HEIGHT) - OVERSCAN);
     const visibleCount = Math.ceil(containerHeight / ROW_HEIGHT) + OVERSCAN * 2;
     const endIdx = Math.min(this.store.entryCount(), startIdx + visibleCount);
 
     const count = endIdx - startIdx;
-    if (count <= 0) { this._visibleRows = []; return; }
+    if (count <= 0) { this._visibleRows = []; this._rowsTop = 0; return; }
 
     try {
       const entries = this.store.entriesRange(startIdx, count);
@@ -158,21 +157,21 @@ export class TraceTable extends LitElement {
         index: startIdx + i,
         data,
       }));
+      this._rowsTop = startIdx * ROW_HEIGHT;
     } catch (err) {
       console.error('Failed to fetch entries:', err);
       this._visibleRows = [];
+      this._rowsTop = 0;
     }
   }
 
   /** Scroll to a specific entry index. */
   scrollToIndex(index) {
     const scrollArea = this.renderRoot?.querySelector('.scroll-area');
-    if (scrollArea) {
-      scrollArea.scrollTop = index * ROW_HEIGHT;
-      // Force update in case scroll event doesn't fire (e.g. same position)
-      this._scrollTop = scrollArea.scrollTop;
-      this._updateVisibleRows();
-    }
+    if (!scrollArea) return;
+    scrollArea.scrollTop = index * ROW_HEIGHT;
+    // Always sync immediately — don't rely on the scroll event firing
+    this._syncFromDom();
   }
 }
 
