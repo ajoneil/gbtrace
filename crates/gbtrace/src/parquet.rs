@@ -132,10 +132,10 @@ impl ParquetTraceWriter {
                     b.append_value(val.and_then(|v| v.as_u64()).unwrap_or(0));
                 }
                 (ColumnBuffer::UInt16(b), FieldType::UInt16) => {
-                    b.append_value(parse_hex_u16(val));
+                    b.append_value(parse_u16(val));
                 }
                 (ColumnBuffer::UInt8(b), FieldType::UInt8) => {
-                    b.append_value(parse_hex_u8(val));
+                    b.append_value(parse_u8(val));
                 }
                 (ColumnBuffer::Bool(b), FieldType::Bool) => {
                     b.append_value(val.and_then(|v| v.as_bool()).unwrap_or(false));
@@ -173,16 +173,12 @@ impl ParquetTraceWriter {
     }
 }
 
-fn parse_hex_u16(val: Option<&serde_json::Value>) -> u16 {
-    val.and_then(|v| v.as_str())
-        .and_then(|s| u16::from_str_radix(s.strip_prefix("0x").unwrap_or(s), 16).ok())
-        .unwrap_or(0)
+fn parse_u16(val: Option<&serde_json::Value>) -> u16 {
+    val.and_then(|v| v.as_u64()).map(|n| n as u16).unwrap_or(0)
 }
 
-fn parse_hex_u8(val: Option<&serde_json::Value>) -> u8 {
-    val.and_then(|v| v.as_str())
-        .and_then(|s| u8::from_str_radix(s.strip_prefix("0x").unwrap_or(s), 16).ok())
-        .unwrap_or(0)
+fn parse_u8(val: Option<&serde_json::Value>) -> u8 {
+    val.and_then(|v| v.as_u64()).map(|n| n as u8).unwrap_or(0)
 }
 
 // ---------------------------------------------------------------------------
