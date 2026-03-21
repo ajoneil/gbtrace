@@ -6,11 +6,20 @@ import './trace-query.js';
 
 export class AppShell extends LitElement {
   static styles = css`
-    :host { display: block; }
+    :host {
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+    }
     .layout {
       max-width: 1200px;
       margin: 0 auto;
       padding: 24px;
+      width: 100%;
+      display: flex;
+      flex-direction: column;
+      flex: 1;
+      min-height: 0;
     }
     header {
       display: flex;
@@ -39,7 +48,17 @@ export class AppShell extends LitElement {
       font-size: 0.8rem;
     }
     .new-trace:hover { border-color: var(--accent); color: var(--accent); }
-    .sections > * { margin-bottom: 16px; }
+    .sections {
+      display: flex;
+      flex-direction: column;
+      flex: 1;
+      min-height: 0;
+    }
+    .sections > * { margin-bottom: 12px; }
+    .sections > trace-table {
+      flex: 1;
+      min-height: 0;
+    }
   `;
 
   static properties = {

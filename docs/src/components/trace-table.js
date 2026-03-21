@@ -6,12 +6,20 @@ const OVERSCAN = 10;
 
 export class TraceTable extends LitElement {
   static styles = css`
-    :host { display: block; }
+    :host {
+      display: flex;
+      flex-direction: column;
+      min-height: 0;
+    }
     .container {
       border: 1px solid var(--border);
       border-radius: 8px;
       overflow: hidden;
       background: var(--bg-surface);
+      display: flex;
+      flex-direction: column;
+      flex: 1;
+      min-height: 0;
     }
     .header-row {
       display: flex;
@@ -35,7 +43,8 @@ export class TraceTable extends LitElement {
       color: var(--text-muted);
     }
     .scroll-area {
-      height: 500px;
+      flex: 1;
+      min-height: 200px;
       overflow-y: auto;
       position: relative;
     }
@@ -134,7 +143,8 @@ export class TraceTable extends LitElement {
   _updateVisibleRows() {
     if (!this.store) { this._visibleRows = []; return; }
 
-    const containerHeight = 500; // matches .scroll-area height
+    const scrollEl = this.renderRoot?.querySelector('.scroll-area');
+    const containerHeight = scrollEl?.clientHeight || 500;
     const startIdx = Math.max(0, Math.floor(this._scrollTop / ROW_HEIGHT) - OVERSCAN);
     const visibleCount = Math.ceil(containerHeight / ROW_HEIGHT) + OVERSCAN * 2;
     const endIdx = Math.min(this.store.entryCount(), startIdx + visibleCount);
