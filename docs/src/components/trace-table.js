@@ -3,6 +3,9 @@ import { displayVal } from '../lib/format.js';
 
 const ROW_HEIGHT = 24;
 const OVERSCAN = 10;
+// Max spacer height — browsers clamp element sizes around 16M-33M px.
+// Use a safe value well under the limit.
+const MAX_SPACER = 10_000_000;
 
 export class TraceTable extends LitElement {
   static styles = css`
@@ -81,9 +84,7 @@ export class TraceTable extends LitElement {
   static properties = {
     store: { type: Object },
     fields: { type: Array },
-    highlightIndices: { type: Object },  // Set<number>
-    _visibleRows: { state: true },
-    _rowsTop: { state: true },
+    highlightIndices: { type: Object },
   };
 
   constructor() {
@@ -91,20 +92,19 @@ export class TraceTable extends LitElement {
     this.store = null;
     this.fields = [];
     this.highlightIndices = null;
-    this._visibleRows = [];
-    this._rowsTop = 0;
+    this._renderedStart = -1;
+    this._renderedCount = 0;
+    this._rafId = null;
   }
 
   updated(changed) {
-    if (changed.has('store') || changed.has('fields')) {
-      // Wait for the DOM to be ready before measuring
-      this.updateComplete.then(() => this._syncFromDom());
+    if (changed.has('store') || changed.has('fields') || changed.has('highlightIndices')) {
+      this.updateComplete.then(() => this._renderRows());
     }
   }
 
   render() {
     if (!this.store || !this.fields?.length) return '';
-    const totalHeight = this.store.entryCount() * ROW_HEIGHT;
 
     return html`
       <div class="container">
@@ -113,65 +113,141 @@ export class TraceTable extends LitElement {
           ${this.fields.map(f => html`<span>${f}</span>`)}
         </div>
         <div class="scroll-area" @scroll=${this._onScroll}>
-          <div class="spacer" style="height:${totalHeight}px"></div>
-          <div class="rows" style="top:${this._rowsTop}px">
-            ${this._visibleRows.map(r => html`
-              <div class="row ${this._isHighlighted(r.index) ? 'highlight' : ''}">
-                <span>${r.index}</span>
-                ${this.fields.map(f => html`<span>${displayVal(r.data[f])}</span>`)}
-              </div>
-            `)}
-          </div>
+          <div class="spacer" style="height:${this._spacerHeight()}px"></div>
+          <div class="rows"></div>
         </div>
       </div>
     `;
   }
 
-  _isHighlighted(index) {
-    return this.highlightIndices?.has(index) ?? false;
+  /** Spacer height, capped to avoid browser limits. */
+  _spacerHeight() {
+    if (!this.store) return 0;
+    const natural = this.store.entryCount() * ROW_HEIGHT;
+    return Math.min(natural, MAX_SPACER);
+  }
+
+  /** Is the spacer capped (i.e., scroll position needs remapping)? */
+  _isRemapped() {
+    if (!this.store) return false;
+    return this.store.entryCount() * ROW_HEIGHT > MAX_SPACER;
+  }
+
+  /** Convert a scroll position to entry index. */
+  _scrollToEntry(scrollTop, scrollEl) {
+    if (!this._isRemapped()) {
+      return Math.floor(scrollTop / ROW_HEIGHT);
+    }
+    // Remapped: scroll fraction → entry index
+    const maxScroll = scrollEl.scrollHeight - scrollEl.clientHeight;
+    if (maxScroll <= 0) return 0;
+    const frac = scrollTop / maxScroll;
+    const totalEntries = this.store.entryCount();
+    const maxStart = totalEntries - Math.ceil(scrollEl.clientHeight / ROW_HEIGHT);
+    return Math.round(frac * Math.max(0, maxStart));
+  }
+
+  /** Convert an entry index to scroll position. */
+  _entryToScroll(index, scrollEl) {
+    if (!this._isRemapped()) {
+      return index * ROW_HEIGHT;
+    }
+    const maxScroll = scrollEl.scrollHeight - scrollEl.clientHeight;
+    if (maxScroll <= 0) return 0;
+    const totalEntries = this.store.entryCount();
+    const maxStart = totalEntries - Math.ceil(scrollEl.clientHeight / ROW_HEIGHT);
+    if (maxStart <= 0) return 0;
+    const frac = index / maxStart;
+    return Math.round(frac * maxScroll);
   }
 
   _onScroll() {
-    this._syncFromDom();
+    if (this._rafId) return;
+    this._rafId = requestAnimationFrame(() => {
+      this._rafId = null;
+      this._renderRows();
+    });
   }
 
-  /** Single source of truth: read scroll position from the actual DOM element. */
-  _syncFromDom() {
-    if (!this.store) { this._visibleRows = []; return; }
-
+  _renderRows() {
     const scrollEl = this.renderRoot?.querySelector('.scroll-area');
-    if (!scrollEl) { this._visibleRows = []; return; }
+    const rowsEl = this.renderRoot?.querySelector('.rows');
+    if (!scrollEl || !rowsEl || !this.store || !this.fields?.length) return;
 
-    const scrollTop = scrollEl.scrollTop;
-    const containerHeight = scrollEl.clientHeight;
-    const startIdx = Math.max(0, Math.floor(scrollTop / ROW_HEIGHT) - OVERSCAN);
+    const firstVisible = this._scrollToEntry(scrollEl.scrollTop, scrollEl);
+    const containerHeight = scrollEl.clientHeight || 500;
     const visibleCount = Math.ceil(containerHeight / ROW_HEIGHT) + OVERSCAN * 2;
+    const startIdx = Math.max(0, firstVisible - OVERSCAN);
     const endIdx = Math.min(this.store.entryCount(), startIdx + visibleCount);
-
     const count = endIdx - startIdx;
-    if (count <= 0) { this._visibleRows = []; this._rowsTop = 0; return; }
 
+    if (startIdx === this._renderedStart && count === this._renderedCount) return;
+    this._renderedStart = startIdx;
+    this._renderedCount = count;
+
+    if (count <= 0) {
+      rowsEl.innerHTML = '';
+      rowsEl.style.top = '0px';
+      return;
+    }
+
+    let entries;
     try {
-      const entries = this.store.entriesRange(startIdx, count);
-      this._visibleRows = entries.map((data, i) => ({
-        index: startIdx + i,
-        data,
-      }));
-      this._rowsTop = startIdx * ROW_HEIGHT;
+      entries = this.store.entriesRange(startIdx, count);
     } catch (err) {
       console.error('Failed to fetch entries:', err);
-      this._visibleRows = [];
-      this._rowsTop = 0;
+      return;
     }
+
+    // Position rows at the right place in the scroll area.
+    // For remapped mode, position relative to the scroll fraction.
+    if (this._isRemapped()) {
+      const maxScroll = scrollEl.scrollHeight - scrollEl.clientHeight;
+      const totalEntries = this.store.entryCount();
+      const maxStart = totalEntries - Math.ceil(containerHeight / ROW_HEIGHT);
+      const frac = maxStart > 0 ? startIdx / maxStart : 0;
+      rowsEl.style.top = `${Math.round(frac * maxScroll)}px`;
+    } else {
+      rowsEl.style.top = `${startIdx * ROW_HEIGHT}px`;
+    }
+
+    const fields = this.fields;
+    const hl = this.highlightIndices;
+    const parts = [];
+    for (let i = 0; i < entries.length; i++) {
+      const idx = startIdx + i;
+      const data = entries[i];
+      const cls = hl?.has(idx) ? 'row highlight' : 'row';
+      parts.push(`<div class="${cls}" data-idx="${idx}">`);
+      parts.push(`<span>${idx}</span>`);
+      for (const f of fields) {
+        parts.push(`<span>${displayVal(data[f])}</span>`);
+      }
+      parts.push('</div>');
+    }
+    rowsEl.innerHTML = parts.join('');
+
+    for (const row of rowsEl.children) {
+      const idx = parseInt(row.dataset.idx, 10);
+      row.addEventListener('mouseenter', () => this._emitHover(idx));
+      row.addEventListener('mouseleave', () => this._emitHover(null));
+    }
+  }
+
+  _emitHover(index) {
+    this.dispatchEvent(new CustomEvent('hover-index', {
+      detail: { index },
+      bubbles: true, composed: true,
+    }));
   }
 
   /** Scroll to a specific entry index. */
   scrollToIndex(index) {
-    const scrollArea = this.renderRoot?.querySelector('.scroll-area');
-    if (!scrollArea) return;
-    scrollArea.scrollTop = index * ROW_HEIGHT;
-    // Always sync immediately — don't rely on the scroll event firing
-    this._syncFromDom();
+    const scrollEl = this.renderRoot?.querySelector('.scroll-area');
+    if (!scrollEl) return;
+    this._renderedStart = -1;
+    scrollEl.scrollTop = this._entryToScroll(index, scrollEl);
+    this._renderRows();
   }
 }
 
