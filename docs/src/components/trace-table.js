@@ -169,6 +169,9 @@ export class TraceTable extends LitElement {
     const scrollArea = this.renderRoot?.querySelector('.scroll-area');
     if (scrollArea) {
       scrollArea.scrollTop = index * ROW_HEIGHT;
+      // Force update in case scroll event doesn't fire (e.g. same position)
+      this._scrollTop = scrollArea.scrollTop;
+      this._updateVisibleRows();
     }
   }
 }
