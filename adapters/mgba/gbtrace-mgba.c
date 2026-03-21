@@ -18,6 +18,7 @@
 #include <mgba/core/timing.h>
 #include <mgba/debugger/debugger.h>
 #include <mgba/gb/core.h>
+#include <mgba/gb/interface.h>
 #include <mgba/internal/gb/gb.h>
 #include <mgba/internal/sm83/sm83.h>
 #include <mgba-util/vfs.h>
@@ -490,6 +491,17 @@ int main(int argc, char *argv[]) {
         strncpy(boot_hash, sha256_file(boot_rom_path), sizeof(boot_hash) - 1);
         boot_rom_info = boot_hash;
         fprintf(stderr, "Boot ROM: %s (sha256: %s)\n", boot_rom_path, boot_rom_info);
+    }
+
+    // Force the hardware model on the internal GB struct before reset,
+    // since the config-based approach doesn't reliably override auto-detection.
+    {
+        struct GB *gb = (struct GB *) g_core->board;
+        if (strcmp(model, "CGB-E") == 0) {
+            gb->model = GB_MODEL_CGB;
+        } else {
+            gb->model = GB_MODEL_DMG;
+        }
     }
 
     g_core->reset(g_core);
