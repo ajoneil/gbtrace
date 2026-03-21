@@ -47,6 +47,19 @@ export class TraceStore {
         return takeFromExternrefTable0(ret[0]);
     }
     /**
+     * Per-field diff statistics: returns a JS object { total, matching, fields: { fieldName: diffCount, ... } }
+     * @param {TraceStore} other
+     * @returns {any}
+     */
+    diffStats(other) {
+        _assertClass(other, TraceStore);
+        const ret = wasm.tracestore_diffStats(this.__wbg_ptr, other.__wbg_ptr);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return takeFromExternrefTable0(ret[0]);
+    }
+    /**
      * Get a range of entries as a JS array. Used for virtual scrolling.
      * @param {number} start
      * @param {number} count
@@ -235,6 +248,11 @@ function __wbg_get_imports() {
         __wbindgen_cast_0000000000000002: function(arg0, arg1) {
             // Cast intrinsic for `Ref(String) -> Externref`.
             const ret = getStringFromWasm0(arg0, arg1);
+            return ret;
+        },
+        __wbindgen_cast_0000000000000003: function(arg0) {
+            // Cast intrinsic for `U64 -> Externref`.
+            const ret = BigInt.asUintN(64, arg0);
             return ret;
         },
         __wbindgen_init_externref_table: function() {

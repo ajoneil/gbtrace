@@ -174,6 +174,61 @@ impl TraceStore {
         Ok(arr)
     }
 
+    /// Per-field diff statistics: returns a JS object { total, matching, fields: { fieldName: diffCount, ... } }
+    #[wasm_bindgen(js_name = diffStats)]
+    pub fn diff_stats(&self, other: &TraceStore) -> Result<JsValue, JsError> {
+        let len = self.store.entry_count().min(other.store.entry_count());
+        let header = self.store.header();
+
+        let mut field_counts: Vec<(&str, u64)> = Vec::new();
+        let mut any_diff_count: usize = 0;
+        let mut any_diff_flags = vec![false; len];
+
+        for (i, name) in header.fields.iter().enumerate() {
+            if name == "cy" { continue; }
+            if let Some(j) = other.store.field_col(name) {
+                let ca = self.store.column(i);
+                let cb = other.store.column(j);
+                let mut count = 0u64;
+                for row in 0..len {
+                    if ca.get_numeric(row) != cb.get_numeric(row) {
+                        count += 1;
+                        any_diff_flags[row] = true;
+                    }
+                }
+                if count > 0 {
+                    field_counts.push((name, count));
+                }
+            }
+        }
+
+        for flag in &any_diff_flags {
+            if *flag { any_diff_count += 1; }
+        }
+
+        let matching = len - any_diff_count;
+        let pct = if len > 0 { (matching as f64 / len as f64) * 100.0 } else { 100.0 };
+
+        #[derive(serde::Serialize)]
+        struct Stats {
+            total: usize,
+            matching: usize,
+            differing: usize,
+            match_pct: f64,
+            fields: Vec<(String, u64)>,
+        }
+
+        let stats = Stats {
+            total: len,
+            matching,
+            differing: any_diff_count,
+            match_pct: (pct * 10.0).round() / 10.0,
+            fields: field_counts.iter().map(|(n, c)| (n.to_string(), *c)).collect(),
+        };
+
+        Ok(to_js(&stats)?)
+    }
+
     /// Compare ALL fields between this store and another, returning indices where any field differs.
     #[wasm_bindgen(js_name = diffAll)]
     pub fn diff_all(
