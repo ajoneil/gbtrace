@@ -1,0 +1,8 @@
+[profile]
+name = "blargg_cpu"
+description = "CPU registers + serial output for Blargg cpu_instrs individual tests."
+trigger = "instruction"
+
+[fields]
+cpu = ["pc", "sp", "a", "f", "b", "c", "d", "e", "h", "l", "op"]
+serial = ["sb", "sc"]
