@@ -20,6 +20,9 @@ pub enum Error {
     #[error("profile error: {0}")]
     Profile(String),
 
+    #[error("diff error: {0}")]
+    Diff(String),
+
     #[cfg(feature = "parquet")]
     #[error("Parquet error: {0}")]
     Parquet(#[from] ::parquet::errors::ParquetError),

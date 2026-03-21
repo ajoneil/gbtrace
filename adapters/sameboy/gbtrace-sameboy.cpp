@@ -150,6 +150,12 @@ static GB_gameboy_t *g_gb = nullptr;
 static Profile g_profile;
 static uint64_t g_total_8mhz_ticks = 0;
 
+static unsigned char g_stop_serial_byte = 0;
+static int g_stop_serial_count = 1;
+static int g_stop_serial_seen = 0;
+static bool g_stop_serial_active = false;
+static bool g_stop_serial_triggered = false;
+
 // Pre-computed list of what to emit per entry.
 struct FieldEmitter {
     std::string name;
@@ -256,6 +262,23 @@ static void exec_callback(GB_gameboy_t *gb, uint16_t address, uint8_t opcode) {
     }
 
     std::fprintf(g_output, "}\n");
+
+    // Check serial stop condition: detect rising edge of SC bit 7
+    if (g_stop_serial_active && !g_stop_serial_triggered) {
+        static bool prev_sc_high = false;
+        unsigned char sc = GB_safe_read_memory(gb, 0xFF02);
+        bool sc_high = (sc & 0x80) != 0;
+        if (sc_high && !prev_sc_high) {
+            unsigned char sb = GB_safe_read_memory(gb, 0xFF01);
+            if (sb == g_stop_serial_byte) {
+                g_stop_serial_seen++;
+                if (g_stop_serial_seen >= g_stop_serial_count) {
+                    g_stop_serial_triggered = true;
+                }
+            }
+        }
+        prev_sc_high = sc_high;
+    }
 }
 
 // --- SHA-256 ---
@@ -299,6 +322,27 @@ static void write_header(FILE *out, const Profile &prof,
     std::fprintf(out, "],\"trigger\":\"%s\",\"cy_unit\":\"tcycle\"}\n", prof.trigger.c_str());
 }
 
+// --- Stop condition ---
+
+struct StopCondition {
+    unsigned short addr;
+    unsigned char value;
+    bool active = false;
+};
+
+static StopCondition parse_stop_when(const std::string &spec) {
+    auto eq = spec.find('=');
+    if (eq == std::string::npos) {
+        std::fprintf(stderr, "Error: --stop-when format is ADDR=VAL (e.g. A000=80)\n");
+        std::exit(1);
+    }
+    StopCondition cond;
+    cond.addr = static_cast<unsigned short>(std::strtoul(spec.substr(0, eq).c_str(), nullptr, 16));
+    cond.value = static_cast<unsigned char>(std::strtoul(spec.substr(eq + 1).c_str(), nullptr, 16));
+    cond.active = true;
+    return cond;
+}
+
 // --- Main ---
 
 static void print_usage(const char *argv0) {
@@ -310,6 +354,9 @@ static void print_usage(const char *argv0) {
         "  --profile <path>     Capture profile TOML file (required)\n"
         "  --output <path>      Output trace file (default: stdout)\n"
         "  --frames <n>         Stop after N frames (default: 3000)\n"
+        "  --stop-when <A=V>    Stop when memory ADDR equals VAL (hex, e.g. A000=80)\n"
+        "  --stop-on-serial <HH>  Stop when serial byte HH is sent (hex)\n"
+        "  --stop-serial-count <n> Require n serial matches before stopping (default: 1)\n"
         "  --model <model>      dmg or cgb (default: dmg)\n"
         "  --boot-rom <path>    Boot ROM file (default: boot_roms/<model>_boot.bin)\n",
         argv0);
@@ -323,6 +370,7 @@ int main(int argc, char *argv[]) {
     int max_frames = 3000;
     std::string model = "DMG-B";
     GB_model_t gb_model = GB_MODEL_DMG_B;
+    StopCondition stop_when;
 
     for (int i = 1; i < argc; i++) {
         std::string arg = argv[i];
@@ -334,6 +382,14 @@ int main(int argc, char *argv[]) {
             output_path = argv[++i];
         } else if (arg == "--frames" && i + 1 < argc) {
             max_frames = std::atoi(argv[++i]);
+        } else if (arg == "--stop-when" && i + 1 < argc) {
+            stop_when = parse_stop_when(argv[++i]);
+        } else if (arg == "--stop-on-serial" && i + 1 < argc) {
+            g_stop_serial_byte = static_cast<unsigned char>(
+                std::strtoul(argv[++i], nullptr, 16));
+            g_stop_serial_active = true;
+        } else if (arg == "--stop-serial-count" && i + 1 < argc) {
+            g_stop_serial_count = std::atoi(argv[++i]);
         } else if (arg == "--boot-rom" && i + 1 < argc) {
             boot_rom_path = argv[++i];
         } else if (arg == "--model" && i + 1 < argc) {
@@ -419,19 +475,51 @@ int main(int argc, char *argv[]) {
     GB_set_rendering_disabled(g_gb, true);
     GB_set_turbo_mode(g_gb, true, true);
 
+    // Run boot ROM without tracing — advance until PC reaches 0x0100
+    std::fprintf(stderr, "Running boot ROM (no trace)...\n");
+    while (true) {
+        unsigned ticks = GB_run(g_gb);
+        g_total_8mhz_ticks += ticks;
+        GB_registers_t *regs = GB_get_registers(g_gb);
+        if (regs->pc >= 0x0100) break;
+    }
+    std::fprintf(stderr, "Boot complete at cycle %llu\n",
+                 (unsigned long long)(g_total_8mhz_ticks / 2));
+
+    // Reset cycle origin so traces start at cy=0 post-boot
+    g_total_8mhz_ticks = 0;
+
     // Write header and set callback
     std::string rom_hash = sha256_file(rom_path);
     write_header(g_output, g_profile, rom_hash, model, boot_rom_info);
     GB_set_execution_callback(g_gb, exec_callback);
 
     // Run: GB_run executes one CPU step and returns 8MHz ticks consumed.
-    // Track vblank_just_occured to count frames.
+    if (stop_when.active) {
+        std::fprintf(stderr, "Stop condition: [0x%04X] == 0x%02X\n",
+                     stop_when.addr, stop_when.value);
+    }
+    if (g_stop_serial_active) {
+        std::fprintf(stderr, "Serial stop: byte=0x%02X count=%d\n",
+                     g_stop_serial_byte, g_stop_serial_count);
+    }
+
     int frames = 0;
+    bool stopped_early = false;
     while (frames < max_frames) {
         unsigned ticks = GB_run(g_gb);
         g_total_8mhz_ticks += ticks;
         if (g_gb->vblank_just_occured) {
             frames++;
+            if (stop_when.active &&
+                GB_safe_read_memory(g_gb, stop_when.addr) == stop_when.value) {
+                stopped_early = true;
+                break;
+            }
+            if (g_stop_serial_triggered) {
+                stopped_early = true;
+                break;
+            }
         }
     }
 
@@ -443,6 +531,9 @@ int main(int argc, char *argv[]) {
     GB_free(g_gb);
     GB_dealloc(g_gb);
 
+    if (stopped_early) {
+        std::fprintf(stderr, "Stop condition met at frame %d.\n", frames);
+    }
     std::fprintf(stderr, "Traced %d frames, output written.\n", frames);
     return 0;
 }

@@ -132,6 +132,11 @@ static Profile parse_profile(const std::string &path) {
 static FILE *g_output = nullptr;
 static gambatte::GB *g_gb = nullptr;
 static Profile g_profile;
+static unsigned char g_stop_serial_byte = 0;
+static int g_stop_serial_count = 1;  // stop after Nth occurrence
+static int g_stop_serial_seen = 0;
+static bool g_stop_serial_active = false;
+static bool g_stop_serial_triggered = false;
 
 // Pre-computed list of what to emit per entry, for fast callback execution.
 struct FieldEmitter {
@@ -153,7 +158,9 @@ static void build_emitters(const Profile &prof) {
         if (field == "op") {
             em.source = FieldEmitter::OPCODE;
         } else if (field == "ime") {
-            em.source = FieldEmitter::IME;
+            // gambatte doesn't expose IME — skip rather than emit fake data
+            std::fprintf(stderr, "Note: skipping 'ime' (not available in gambatte)\n");
+            continue;
         } else if (auto it = CALLBACK_FIELDS.find(field); it != CALLBACK_FIELDS.end()) {
             em.source = it->second.is_16bit ? FieldEmitter::CALLBACK_16 : FieldEmitter::CALLBACK_8;
             em.cb_index = it->second.index;
@@ -220,6 +227,23 @@ static void trace_callback(void *data) {
     }
 
     std::fprintf(g_output, "}\n");
+
+    // Check serial stop condition: detect rising edge of SC bit 7
+    if (g_stop_serial_active && !g_stop_serial_triggered) {
+        static bool prev_sc_high = false;
+        unsigned char sc = g_gb->externalRead(0xFF02);
+        bool sc_high = (sc & 0x80) != 0;
+        if (sc_high && !prev_sc_high) {
+            unsigned char sb = g_gb->externalRead(0xFF01);
+            if (sb == g_stop_serial_byte) {
+                g_stop_serial_seen++;
+                if (g_stop_serial_seen >= g_stop_serial_count) {
+                    g_stop_serial_triggered = true;
+                }
+            }
+        }
+        prev_sc_high = sc_high;
+    }
 }
 
 // --- SHA-256 ---
@@ -255,12 +279,37 @@ static void write_header(FILE *out, const Profile &prof,
         rom_sha256.c_str(), model.c_str(), boot_rom_info.c_str(),
         prof.name.c_str());
 
-    for (size_t i = 0; i < prof.fields.size(); i++) {
-        if (i > 0) std::fprintf(out, ",");
-        std::fprintf(out, "\"%s\"", prof.fields[i].c_str());
+    // Write "cy" first, then only fields that have emitters (skips unsupported fields)
+    std::fprintf(out, "\"cy\"");
+    for (const auto &em : g_emitters) {
+        std::fprintf(out, ",\"%s\"", em.name.c_str());
     }
 
     std::fprintf(out, "],\"trigger\":\"%s\",\"cy_unit\":\"tcycle\"}\n", prof.trigger.c_str());
+}
+
+// --- Stop condition ---
+
+struct StopCondition {
+    unsigned short addr = 0;
+    unsigned char value = 0;
+    bool active = false;
+};
+
+static StopCondition parse_stop_when(const std::string &spec) {
+    // Format: ADDR=VAL (hex), e.g. A000=80
+    auto eq = spec.find('=');
+    if (eq == std::string::npos) {
+        std::fprintf(stderr, "Error: --stop-when format is ADDR=VAL (e.g. A000=80)\n");
+        std::exit(1);
+    }
+    StopCondition cond;
+    cond.addr = static_cast<unsigned short>(
+        std::strtoul(spec.substr(0, eq).c_str(), nullptr, 16));
+    cond.value = static_cast<unsigned char>(
+        std::strtoul(spec.substr(eq + 1).c_str(), nullptr, 16));
+    cond.active = true;
+    return cond;
 }
 
 // --- Main ---
@@ -274,6 +323,9 @@ static void print_usage(const char *argv0) {
         "  --profile <path>     Capture profile TOML file (required)\n"
         "  --output <path>      Output trace file (default: stdout)\n"
         "  --frames <n>         Stop after N frames (default: 3000)\n"
+        "  --stop-when <A=V>    Stop when memory ADDR equals VAL (hex, e.g. A000=80)\n"
+        "  --stop-on-serial <B> Stop when byte B (hex) is sent via serial (e.g. 0A for newline)\n"
+        "  --stop-serial-count <N> Stop on Nth occurrence of serial byte (default: 1)\n"
         "  --model <model>      dmg or cgb (default: dmg)\n"
         "  --boot-rom <path>    Boot ROM file (default: skip boot)\n",
         argv0);
@@ -287,6 +339,7 @@ int main(int argc, char *argv[]) {
     int max_frames = 3000;
     std::string model = "DMG-B";
     unsigned load_flags = gambatte::GB::LoadFlag::NO_BIOS;
+    StopCondition stop_when;
 
     for (int i = 1; i < argc; i++) {
         std::string arg = argv[i];
@@ -298,6 +351,14 @@ int main(int argc, char *argv[]) {
             output_path = argv[++i];
         } else if (arg == "--frames" && i + 1 < argc) {
             max_frames = std::atoi(argv[++i]);
+        } else if (arg == "--stop-when" && i + 1 < argc) {
+            stop_when = parse_stop_when(argv[++i]);
+        } else if (arg == "--stop-on-serial" && i + 1 < argc) {
+            g_stop_serial_byte = static_cast<unsigned char>(
+                std::strtoul(argv[++i], nullptr, 16));
+            g_stop_serial_active = true;
+        } else if (arg == "--stop-serial-count" && i + 1 < argc) {
+            g_stop_serial_count = std::atoi(argv[++i]);
         } else if (arg == "--boot-rom" && i + 1 < argc) {
             boot_rom_path = argv[++i];
         } else if (arg == "--model" && i + 1 < argc) {
@@ -378,7 +439,18 @@ int main(int argc, char *argv[]) {
     std::vector<gambatte::uint_least32_t> video_buf(160 * 144, 0);
     std::vector<gambatte::uint_least32_t> audio_buf(SAMPLES_PER_FRAME * 2 + 2064, 0);
 
+    if (stop_when.active) {
+        std::fprintf(stderr, "Stop condition: [0x%04X] == 0x%02X\n",
+                     stop_when.addr, stop_when.value);
+    }
+    if (g_stop_serial_active) {
+        std::fprintf(stderr, "Stop on serial byte: 0x%02X (after %d occurrence%s)\n",
+                     g_stop_serial_byte, g_stop_serial_count,
+                     g_stop_serial_count == 1 ? "" : "s");
+    }
+
     int frames = 0;
+    bool stopped_early = false;
     while (frames < max_frames) {
         std::size_t samples = SAMPLES_PER_FRAME;
         std::ptrdiff_t result = gb.runFor(
@@ -386,6 +458,15 @@ int main(int argc, char *argv[]) {
             audio_buf.data(), samples);
         if (result >= 0) {
             frames++;
+            if (stop_when.active &&
+                gb.externalRead(stop_when.addr) == stop_when.value) {
+                stopped_early = true;
+                break;
+            }
+            if (g_stop_serial_triggered) {
+                stopped_early = true;
+                break;
+            }
         }
     }
 
@@ -394,6 +475,10 @@ int main(int argc, char *argv[]) {
         std::fclose(g_output);
     }
 
-    std::fprintf(stderr, "Traced %d frames, output written.\n", frames);
+    if (stopped_early) {
+        std::fprintf(stderr, "Stop condition met at frame %d, output written.\n", frames);
+    } else {
+        std::fprintf(stderr, "Traced %d frames, output written.\n", frames);
+    }
     return 0;
 }

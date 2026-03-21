@@ -219,6 +219,12 @@ static FILE *g_output = NULL;
 static struct Profile g_profile;
 static struct mCore *g_core = NULL;
 
+static unsigned char g_stop_serial_byte = 0;
+static int g_stop_serial_count = 1;
+static int g_stop_serial_seen = 0;
+static int g_stop_serial_active = 0;
+static int g_stop_serial_triggered = 0;
+
 // --- Formatting helpers ---
 
 static inline void fput_u8(FILE *out, int val) {
@@ -286,6 +292,23 @@ static void emit_entry(struct mCore *core) {
     }
 
     fprintf(g_output, "}\n");
+
+    // Check serial stop condition: detect rising edge of SC bit 7
+    if (g_stop_serial_active && !g_stop_serial_triggered) {
+        static int prev_sc_high = 0;
+        unsigned char sc = core->rawRead8(core, 0xFF02, -1);
+        int sc_high = (sc & 0x80) != 0;
+        if (sc_high && !prev_sc_high) {
+            unsigned char sb = core->rawRead8(core, 0xFF01, -1);
+            if (sb == g_stop_serial_byte) {
+                g_stop_serial_seen++;
+                if (g_stop_serial_seen >= g_stop_serial_count) {
+                    g_stop_serial_triggered = 1;
+                }
+            }
+        }
+        prev_sc_high = sc_high;
+    }
 }
 
 static void trace_custom(struct mDebuggerModule *mod) {
@@ -340,6 +363,9 @@ static void print_usage(const char *argv0) {
         "  --profile <path>     Capture profile TOML file (required)\n"
         "  --output <path>      Output trace file (default: stdout)\n"
         "  --frames <n>         Stop after N frames (default: 3000)\n"
+        "  --stop-when <A=V>    Stop when memory ADDR equals VAL (hex, e.g. A000=80)\n"
+        "  --stop-on-serial <B> Stop when byte B (hex) is sent via serial (e.g. 0A for newline)\n"
+        "  --stop-serial-count <N> Stop on Nth occurrence of serial byte (default: 1)\n"
         "  --model <model>      dmg or cgb (default: dmg)\n"
         "  --boot-rom <path>    Boot ROM file (default: skip boot)\n",
         argv0);
@@ -352,6 +378,9 @@ int main(int argc, char *argv[]) {
     const char *boot_rom_path = NULL;
     int max_frames = 3000;
     const char *model = "DMG-B";
+    unsigned short stop_addr = 0;
+    unsigned char stop_val = 0;
+    int stop_active = 0;
 
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--rom") == 0 && i + 1 < argc) {
@@ -362,6 +391,18 @@ int main(int argc, char *argv[]) {
             output_path = argv[++i];
         } else if (strcmp(argv[i], "--frames") == 0 && i + 1 < argc) {
             max_frames = atoi(argv[++i]);
+        } else if (strcmp(argv[i], "--stop-when") == 0 && i + 1 < argc) {
+            const char *spec = argv[++i];
+            const char *eq = strchr(spec, '=');
+            if (!eq) { fprintf(stderr, "Error: --stop-when format is ADDR=VAL (e.g. A000=80)\n"); return 1; }
+            stop_addr = (unsigned short)strtoul(spec, NULL, 16);
+            stop_val = (unsigned char)strtoul(eq + 1, NULL, 16);
+            stop_active = 1;
+        } else if (strcmp(argv[i], "--stop-on-serial") == 0 && i + 1 < argc) {
+            g_stop_serial_byte = (unsigned char)strtoul(argv[++i], NULL, 16);
+            g_stop_serial_active = 1;
+        } else if (strcmp(argv[i], "--stop-serial-count") == 0 && i + 1 < argc) {
+            g_stop_serial_count = atoi(argv[++i]);
         } else if (strcmp(argv[i], "--boot-rom") == 0 && i + 1 < argc) {
             boot_rom_path = argv[++i];
         } else if (strcmp(argv[i], "--model") == 0 && i + 1 < argc) {
@@ -476,8 +517,29 @@ int main(int argc, char *argv[]) {
     mDebuggerModuleSetNeedsCallback(&trace_mod.d);
 
     // Run
-    for (int frame = 0; frame < max_frames; frame++) {
+    if (stop_active) {
+        fprintf(stderr, "Stop condition: [0x%04X] == 0x%02X\n", stop_addr, stop_val);
+    }
+    if (g_stop_serial_active) {
+        fprintf(stderr, "Stop on serial byte: 0x%02X (after %d occurrence%s)\n",
+                g_stop_serial_byte, g_stop_serial_count,
+                g_stop_serial_count == 1 ? "" : "s");
+    }
+
+    int frames = 0;
+    int stopped_early = 0;
+    for (frames = 0; frames < max_frames; frames++) {
         mDebuggerRunFrame(&debugger);
+        if (stop_active && g_core->rawRead8(g_core, stop_addr, -1) == stop_val) {
+            stopped_early = 1;
+            frames++;
+            break;
+        }
+        if (g_stop_serial_triggered) {
+            stopped_early = 1;
+            frames++;
+            break;
+        }
     }
 
     fflush(g_output);
@@ -489,6 +551,9 @@ int main(int argc, char *argv[]) {
     mDebuggerDeinit(&debugger);
     g_core->deinit(g_core);
 
-    fprintf(stderr, "Traced %d frames, output written.\n", max_frames);
+    if (stopped_early) {
+        fprintf(stderr, "Stop condition met at frame %d.\n", frames);
+    }
+    fprintf(stderr, "Traced %d frames, output written.\n", frames);
     return 0;
 }
