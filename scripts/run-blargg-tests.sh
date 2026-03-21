@@ -14,7 +14,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 ROM_DIR="$PROJECT_DIR/docs/tests/blargg/cpu_instrs/individual"
-PROFILE="$PROJECT_DIR/profiles/blargg_cpu.toml"
+PROFILE="$PROJECT_DIR/docs/tests/blargg/blargg_cpu.toml"
 CLI="$PROJECT_DIR/target/release/gbtrace-cli"
 
 # Serial stop: 4th newline = after "Passed\n" or "Failed\n"

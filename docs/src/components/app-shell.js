@@ -1,5 +1,6 @@
 import { LitElement, html, css } from 'lit';
 import './file-loader.js';
+import './test-picker.js';
 import './trace-header.js';
 import './trace-table.js';
 import './trace-query.js';
@@ -48,6 +49,11 @@ export class AppShell extends LitElement {
       font-size: 0.8rem;
     }
     .new-trace:hover { border-color: var(--accent); color: var(--accent); }
+    test-picker {
+      display: flex;
+      justify-content: center;
+      margin-top: 16px;
+    }
     .sections {
       display: flex;
       flex-direction: column;
@@ -88,6 +94,7 @@ export class AppShell extends LitElement {
 
         ${this._store ? this._renderViewer() : html`
           <file-loader @trace-loaded=${this._onTraceLoaded}></file-loader>
+          <test-picker @trace-loaded=${this._onTraceLoaded}></test-picker>
         `}
       </div>
     `;
