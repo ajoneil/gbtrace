@@ -64,11 +64,20 @@ static bool is_in_list(const char *name, const char **list) {
 #define MAX_FIELDS 32
 #define MAX_NAME 64
 
+#define MAX_MEMORY_FIELDS 16
+
+struct MemoryField {
+    char name[MAX_NAME];
+    unsigned short addr;
+};
+
 struct Profile {
     char name[MAX_NAME];
     char trigger[MAX_NAME];
     char fields[MAX_FIELDS][MAX_NAME];
     int nfields; // includes "cy" at index 0
+    struct MemoryField memory[MAX_MEMORY_FIELDS];
+    int nmemory;
 };
 
 static void trim(char *s) {
@@ -94,11 +103,18 @@ static struct Profile parse_profile(const char *path) {
     FILE *f = fopen(path, "r");
     if (!f) { fprintf(stderr, "Error: cannot open profile '%s'\n", path); exit(1); }
 
+    int in_memory_section = 0;
     char line[1024];
     while (fgets(line, sizeof(line), f)) {
-        // Strip comments
         char *hash = strchr(line, '#');
         if (hash) *hash = '\0';
+        trim(line);
+
+        // Track TOML sections
+        if (line[0] == '[') {
+            in_memory_section = (strcmp(line, "[fields.memory]") == 0);
+            continue;
+        }
 
         char *eq = strchr(line, '=');
         if (!eq) continue;
@@ -108,14 +124,22 @@ static struct Profile parse_profile(const char *path) {
         char *val = eq + 1;
         trim(key); trim(val);
 
-        if (strcmp(key, "name") == 0) {
+        if (in_memory_section) {
+            strip_quotes(val);
+            if (prof.nmemory < MAX_MEMORY_FIELDS && prof.nfields < MAX_FIELDS) {
+                strncpy(prof.memory[prof.nmemory].name, key, MAX_NAME - 1);
+                prof.memory[prof.nmemory].addr = (unsigned short)strtoul(val, NULL, 16);
+                prof.nmemory++;
+                strncpy(prof.fields[prof.nfields], key, MAX_NAME - 1);
+                prof.nfields++;
+            }
+        } else if (strcmp(key, "name") == 0) {
             strip_quotes(val);
             strncpy(prof.name, val, MAX_NAME - 1);
         } else if (strcmp(key, "trigger") == 0) {
             strip_quotes(val);
             strncpy(prof.trigger, val, MAX_NAME - 1);
         } else if (val[0] == '[') {
-            // Parse array: ["f1", "f2", ...]
             char *start = strchr(val, '[');
             char *end = strchr(val, ']');
             if (start && end) {
@@ -168,6 +192,15 @@ static void build_emitters(const struct Profile *prof) {
             em->source = SRC_REG16;
         } else {
             int addr = find_io_addr(field);
+            if (addr < 0) {
+                // Check memory fields from profile
+                for (int m = 0; m < prof->nmemory; m++) {
+                    if (strcmp(field, prof->memory[m].name) == 0) {
+                        addr = prof->memory[m].addr;
+                        break;
+                    }
+                }
+            }
             if (addr >= 0) {
                 em->source = SRC_IO;
                 em->io_addr = addr;
