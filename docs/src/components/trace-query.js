@@ -9,15 +9,6 @@ const SEMANTIC_CONDITIONS = [
   { group: 'PPU', label: 'Drawing', query: 'ppu enters mode 3', needs: 'stat' },
   { group: 'PPU', label: 'LCD On', query: 'lcd on', needs: 'lcdc' },
   { group: 'PPU', label: 'LCD Off', query: 'lcd off', needs: 'lcdc' },
-  // Flags
-  { group: 'Flags', label: 'Z set', query: 'flag z becomes set', needs: 'f' },
-  { group: 'Flags', label: 'Z clear', query: 'flag z becomes clear', needs: 'f' },
-  { group: 'Flags', label: 'N set', query: 'flag n becomes set', needs: 'f' },
-  { group: 'Flags', label: 'N clear', query: 'flag n becomes clear', needs: 'f' },
-  { group: 'Flags', label: 'H set', query: 'flag h becomes set', needs: 'f' },
-  { group: 'Flags', label: 'H clear', query: 'flag h becomes clear', needs: 'f' },
-  { group: 'Flags', label: 'C set', query: 'flag c becomes set', needs: 'f' },
-  { group: 'Flags', label: 'C clear', query: 'flag c becomes clear', needs: 'f' },
   // Interrupts
   { group: 'IRQ', label: 'VBlank', query: 'interrupt 0', needs: 'if_' },
   { group: 'IRQ', label: 'STAT', query: 'interrupt 1', needs: 'if_' },
@@ -27,6 +18,15 @@ const SEMANTIC_CONDITIONS = [
   // Timer
   { group: 'Timer', label: 'Overflow', query: 'timer overflow', needs: 'tima' },
 ];
+
+// Flag chips cycle: off -> becomes set -> becomes clear -> off
+const FLAG_CHIPS = [
+  { name: 'Z', flag: 'z' },
+  { name: 'N', flag: 'n' },
+  { name: 'H', flag: 'h' },
+  { name: 'C', flag: 'c' },
+];
+const FLAG_MODES = [null, 'set', 'clear'];  // cycle order
 
 export class TraceQuery extends LitElement {
   static styles = css`
@@ -225,6 +225,7 @@ export class TraceQuery extends LitElement {
     _matchEntries: { state: true },
     _currentMatch: { state: true },
     _error: { state: true },
+    _flagModes: { state: true },
   };
 
   constructor() {
@@ -237,6 +238,7 @@ export class TraceQuery extends LitElement {
     this._activeQuery = null;
     this._activeLabel = null;
     this._matches = null;
+    this._flagModes = {}; // { z: null, n: null, h: null, c: null }
     this._matchEntries = [];
     this._currentMatch = -1;
     this._error = null;
@@ -250,7 +252,9 @@ export class TraceQuery extends LitElement {
 
     return html`
       ${semanticAvailable.length > 0 ? html`
-        ${this._renderSemanticGroups(semanticAvailable)}
+        <div class="chip-row">
+          ${this._renderSemanticInline(semanticAvailable)}
+        </div>
       ` : ''}
 
       <div class="chip-row">
@@ -261,6 +265,19 @@ export class TraceQuery extends LitElement {
             @click=${() => this._selectField(f)}
           >${f}</span>
         `)}
+        ${(this.fields || []).includes('f') ? html`
+          <span class="section-label" style="margin-left:6px">Flags</span>
+          ${FLAG_CHIPS.map(fc => {
+            const mode = this._flagModes[fc.flag] || null;
+            const label = mode ? `${fc.name} ${mode}` : fc.name;
+            return html`
+              <span
+                class="chip ${mode ? 'active' : ''}"
+                @click=${() => this._cycleFlag(fc.flag)}
+              >${label}</span>
+            `;
+          })}
+        ` : ''}
       </div>
 
       ${this._selectedField ? html`
@@ -328,20 +345,18 @@ export class TraceQuery extends LitElement {
     `;
   }
 
-  _renderSemanticGroups(conditions) {
+  _renderSemanticInline(conditions) {
     const groups = [...new Set(conditions.map(c => c.group))];
-    return groups.map(group => {
+    return groups.map((group, i) => {
       const items = conditions.filter(c => c.group === group);
       return html`
-        <div class="chip-row">
-          <span class="section-label">${group}</span>
-          ${items.map(c => html`
-            <span
-              class="chip ${this._activeQuery === c.query ? 'active' : ''}"
-              @click=${() => this._toggleSemantic(c.query, c.label)}
-            >${c.label}</span>
-          `)}
-        </div>
+        <span class="section-label" style="${i > 0 ? 'margin-left:6px' : ''}">${group}</span>
+        ${items.map(c => html`
+          <span
+            class="chip ${this._activeQuery === c.query ? 'active' : ''}"
+            @click=${() => this._toggleSemantic(c.query, c.label)}
+          >${c.label}</span>
+        `)}
       `;
     });
   }
@@ -363,6 +378,22 @@ export class TraceQuery extends LitElement {
     return available.slice(0, 6).map(f =>
       html`<span class="result-field"><span class="fname">${f}</span>=${displayVal(entry[f])}</span>`
     );
+  }
+
+  _cycleFlag(flag) {
+    const current = this._flagModes[flag] || null;
+    const idx = FLAG_MODES.indexOf(current);
+    const next = FLAG_MODES[(idx + 1) % FLAG_MODES.length];
+
+    this._flagModes = { ...this._flagModes, [flag]: next };
+
+    if (next) {
+      const query = `flag ${flag} becomes ${next}`;
+      const label = `flag ${flag.toUpperCase()} becomes ${next}`;
+      this._runQuery(query, label);
+    } else {
+      this._clear();
+    }
   }
 
   _selectField(field) {
@@ -422,6 +453,7 @@ export class TraceQuery extends LitElement {
       this._selectedField = null;
       this._fieldOp = null;
       this._fieldValue = '';
+      this._flagModes = {};
       this._runQuery(query, label);
     }
   }
@@ -471,6 +503,7 @@ export class TraceQuery extends LitElement {
     this._matchEntries = [];
     this._currentMatch = -1;
     this._error = null;
+    this._flagModes = {};
     this._emitHighlight();
   }
 
