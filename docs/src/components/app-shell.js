@@ -74,6 +74,7 @@ export class AppShell extends LitElement {
     _filename: { state: true },
     _highlightIndices: { state: true },
     _chartField: { state: true },
+    _hoverIndex: { state: true },
   };
 
   constructor() {
@@ -83,6 +84,7 @@ export class AppShell extends LitElement {
     this._filename = null;
     this._highlightIndices = null;
     this._chartField = null;
+    this._hoverIndex = null;
   }
 
   render() {
@@ -110,6 +112,7 @@ export class AppShell extends LitElement {
         @highlight-changed=${this._onHighlightChanged}
         @jump-to-index=${this._onJumpToIndex}
         @field-selected=${this._onFieldSelected}
+        @hover-index=${this._onHoverIndex}
       >
         <trace-header
           .header=${this._header}
@@ -124,6 +127,7 @@ export class AppShell extends LitElement {
             .store=${this._store}
             .field=${this._chartField}
             .highlightIndices=${this._highlightIndices}
+            .cursorIndex=${this._hoverIndex}
           ></trace-chart>
         ` : ''}
 
@@ -157,6 +161,10 @@ export class AppShell extends LitElement {
     this._chartField = e.detail.field;
   }
 
+  _onHoverIndex(e) {
+    this._hoverIndex = e.detail.index;
+  }
+
   _reset() {
     if (this._store) {
       this._store.free();
@@ -166,6 +174,7 @@ export class AppShell extends LitElement {
     this._filename = null;
     this._highlightIndices = null;
     this._chartField = null;
+    this._hoverIndex = null;
   }
 }
 

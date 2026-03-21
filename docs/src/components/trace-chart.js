@@ -71,6 +71,7 @@ export class TraceChart extends LitElement {
     store: { type: Object },
     field: { type: String },
     highlightIndices: { type: Object },
+    cursorIndex: { type: Number },
     _viewStart: { state: true },
     _viewEnd: { state: true },
     _tooltip: { state: true },
@@ -82,6 +83,7 @@ export class TraceChart extends LitElement {
     this.store = null;
     this.field = null;
     this.highlightIndices = null;
+    this.cursorIndex = null;
     this._viewStart = 0;
     this._viewEnd = 0;
     this._tooltip = null;
@@ -113,7 +115,7 @@ export class TraceChart extends LitElement {
         this.updateComplete.then(() => this._draw());
       }
     }
-    if (changed.has('highlightIndices') || changed.has('_viewStart') || changed.has('_viewEnd')) {
+    if (changed.has('highlightIndices') || changed.has('cursorIndex') || changed.has('_viewStart') || changed.has('_viewEnd')) {
       this.updateComplete.then(() => this._draw());
     }
   }
@@ -252,6 +254,33 @@ export class TraceChart extends LitElement {
     ctx.strokeStyle = '#58a6ff';
     ctx.lineWidth = 1;
     ctx.stroke();
+
+    // Cursor line from hovered table row
+    if (this.cursorIndex != null && this.cursorIndex >= start && this.cursorIndex < end) {
+      const frac = (this.cursorIndex - start) / (end - start);
+      const cx = PADDING.left + frac * plotW;
+      ctx.strokeStyle = '#f0883e';
+      ctx.lineWidth = 1;
+      ctx.setLineDash([4, 3]);
+      ctx.beginPath();
+      ctx.moveTo(cx, PADDING.top);
+      ctx.lineTo(cx, PADDING.top + plotH);
+      ctx.stroke();
+      ctx.setLineDash([]);
+
+      // Show the value at cursor
+      const val = this.store.entry(this.cursorIndex);
+      if (val) {
+        const yVal = val[this.field];
+        if (yVal != null && typeof yVal === 'number') {
+          const cy = toY(yVal);
+          ctx.fillStyle = '#f0883e';
+          ctx.beginPath();
+          ctx.arc(cx, cy, 3, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      }
+    }
 
     // Y axis labels
     ctx.fillStyle = '#8b949e';
