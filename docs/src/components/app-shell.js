@@ -1,6 +1,7 @@
 import { LitElement, html, css } from 'lit';
 import './file-loader.js';
 import './test-picker.js';
+import './compare-bar.js';
 import './trace-header.js';
 import './trace-table.js';
 import './trace-query.js';
@@ -83,6 +84,19 @@ export class AppShell extends LitElement {
     .compare-header .vs { color: var(--text-muted); }
     .compare-header .name-b { color: #d29922; font-weight: 600; font-family: var(--mono); }
     .compare-header .entries { color: var(--text-muted); margin-left: auto; }
+    .compare-header .exit-btn {
+      padding: 2px 8px;
+      background: none;
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      color: var(--text-muted);
+      cursor: pointer;
+      font-size: 0.75rem;
+    }
+    .compare-header .exit-btn:hover {
+      border-color: var(--red);
+      color: var(--red);
+    }
   `;
 
   static properties = {
@@ -92,6 +106,8 @@ export class AppShell extends LitElement {
     _filename: { state: true },
     _nameA: { state: true },
     _nameB: { state: true },
+    _testRom: { state: true },
+    _emulator: { state: true },
     _highlightIndices: { state: true },
     _chartField: { state: true },
     _hoverIndex: { state: true },
@@ -105,6 +121,8 @@ export class AppShell extends LitElement {
     this._filename = null;
     this._nameA = '';
     this._nameB = '';
+    this._testRom = null;
+    this._emulator = null;
     this._highlightIndices = null;
     this._chartField = null;
     this._hoverIndex = null;
@@ -124,10 +142,7 @@ export class AppShell extends LitElement {
           ? (this._storeB ? this._renderCompare() : this._renderViewer())
           : html`
             <file-loader @trace-loaded=${this._onTraceLoaded}></file-loader>
-            <test-picker
-              @trace-loaded=${this._onTraceLoaded}
-              @trace-compare=${this._onTraceCompare}
-            ></test-picker>
+            <test-picker @trace-loaded=${this._onTraceLoaded}></test-picker>
           `
         }
       </div>
@@ -142,12 +157,18 @@ export class AppShell extends LitElement {
         @jump-to-index=${this._onJumpToIndex}
         @field-selected=${this._onFieldSelected}
         @hover-index=${this._onHoverIndex}
+        @compare-loaded=${this._onCompareLoaded}
       >
         <trace-header
           .header=${this._header}
           .entryCount=${this._store.entryCount()}
           .filename=${this._filename}
         ></trace-header>
+
+        <compare-bar
+          .testRom=${this._testRom}
+          .emulator=${this._emulator}
+        ></compare-bar>
 
         <trace-query .store=${this._store} .fields=${fields}></trace-query>
 
@@ -187,7 +208,8 @@ export class AppShell extends LitElement {
           <span class="name-a">${this._nameA}</span>
           <span class="vs">vs</span>
           <span class="name-b">${this._nameB}</span>
-          <span class="entries">${minCount.toLocaleString()} entries (sequence aligned)</span>
+          <span class="entries">${minCount.toLocaleString()} entries</span>
+          <button class="exit-btn" @click=${this._exitCompare}>exit compare</button>
         </div>
 
         <trace-query
@@ -222,26 +244,33 @@ export class AppShell extends LitElement {
   }
 
   _onTraceLoaded(e) {
-    const { store, filename } = e.detail;
+    const { store, filename, testRom, emulator } = e.detail;
     this._store = store;
     this._storeB = null;
     this._header = store.header();
     this._filename = filename;
-    this._nameA = '';
+    this._nameA = emulator || filename;
     this._nameB = '';
+    this._testRom = testRom || null;
+    this._emulator = emulator || null;
     this._highlightIndices = null;
     this._chartField = null;
     this._hoverIndex = null;
   }
 
-  _onTraceCompare(e) {
-    const { storeA, storeB, nameA, nameB } = e.detail;
-    this._store = storeA;
-    this._storeB = storeB;
-    this._header = storeA.header();
-    this._filename = `${nameA} vs ${nameB}`;
-    this._nameA = nameA;
-    this._nameB = nameB;
+  _onCompareLoaded(e) {
+    const { store, name } = e.detail;
+    this._storeB = store;
+    this._nameB = name;
+    this._highlightIndices = null;
+    this._chartField = null;
+    this._hoverIndex = null;
+  }
+
+  _exitCompare() {
+    if (this._storeB) this._storeB.free();
+    this._storeB = null;
+    this._nameB = '';
     this._highlightIndices = null;
     this._chartField = null;
     this._hoverIndex = null;
@@ -274,6 +303,8 @@ export class AppShell extends LitElement {
     this._filename = null;
     this._nameA = '';
     this._nameB = '';
+    this._testRom = null;
+    this._emulator = null;
     this._highlightIndices = null;
     this._chartField = null;
     this._hoverIndex = null;
