@@ -243,7 +243,6 @@ fn field_matches_value(entry: &TraceEntry, field: &str, value: &str) -> bool {
     }
 }
 
-/// Get a field as u8 (delegates to TraceEntry::get_u8).
 fn entry_field_u8(entry: &TraceEntry, field: &str) -> Option<u8> {
     entry.get_u8(field)
 }

@@ -51,28 +51,14 @@ impl TraceEntry {
         self.fields.get(name)
     }
 
-    /// Get a field as u8 (works for both numeric and legacy hex string values).
+    /// Get a field as u8.
     pub fn get_u8(&self, name: &str) -> Option<u8> {
-        self.fields.get(name).and_then(|v| match v {
-            Value::Number(n) => n.as_u64().map(|n| n as u8),
-            Value::String(s) => {
-                let s = s.strip_prefix("0x").or_else(|| s.strip_prefix("0X")).unwrap_or(s);
-                u8::from_str_radix(s, 16).ok()
-            }
-            _ => None,
-        })
+        self.fields.get(name).and_then(|v| v.as_u64()).map(|n| n as u8)
     }
 
-    /// Get a field as u16 (works for both numeric and legacy hex string values).
+    /// Get a field as u16.
     pub fn get_u16(&self, name: &str) -> Option<u16> {
-        self.fields.get(name).and_then(|v| match v {
-            Value::Number(n) => n.as_u64().map(|n| n as u16),
-            Value::String(s) => {
-                let s = s.strip_prefix("0x").or_else(|| s.strip_prefix("0X")).unwrap_or(s);
-                u16::from_str_radix(s, 16).ok()
-            }
-            _ => None,
-        })
+        self.fields.get(name).and_then(|v| v.as_u64()).map(|n| n as u16)
     }
 
     /// Serialize to a JSON object.
