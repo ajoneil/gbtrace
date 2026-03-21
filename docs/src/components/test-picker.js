@@ -28,6 +28,9 @@ function traceUrl(rom, emulator) {
   return `tests/blargg/${base}_${emulator}.gbtrace.parquet`;
 }
 
+// Export for use by the compare bar
+export { TEST_SUITES, EMULATORS, traceUrl };
+
 export class TestPicker extends LitElement {
   static styles = css`
     :host { display: block; }
@@ -70,16 +73,10 @@ export class TestPicker extends LitElement {
       font-size: 0.85rem;
     }
 
-    .section-label {
-      font-size: 0.75rem;
-      color: var(--text-muted);
-      margin-top: 10px;
-      margin-bottom: 4px;
-    }
-
     .emu-btns {
       display: flex;
       gap: 4px;
+      margin-top: 8px;
     }
 
     .emu-btn {
@@ -98,30 +95,6 @@ export class TestPicker extends LitElement {
       color: var(--accent);
     }
     .emu-btn:disabled {
-      opacity: 0.5;
-      cursor: not-allowed;
-    }
-
-    .compare-btns {
-      display: flex;
-      gap: 4px;
-    }
-    .compare-btn {
-      padding: 5px 10px;
-      background: var(--bg-secondary);
-      border: 1px solid var(--border);
-      border-radius: 6px;
-      color: var(--text-muted);
-      cursor: pointer;
-      font-size: 0.75rem;
-      font-family: inherit;
-      transition: border-color 0.15s, color 0.15s;
-    }
-    .compare-btn:hover {
-      border-color: var(--yellow);
-      color: var(--yellow);
-    }
-    .compare-btn:disabled {
       opacity: 0.5;
       cursor: not-allowed;
     }
@@ -165,14 +138,6 @@ export class TestPicker extends LitElement {
     const suite = TEST_SUITES[0];
     const test = suite.tests[this._selectedTest];
 
-    // Generate compare pairs
-    const pairs = [];
-    for (let i = 0; i < EMULATORS.length; i++) {
-      for (let j = i + 1; j < EMULATORS.length; j++) {
-        pairs.push([EMULATORS[i], EMULATORS[j]]);
-      }
-    }
-
     return html`
       <div class="picker">
         <h3>Or load a test trace</h3>
@@ -184,7 +149,6 @@ export class TestPicker extends LitElement {
             `)}
           </select>
         </div>
-        <div class="section-label">View single</div>
         <div class="emu-btns">
           ${EMULATORS.map(emu => html`
             <button
@@ -192,16 +156,6 @@ export class TestPicker extends LitElement {
               ?disabled=${this._loading !== null}
               @click=${() => this._load(test, emu)}
             >${emu}</button>
-          `)}
-        </div>
-        <div class="section-label">Compare</div>
-        <div class="compare-btns">
-          ${pairs.map(([a, b]) => html`
-            <button
-              class="compare-btn"
-              ?disabled=${this._loading !== null}
-              @click=${() => this._loadCompare(test, a, b)}
-            >${a} vs ${b}</button>
           `)}
         </div>
         <div class="meta">
@@ -232,43 +186,11 @@ export class TestPicker extends LitElement {
       const bytes = new Uint8Array(buffer);
       const store = await createTraceStore(bytes);
       this.dispatchEvent(new CustomEvent('trace-loaded', {
-        detail: { store, filename },
-        bubbles: true,
-        composed: true,
-      }));
-    } catch (err) {
-      this._error = `Failed to load: ${err.message || err}`;
-    } finally {
-      this._loading = null;
-    }
-  }
-
-  async _loadCompare(test, emuA, emuB) {
-    this._loading = `${emuA} + ${emuB}`;
-    this._error = null;
-
-    try {
-      const [respA, respB] = await Promise.all([
-        fetch(traceUrl(test.rom, emuA)),
-        fetch(traceUrl(test.rom, emuB)),
-      ]);
-      if (!respA.ok) throw new Error(`${emuA}: ${respA.status}`);
-      if (!respB.ok) throw new Error(`${emuB}: ${respB.status}`);
-
-      const [bufA, bufB] = await Promise.all([
-        respA.arrayBuffer(),
-        respB.arrayBuffer(),
-      ]);
-
-      const [storeA, storeB] = await Promise.all([
-        createTraceStore(new Uint8Array(bufA)),
-        createTraceStore(new Uint8Array(bufB)),
-      ]);
-
-      this.dispatchEvent(new CustomEvent('trace-compare', {
         detail: {
-          storeA, storeB,
-          nameA: emuA, nameB: emuB,
+          store, filename,
+          // Pass test metadata so the viewer can offer comparison
+          testRom: test.rom,
+          emulator,
         },
         bubbles: true,
         composed: true,
