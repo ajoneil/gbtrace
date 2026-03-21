@@ -84,6 +84,24 @@ export class AppShell extends LitElement {
     .compare-header .vs { color: var(--text-muted); }
     .compare-header .name-b { color: #d29922; font-weight: 600; font-family: var(--mono); }
     .compare-header .entries { color: var(--text-muted); margin-left: auto; }
+    .compare-header .match-pct {
+      font-family: var(--mono);
+      font-weight: 600;
+    }
+    .compare-header .match-pct.good { color: var(--green); }
+    .compare-header .match-pct.partial { color: var(--yellow); }
+    .compare-header .match-pct.bad { color: var(--red); }
+    .diff-fields {
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+      font-size: 0.75rem;
+      font-family: var(--mono);
+      color: var(--text-muted);
+    }
+    .diff-fields .diff-field {
+      color: var(--red);
+    }
     .compare-header .exit-btn {
       padding: 2px 8px;
       background: none;
@@ -111,6 +129,7 @@ export class AppShell extends LitElement {
     _highlightIndices: { state: true },
     _chartField: { state: true },
     _hoverIndex: { state: true },
+    _diffStats: { state: true },
   };
 
   constructor() {
@@ -126,6 +145,7 @@ export class AppShell extends LitElement {
     this._highlightIndices = null;
     this._chartField = null;
     this._hoverIndex = null;
+    this._diffStats = null;
   }
 
   render() {
@@ -208,6 +228,18 @@ export class AppShell extends LitElement {
           <span class="name-a">${this._nameA}</span>
           <span class="vs">vs</span>
           <span class="name-b">${this._nameB}</span>
+          ${this._diffStats ? html`
+            <span class="match-pct ${this._diffStats.match_pct === 100 ? 'good' : this._diffStats.match_pct > 90 ? 'partial' : 'bad'}">
+              ${this._diffStats.match_pct}% match
+            </span>
+            ${this._diffStats.fields.length > 0 ? html`
+              <span class="diff-fields">
+                diffs in ${this._diffStats.fields.map(([name, count]) => html`
+                  <span class="diff-field">${name}<span style="color:var(--text-muted)">(${count.toLocaleString()})</span></span>
+                `)}
+              </span>
+            ` : ''}
+          ` : ''}
           <span class="entries">${minCount.toLocaleString()} entries</span>
           <button class="exit-btn" @click=${this._exitCompare}>exit compare</button>
         </div>
@@ -265,6 +297,12 @@ export class AppShell extends LitElement {
     this._highlightIndices = null;
     this._chartField = null;
     this._hoverIndex = null;
+    try {
+      this._diffStats = this._store.diffStats(store);
+    } catch (err) {
+      console.error('Failed to compute diff stats:', err);
+      this._diffStats = null;
+    }
   }
 
   _exitCompare() {
@@ -274,6 +312,7 @@ export class AppShell extends LitElement {
     this._highlightIndices = null;
     this._chartField = null;
     this._hoverIndex = null;
+    this._diffStats = null;
   }
 
   _onHighlightChanged(e) {
