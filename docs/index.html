@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>gbtrace — Game Boy Trace Viewer</title>
+  <script type="importmap">
+  {
+    "imports": {
+      "lit": "https://esm.run/lit@3",
+      "lit/": "https://esm.run/lit@3/"
+    }
+  }
+  </script>
+  <style>
+    :root {
+      --bg: #0d1117;
+      --bg-surface: #161b22;
+      --bg-hover: #1c2129;
+      --border: #30363d;
+      --text: #e6edf3;
+      --text-muted: #8b949e;
+      --accent: #58a6ff;
+      --accent-subtle: #1f6feb33;
+      --green: #3fb950;
+      --red: #f85149;
+      --yellow: #d29922;
+      --mono: 'SF Mono', 'Cascadia Code', 'Fira Code', Consolas, monospace;
+      --sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: var(--sans);
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+    }
+  </style>
+</head>
+<body>
+  <app-shell></app-shell>
+  <script type="module" src="src/components/app-shell.js"></script>
+</body>
+</html>

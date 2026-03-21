@@ -22,9 +22,9 @@ enum Command {
     },
     /// Convert between trace file formats (JSONL <-> Parquet)
     Convert {
-        /// Input file (.gbtrace, .gbtrace.gz, or .parquet)
+        /// Input file (.gbtrace, .gbtrace.gz, or .gbtrace.parquet)
         input: PathBuf,
-        /// Output file (.gbtrace, .gbtrace.gz, or .parquet)
+        /// Output file (.gbtrace, .gbtrace.gz, or .gbtrace.parquet)
         #[arg(short, long)]
         output: Option<PathBuf>,
     },
@@ -187,10 +187,10 @@ fn cmd_convert(input: &PathBuf, output: Option<PathBuf>) -> i32 {
         if ext == "parquet" {
             input.with_extension("gbtrace")
         } else {
-            // .gbtrace or .gbtrace.gz -> .parquet
+            // .gbtrace or .gbtrace.gz -> .gbtrace.parquet
             let stem = input.file_stem().and_then(|s| s.to_str()).unwrap_or("trace");
             let stem = stem.strip_suffix(".gbtrace").unwrap_or(stem);
-            input.with_file_name(format!("{stem}.parquet"))
+            input.with_file_name(format!("{stem}.gbtrace.parquet"))
         }
     });
 

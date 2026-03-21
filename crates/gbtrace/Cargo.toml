@@ -6,7 +6,7 @@ description = "Reader, writer, and profile parser for the GB Trace emulator comp
 
 [features]
 default = []
-parquet = ["dep:arrow", "dep:parquet"]
+parquet = ["dep:arrow", "dep:bytes", "dep:parquet"]
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }
@@ -16,6 +16,7 @@ flate2 = "1"
 sha2 = "0.10"
 thiserror = "2"
 arrow = { version = "54", optional = true, default-features = false }
+bytes = { version = "1", optional = true }
 parquet = { version = "54", optional = true, features = ["zstd"] }
 
 [dev-dependencies]
