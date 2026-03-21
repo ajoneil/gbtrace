@@ -220,8 +220,7 @@ struct TraceModule {
     struct mDebuggerModule d; // must be first
 };
 
-static void trace_custom(struct mDebuggerModule *mod) {
-    struct mCore *core = mod->p->core;
+static void emit_entry(struct mCore *core) {
     struct SM83Core *cpu = core->cpu;
     struct GB *gb = core->board;
 
@@ -254,6 +253,10 @@ static void trace_custom(struct mDebuggerModule *mod) {
     }
 
     fprintf(g_output, "}\n");
+}
+
+static void trace_custom(struct mDebuggerModule *mod) {
+    emit_entry(mod->p->core);
 }
 
 // --- SHA-256 ---
@@ -290,7 +293,7 @@ static void write_header(FILE *out, const struct Profile *prof,
         fprintf(out, "\"%s\"", prof->fields[i]);
     }
 
-    fprintf(out, "],\"trigger\":\"%s\"}\n", prof->trigger);
+    fprintf(out, "],\"trigger\":\"%s\",\"cy_unit\":\"tcycle\"}\n", prof->trigger);
 }
 
 // --- Main ---
@@ -420,6 +423,10 @@ int main(int argc, char *argv[]) {
     // Write header
     char *rom_hash = sha256_file(rom_path);
     write_header(g_output, &g_profile, rom_hash, model, boot_rom_info);
+
+    // Emit the initial CPU state (the debugger callback misses the first
+    // instruction because it's attached after reset)
+    emit_entry(g_core);
 
     // Set up debugger with trace module
     struct mDebugger debugger;

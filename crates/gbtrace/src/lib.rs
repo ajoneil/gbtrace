@@ -11,7 +11,7 @@ pub mod parquet;
 
 pub use entry::TraceEntry;
 pub use error::Error;
-pub use header::{BootRom, TraceHeader, Trigger};
+pub use header::{BootRom, CycleUnit, TraceHeader, Trigger};
 pub use profile::{FieldType, Profile};
 pub use query::{Condition, ConditionEvaluator};
 pub use reader::TraceReader;

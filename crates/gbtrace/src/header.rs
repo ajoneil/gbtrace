@@ -59,6 +59,36 @@ impl<'de> Deserialize<'de> for BootRom {
     }
 }
 
+/// Unit of the `cy` field in trace entries.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum CycleUnit {
+    /// T-cycles at 4.194304 MHz (highest precision).
+    Tcycle,
+    /// M-cycles at 1.048576 MHz (1 M-cycle = 4 T-cycles).
+    Mcycle,
+    /// Instruction count (no timing information, just sequence order).
+    Instruction,
+}
+
+impl Default for CycleUnit {
+    fn default() -> Self {
+        CycleUnit::Tcycle
+    }
+}
+
+impl CycleUnit {
+    /// Convert a cycle value from this unit to T-cycles.
+    /// Returns None for instruction counts (no meaningful conversion).
+    pub fn to_tcycles(&self, value: u64) -> Option<u64> {
+        match self {
+            CycleUnit::Tcycle => Some(value),
+            CycleUnit::Mcycle => Some(value * 4),
+            CycleUnit::Instruction => None,
+        }
+    }
+}
+
 /// When trace entries are emitted.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -102,6 +132,10 @@ pub struct TraceHeader {
 
     /// When entries are emitted.
     pub trigger: Trigger,
+
+    /// Unit of the `cy` field. Defaults to `tcycle` for backward compatibility.
+    #[serde(default)]
+    pub cy_unit: CycleUnit,
 
     /// Optional freeform notes.
     #[serde(default, skip_serializing_if = "String::is_empty")]

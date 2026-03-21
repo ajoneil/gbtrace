@@ -85,6 +85,9 @@ enum Command {
         /// Ignore boot ROM entries (skip to first pc=0x0100)
         #[arg(long)]
         skip_boot: bool,
+        /// Alignment strategy: auto (default), cycle, or sequence
+        #[arg(long, default_value = "auto")]
+        align: String,
     },
 }
 
@@ -108,7 +111,8 @@ fn main() {
             fields,
             exclude,
             skip_boot,
-        } => cmd_diff(&trace_a, &trace_b, max, context, fields, exclude, skip_boot),
+            align,
+        } => cmd_diff(&trace_a, &trace_b, max, context, fields, exclude, skip_boot, &align),
     };
     process::exit(code);
 }
@@ -133,6 +137,7 @@ fn cmd_info(path: &PathBuf) -> i32 {
     println!("Model:     {}", h.model);
     println!("Profile:   {}", h.profile);
     println!("Trigger:   {:?}", h.trigger);
+    println!("Cy unit:   {:?}", h.cy_unit);
     println!("Boot ROM:  {}", format_boot_rom(&h.boot_rom));
     println!("ROM hash:  {}", h.rom_sha256);
     println!("Fields:    {}", h.fields.join(", "));
@@ -670,16 +675,18 @@ fn load_trace(
     all_fields: &[String],
     skip_boot: bool,
     name: &str,
+    normalize_cycles: bool,
 ) -> Result<(gbtrace::TraceHeader, Vec<(u64, Row)>), String> {
     let reader = AnyTraceReader::open(path).map_err(|e| format!("Error opening {}: {e}", path.display()))?;
     let header = reader.header().clone();
+    let cy_unit = &header.cy_unit;
 
     let mut rows: Vec<(u64, Row)> = Vec::new();
     let mut skipping_boot = skip_boot;
 
     for result in reader {
         let entry = result.map_err(|e| format!("Error reading {}: {e}", path.display()))?;
-        let cy = entry.cy().unwrap_or(0);
+        let raw_cy = entry.cy().unwrap_or(0);
 
         if skipping_boot {
             if let Some(Value::String(pc)) = entry.get("pc") {
@@ -693,23 +700,19 @@ fn load_trace(
             }
         }
 
+        // Normalize to T-cycles for cycle-based alignment
+        let cy = if normalize_cycles {
+            cy_unit.to_tcycles(raw_cy).unwrap_or(raw_cy)
+        } else {
+            raw_cy
+        };
+
         let row = entry_to_row(&entry, all_fields);
         rows.push((cy, row));
     }
 
-    if skip_boot && !skipping_boot {
-        let original_len = rows.len(); // can't know skipped count easily, but we can report
-        // We only have post-skip rows. The skip count is reported by the caller.
-        let _ = original_len;
-    }
-
-    if skip_boot {
-        if rows.is_empty() && skipping_boot {
-            eprintln!("  WARNING: {name} has no entry with pc=0x0100, cannot skip boot");
-        } else {
-            // Count comes from the difference with total, but we don't track that.
-            // We just note if boot was skipped.
-        }
+    if skip_boot && rows.is_empty() && skipping_boot {
+        eprintln!("  WARNING: {name} has no entry with pc=0x0100, cannot skip boot");
     }
 
     Ok((header, rows))
@@ -723,6 +726,7 @@ fn cmd_diff(
     fields_filter: Option<String>,
     exclude_filter: Option<String>,
     skip_boot: bool,
+    align: &str,
 ) -> i32 {
     // Peek headers first to get field lists and names
     let reader_a = match AnyTraceReader::open(path_a) {
@@ -742,7 +746,34 @@ fn cmd_diff(
     let name_a = &header_a.emulator;
     let name_b = &header_b.emulator;
 
+    // Determine alignment strategy
+    let use_sequence = match align {
+        "sequence" => true,
+        "cycle" => {
+            if header_a.cy_unit == gbtrace::CycleUnit::Instruction
+                || header_b.cy_unit == gbtrace::CycleUnit::Instruction
+            {
+                eprintln!("ERROR: --align cycle requested but one trace uses instruction counting");
+                return 1;
+            }
+            false
+        }
+        _ => {
+            // auto: use sequence if either trace uses instruction counting
+            header_a.cy_unit == gbtrace::CycleUnit::Instruction
+                || header_b.cy_unit == gbtrace::CycleUnit::Instruction
+        }
+    };
+
     println!("Comparing: {name_a} vs {name_b}");
+
+    // Report cy_unit info
+    if header_a.cy_unit != header_b.cy_unit {
+        println!("  Cycle units: {name_a}={:?}  {name_b}={:?}", header_a.cy_unit, header_b.cy_unit);
+    }
+    if use_sequence {
+        println!("  Alignment: sequence (by instruction index)");
+    }
 
     // Boot ROM info
     let boot_a = format_boot_rom(&header_a.boot_rom);
@@ -811,20 +842,21 @@ fn cmd_diff(
         }
     }
 
-    // Load traces
-    let (_, mut rows_a) = match load_trace(path_a, &all_fields, skip_boot, name_a) {
+    // Load traces (normalize cycles to T-cycles for cycle-based alignment)
+    let normalize = !use_sequence;
+    let (_, mut rows_a) = match load_trace(path_a, &all_fields, skip_boot, name_a, normalize) {
         Ok(v) => v,
         Err(e) => { eprintln!("{e}"); return 1; }
     };
-    let (_, mut rows_b) = match load_trace(path_b, &all_fields, skip_boot, name_b) {
+    let (_, mut rows_b) = match load_trace(path_b, &all_fields, skip_boot, name_b, normalize) {
         Ok(v) => v,
         Err(e) => { eprintln!("{e}"); return 1; }
     };
 
     println!("  Entries:  {} vs {}", rows_a.len(), rows_b.len());
 
-    // Rebase cycle counts if skip_boot and bases differ
-    if skip_boot && !rows_a.is_empty() && !rows_b.is_empty() {
+    // Rebase cycle counts if skip_boot and bases differ (only for cycle alignment)
+    if !use_sequence && skip_boot && !rows_a.is_empty() && !rows_b.is_empty() {
         let base_a = rows_a[0].0;
         let base_b = rows_b[0].0;
         if base_a != base_b {
@@ -840,47 +872,74 @@ fn cmd_diff(
         }
     }
 
-    // Merge-join by cycle count (both are sorted by cy)
+    // Align traces
     let mut merged: Vec<MergedRow> = Vec::new();
-    let mut i = 0;
-    let mut j = 0;
-    while i < rows_a.len() && j < rows_b.len() {
-        let cy_a = rows_a[i].0;
-        let cy_b = rows_b[j].0;
-        match cy_a.cmp(&cy_b) {
-            std::cmp::Ordering::Equal => {
-                merged.push(MergedRow {
-                    cy: cy_a,
-                    vals_a: rows_a[i].1.clone(),
-                    vals_b: rows_b[j].1.clone(),
-                });
-                i += 1;
-                j += 1;
+
+    if use_sequence {
+        // Sequence alignment: match by entry index (1st vs 1st, 2nd vs 2nd)
+        let len = rows_a.len().min(rows_b.len());
+        for idx in 0..len {
+            merged.push(MergedRow {
+                cy: idx as u64,
+                vals_a: rows_a[idx].1.clone(),
+                vals_b: rows_b[idx].1.clone(),
+            });
+        }
+        if rows_a.len() != rows_b.len() {
+            println!(
+                "  WARNING: traces differ in length ({} vs {}), comparing first {len}",
+                rows_a.len(),
+                rows_b.len()
+            );
+        }
+    } else {
+        // Merge-join by cycle count (both are sorted by cy)
+        let mut i = 0;
+        let mut j = 0;
+        while i < rows_a.len() && j < rows_b.len() {
+            let cy_a = rows_a[i].0;
+            let cy_b = rows_b[j].0;
+            match cy_a.cmp(&cy_b) {
+                std::cmp::Ordering::Equal => {
+                    merged.push(MergedRow {
+                        cy: cy_a,
+                        vals_a: rows_a[i].1.clone(),
+                        vals_b: rows_b[j].1.clone(),
+                    });
+                    i += 1;
+                    j += 1;
+                }
+                std::cmp::Ordering::Less => i += 1,
+                std::cmp::Ordering::Greater => j += 1,
             }
-            std::cmp::Ordering::Less => i += 1,
-            std::cmp::Ordering::Greater => j += 1,
         }
     }
 
     if merged.is_empty() {
-        println!("ERROR: No matching cycle counts. Traces may not be aligned.");
-        if !rows_a.is_empty() && !rows_b.is_empty() {
-            println!(
-                "  {name_a} cy range: {} .. {}",
-                rows_a.first().unwrap().0,
-                rows_a.last().unwrap().0
-            );
-            println!(
-                "  {name_b} cy range: {} .. {}",
-                rows_b.first().unwrap().0,
-                rows_b.last().unwrap().0
-            );
+        if use_sequence {
+            println!("ERROR: One or both traces are empty.");
+        } else {
+            println!("ERROR: No matching cycle counts. Traces may not be aligned.");
+            println!("  HINT: use --align sequence to compare by instruction order instead");
+            if !rows_a.is_empty() && !rows_b.is_empty() {
+                println!(
+                    "  {name_a} cy range: {} .. {}",
+                    rows_a.first().unwrap().0,
+                    rows_a.last().unwrap().0
+                );
+                println!(
+                    "  {name_b} cy range: {} .. {}",
+                    rows_b.first().unwrap().0,
+                    rows_b.last().unwrap().0
+                );
+            }
         }
         return 1;
     }
 
     let matched_pct = merged.len() as f64 / rows_a.len().max(rows_b.len()) as f64 * 100.0;
-    println!("Aligned {} entries by cycle count ({matched_pct:.1}% overlap)", merged.len());
+    let align_label = if use_sequence { "instruction index" } else { "cycle count" };
+    println!("Aligned {} entries by {align_label} ({matched_pct:.1}% overlap)", merged.len());
 
     // Find divergences per field
     let mut field_divergences: Vec<FieldDivergence> = Vec::new();
