@@ -376,14 +376,9 @@ fn cmd_strip_boot(input: &PathBuf, output: Option<PathBuf>) -> i32 {
         };
 
         if skipping {
-            if let Some(Value::String(pc)) = entry.get("pc") {
-                if pc == "0x0100" {
-                    skipping = false;
-                    cy_base = entry.cy();
-                } else {
-                    skipped += 1;
-                    continue;
-                }
+            if entry.get_u16("pc") == Some(0x0100) {
+                skipping = false;
+                cy_base = entry.cy();
             } else {
                 skipped += 1;
                 continue;
@@ -513,7 +508,7 @@ fn print_entry_fields(entry: &TraceEntry, fields: &[String]) {
     for f in fields {
         if f == "cy" { continue; }
         if let Some(v) = entry.get(f) {
-            print!(" {f}={}", value_to_string(v));
+            print!(" {f}={}", display_val(&value_to_string(v)));
         }
     }
 }
@@ -622,6 +617,7 @@ fn format_boot_rom(boot_rom: &gbtrace::BootRom) -> String {
 /// We store the string form for display and comparison (matching the JSONL semantics).
 type Row = BTreeMap<String, String>;
 
+/// Convert a JSON value to string for internal comparison.
 fn value_to_string(v: &Value) -> String {
     match v {
         Value::String(s) => s.clone(),
@@ -630,6 +626,21 @@ fn value_to_string(v: &Value) -> String {
         Value::Null => "null".to_string(),
         _ => v.to_string(),
     }
+}
+
+/// Format a value for display: numbers as zero-padded lowercase hex, strings as-is.
+fn display_val(s: &str) -> String {
+    // Handle legacy 0x-prefixed strings
+    if let Some(hex) = s.strip_prefix("0x").or_else(|| s.strip_prefix("0X")) {
+        return hex.to_lowercase();
+    }
+    // If it's a decimal number, format as zero-padded hex
+    if let Ok(n) = s.parse::<u64>() {
+        if n <= 0xFF { return format!("{n:02x}"); }
+        if n <= 0xFFFF { return format!("{n:04x}"); }
+        return format!("{n:x}");
+    }
+    s.to_string()
 }
 
 fn entry_to_row(entry: &TraceEntry, fields: &[String]) -> Row {
@@ -689,12 +700,8 @@ fn load_trace(
         let raw_cy = entry.cy().unwrap_or(0);
 
         if skipping_boot {
-            if let Some(Value::String(pc)) = entry.get("pc") {
-                if pc == "0x0100" {
-                    skipping_boot = false;
-                } else {
-                    continue;
-                }
+            if entry.get_u16("pc") == Some(0x0100) {
+                skipping_boot = false;
             } else {
                 continue;
             }
@@ -983,7 +990,7 @@ fn cmd_diff(
     for d in &field_divergences {
         println!(
             "  {:6}  {:>8} differences, first at cy={}: {name_a}={}  {name_b}={}",
-            d.field, d.count, d.first_cy, d.val_a, d.val_b
+            d.field, d.count, d.first_cy, display_val(&d.val_a), display_val(&d.val_b)
         );
     }
 
@@ -1106,16 +1113,16 @@ fn print_entry_row(
         let diff_strs: Vec<String> = diff_fields
             .iter()
             .map(|f| {
-                let a = row.vals_a.get(f).map(|s| s.as_str()).unwrap_or("?");
-                let b = row.vals_b.get(f).map(|s| s.as_str()).unwrap_or("?");
+                let a = row.vals_a.get(f).map(|s| display_val(s)).unwrap_or_else(|| "?".into());
+                let b = row.vals_b.get(f).map(|s| display_val(s)).unwrap_or_else(|| "?".into());
                 format!("{f}: {a} vs {b}")
             })
             .collect();
         println!("{marker} cy={:>10}  {}", row.cy, diff_strs.join(", "));
     } else {
-        let pc = row.vals_a.get("pc").map(|s| s.as_str()).unwrap_or("?");
-        let op = row.vals_a.get("op").map(|s| s.as_str()).unwrap_or("?");
-        let a = row.vals_a.get("a").map(|s| s.as_str()).unwrap_or("?");
+        let pc = row.vals_a.get("pc").map(|s| display_val(s)).unwrap_or_else(|| "?".into());
+        let op = row.vals_a.get("op").map(|s| display_val(s)).unwrap_or_else(|| "?".into());
+        let a = row.vals_a.get("a").map(|s| display_val(s)).unwrap_or_else(|| "?".into());
         println!("{marker} cy={:>10}  pc={pc} op={op} a={a}  (match)", row.cy);
     }
 }

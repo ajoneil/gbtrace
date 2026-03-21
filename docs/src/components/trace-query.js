@@ -2,18 +2,30 @@ import { LitElement, html, css } from 'lit';
 import { displayVal, normalizeInput } from '../lib/format.js';
 
 const SEMANTIC_CONDITIONS = [
-  { label: 'HBlank', query: 'ppu enters mode 0', needs: 'stat' },
-  { label: 'VBlank', query: 'ppu enters mode 1', needs: 'stat' },
-  { label: 'OAM Scan', query: 'ppu enters mode 2', needs: 'stat' },
-  { label: 'Drawing', query: 'ppu enters mode 3', needs: 'stat' },
-  { label: 'LCD On', query: 'lcd on', needs: 'lcdc' },
-  { label: 'LCD Off', query: 'lcd off', needs: 'lcdc' },
-  { label: 'Timer Overflow', query: 'timer overflow', needs: 'tima' },
-  { label: 'VBlank IRQ', query: 'interrupt 0', needs: 'if_' },
-  { label: 'STAT IRQ', query: 'interrupt 1', needs: 'if_' },
-  { label: 'Timer IRQ', query: 'interrupt 2', needs: 'if_' },
-  { label: 'Serial IRQ', query: 'interrupt 3', needs: 'if_' },
-  { label: 'Joypad IRQ', query: 'interrupt 4', needs: 'if_' },
+  // PPU
+  { group: 'PPU', label: 'HBlank', query: 'ppu enters mode 0', needs: 'stat' },
+  { group: 'PPU', label: 'VBlank', query: 'ppu enters mode 1', needs: 'stat' },
+  { group: 'PPU', label: 'OAM Scan', query: 'ppu enters mode 2', needs: 'stat' },
+  { group: 'PPU', label: 'Drawing', query: 'ppu enters mode 3', needs: 'stat' },
+  { group: 'PPU', label: 'LCD On', query: 'lcd on', needs: 'lcdc' },
+  { group: 'PPU', label: 'LCD Off', query: 'lcd off', needs: 'lcdc' },
+  // Flags
+  { group: 'Flags', label: 'Z set', query: 'flag z becomes set', needs: 'f' },
+  { group: 'Flags', label: 'Z clear', query: 'flag z becomes clear', needs: 'f' },
+  { group: 'Flags', label: 'N set', query: 'flag n becomes set', needs: 'f' },
+  { group: 'Flags', label: 'N clear', query: 'flag n becomes clear', needs: 'f' },
+  { group: 'Flags', label: 'H set', query: 'flag h becomes set', needs: 'f' },
+  { group: 'Flags', label: 'H clear', query: 'flag h becomes clear', needs: 'f' },
+  { group: 'Flags', label: 'C set', query: 'flag c becomes set', needs: 'f' },
+  { group: 'Flags', label: 'C clear', query: 'flag c becomes clear', needs: 'f' },
+  // Interrupts
+  { group: 'IRQ', label: 'VBlank', query: 'interrupt 0', needs: 'if_' },
+  { group: 'IRQ', label: 'STAT', query: 'interrupt 1', needs: 'if_' },
+  { group: 'IRQ', label: 'Timer', query: 'interrupt 2', needs: 'if_' },
+  { group: 'IRQ', label: 'Serial', query: 'interrupt 3', needs: 'if_' },
+  { group: 'IRQ', label: 'Joypad', query: 'interrupt 4', needs: 'if_' },
+  // Timer
+  { group: 'Timer', label: 'Overflow', query: 'timer overflow', needs: 'tima' },
 ];
 
 export class TraceQuery extends LitElement {
@@ -236,15 +248,7 @@ export class TraceQuery extends LitElement {
 
     return html`
       ${semanticAvailable.length > 0 ? html`
-        <div class="section-label">Events</div>
-        <div class="chips">
-          ${semanticAvailable.map(c => html`
-            <span
-              class="chip ${this._activeQuery === c.query ? 'active' : ''}"
-              @click=${() => this._toggleSemantic(c.query, c.label)}
-            >${c.label}</span>
-          `)}
-        </div>
+        ${this._renderSemanticGroups(semanticAvailable)}
       ` : ''}
 
       <div class="section-label">Fields</div>
@@ -320,6 +324,24 @@ export class TraceQuery extends LitElement {
         ` : ''}
       ` : ''}
     `;
+  }
+
+  _renderSemanticGroups(conditions) {
+    const groups = [...new Set(conditions.map(c => c.group))];
+    return groups.map(group => {
+      const items = conditions.filter(c => c.group === group);
+      return html`
+        <div class="section-label">${group}</div>
+        <div class="chips">
+          ${items.map(c => html`
+            <span
+              class="chip ${this._activeQuery === c.query ? 'active' : ''}"
+              @click=${() => this._toggleSemantic(c.query, c.label)}
+            >${c.label}</span>
+          `)}
+        </div>
+      `;
+    });
   }
 
   get _activeField() {

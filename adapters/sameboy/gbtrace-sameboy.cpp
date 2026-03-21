@@ -175,12 +175,12 @@ static void build_emitters(const Profile &prof) {
 
 // --- Formatting helpers ---
 
-static inline void fput_hex8(FILE *out, int val) {
-    std::fprintf(out, "\"0x%02X\"", val & 0xFF);
+static inline void fput_u8(FILE *out, int val) {
+    std::fprintf(out, "%d", val & 0xFF);
 }
 
-static inline void fput_hex16(FILE *out, int val) {
-    std::fprintf(out, "\"0x%04X\"", val & 0xFFFF);
+static inline void fput_u16(FILE *out, int val) {
+    std::fprintf(out, "%d", val & 0xFFFF);
 }
 
 // Read a register value from the emulator.
@@ -218,21 +218,21 @@ static void exec_callback(GB_gameboy_t *gb, uint16_t address, uint8_t opcode) {
         std::fprintf(g_output, ",\"%s\":", em.name.c_str());
         switch (em.source) {
         case FieldEmitter::REGISTER_8:
-            fput_hex8(g_output, read_reg(gb, em.reg));
+            fput_u8(g_output, read_reg(gb, em.reg));
             break;
         case FieldEmitter::REGISTER_16:
             // For PC, use the callback's address parameter (regs->pc has
             // already been advanced past the opcode fetch by this point).
             if (em.reg == RegisterField::PC)
-                fput_hex16(g_output, address);
+                fput_u16(g_output, address);
             else
-                fput_hex16(g_output, read_reg(gb, em.reg));
+                fput_u16(g_output, read_reg(gb, em.reg));
             break;
         case FieldEmitter::IO_READ:
-            fput_hex8(g_output, GB_safe_read_memory(gb, em.io_addr));
+            fput_u8(g_output, GB_safe_read_memory(gb, em.io_addr));
             break;
         case FieldEmitter::OPCODE:
-            fput_hex8(g_output, opcode);
+            fput_u8(g_output, opcode);
             break;
         case FieldEmitter::IME:
             std::fprintf(g_output, gb->ime ? "true" : "false");

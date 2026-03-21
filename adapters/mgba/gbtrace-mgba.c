@@ -188,12 +188,12 @@ static struct mCore *g_core = NULL;
 
 // --- Formatting helpers ---
 
-static inline void fput_hex8(FILE *out, int val) {
-    fprintf(out, "\"0x%02X\"", val & 0xFF);
+static inline void fput_u8(FILE *out, int val) {
+    fprintf(out, "%d", val & 0xFF);
 }
 
-static inline void fput_hex16(FILE *out, int val) {
-    fprintf(out, "\"0x%04X\"", val & 0xFFFF);
+static inline void fput_u16(FILE *out, int val) {
+    fprintf(out, "%d", val & 0xFFFF);
 }
 
 static int read_reg8(struct SM83Core *cpu, const char *name) {
@@ -235,16 +235,16 @@ static void emit_entry(struct mCore *core) {
         fprintf(g_output, ",\"%s\":", em->name);
         switch (em->source) {
         case SRC_REG8:
-            fput_hex8(g_output, read_reg8(cpu, em->name));
+            fput_u8(g_output, read_reg8(cpu, em->name));
             break;
         case SRC_REG16:
-            fput_hex16(g_output, read_reg16(cpu, em->name));
+            fput_u16(g_output, read_reg16(cpu, em->name));
             break;
         case SRC_IO:
-            fput_hex8(g_output, core->rawRead8(core, em->io_addr, -1));
+            fput_u8(g_output, core->rawRead8(core, em->io_addr, -1));
             break;
         case SRC_OPCODE:
-            fput_hex8(g_output, core->rawRead8(core, cpu->pc, -1));
+            fput_u8(g_output, core->rawRead8(core, cpu->pc, -1));
             break;
         case SRC_IME:
             fprintf(g_output, cpu->irqPending ? "true" : "false");
