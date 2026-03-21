@@ -1,4 +1,3 @@
-use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 use std::process;
 
@@ -64,12 +63,12 @@ enum Command {
         #[arg(long, conflicts_with = "until")]
         after: Option<String>,
     },
-    /// Compare two trace files and report divergences
+    /// Compare two or more trace files and report divergences
     Diff {
         /// First trace file (reference)
         trace_a: PathBuf,
-        /// Second trace file (to compare)
-        trace_b: PathBuf,
+        /// Trace file(s) to compare against the reference
+        trace_b: Vec<PathBuf>,
         /// Max divergence regions to show (default: 10)
         #[arg(long, default_value_t = 10)]
         max: usize,
@@ -88,6 +87,15 @@ enum Command {
         /// Alignment strategy: auto (default), cycle, or sequence
         #[arg(long, default_value = "auto")]
         align: String,
+        /// One-line-per-field summary output (good for scripting)
+        #[arg(long)]
+        summary: bool,
+        /// Machine-readable JSON output
+        #[arg(long)]
+        json: bool,
+        /// Show divergence classification
+        #[arg(long)]
+        classify: bool,
     },
 }
 
@@ -112,7 +120,10 @@ fn main() {
             exclude,
             skip_boot,
             align,
-        } => cmd_diff(&trace_a, &trace_b, max, context, fields, exclude, skip_boot, &align),
+            summary,
+            json,
+            classify,
+        } => cmd_diff(&trace_a, &trace_b, max, context, fields, exclude, skip_boot, &align, summary, json, classify),
     };
     process::exit(code);
 }
@@ -508,7 +519,7 @@ fn print_entry_fields(entry: &TraceEntry, fields: &[String]) {
     for f in fields {
         if f == "cy" { continue; }
         if let Some(v) = entry.get(f) {
-            print!(" {f}={}", display_val(&value_to_string(v)));
+            print!(" {f}={}", display_val(v));
         }
     }
 }
@@ -613,516 +624,229 @@ fn format_boot_rom(boot_rom: &gbtrace::BootRom) -> String {
 // diff
 // ---------------------------------------------------------------------------
 
-/// A row from one trace, stored as field name -> string representation.
-/// We store the string form for display and comparison (matching the JSONL semantics).
-type Row = BTreeMap<String, String>;
-
-/// Convert a JSON value to string for internal comparison.
-fn value_to_string(v: &Value) -> String {
+/// Format a JSON value for display: numbers as zero-padded lowercase hex, strings as-is.
+fn display_val(v: &Value) -> String {
     match v {
-        Value::String(s) => s.clone(),
-        Value::Number(n) => n.to_string(),
+        Value::Number(n) => {
+            if let Some(n) = n.as_u64() {
+                if n <= 0xFF { return format!("{n:02x}"); }
+                if n <= 0xFFFF { return format!("{n:04x}"); }
+                return format!("{n:x}");
+            }
+            n.to_string()
+        }
+        Value::String(s) => {
+            if let Some(hex) = s.strip_prefix("0x").or_else(|| s.strip_prefix("0X")) {
+                return hex.to_lowercase();
+            }
+            s.clone()
+        }
         Value::Bool(b) => b.to_string(),
         Value::Null => "null".to_string(),
         _ => v.to_string(),
     }
 }
 
-/// Format a value for display: numbers as zero-padded lowercase hex, strings as-is.
-fn display_val(s: &str) -> String {
-    // Handle legacy 0x-prefixed strings
-    if let Some(hex) = s.strip_prefix("0x").or_else(|| s.strip_prefix("0X")) {
-        return hex.to_lowercase();
-    }
-    // If it's a decimal number, format as zero-padded hex
-    if let Ok(n) = s.parse::<u64>() {
-        if n <= 0xFF { return format!("{n:02x}"); }
-        if n <= 0xFFFF { return format!("{n:04x}"); }
-        return format!("{n:x}");
-    }
-    s.to_string()
-}
-
-fn entry_to_row(entry: &TraceEntry, fields: &[String]) -> Row {
-    let mut row = Row::new();
-    for f in fields {
-        if let Some(v) = entry.get(f) {
-            row.insert(f.clone(), value_to_string(v));
-        }
-    }
-    row
-}
-
-/// Merged row: values from trace A and trace B at the same cycle count.
-struct MergedRow {
-    cy: u64,
-    vals_a: Row,
-    vals_b: Row,
-}
-
-impl MergedRow {
-    fn is_divergent(&self, compare_fields: &[String]) -> bool {
-        for f in compare_fields {
-            let a = self.vals_a.get(f);
-            let b = self.vals_b.get(f);
-            if a != b {
-                return true;
-            }
-        }
-        false
-    }
-
-    fn divergent_fields(&self, compare_fields: &[String]) -> Vec<String> {
-        compare_fields
-            .iter()
-            .filter(|f| self.vals_a.get(*f) != self.vals_b.get(*f))
-            .cloned()
-            .collect()
-    }
-}
-
-fn load_trace(
-    path: &PathBuf,
-    all_fields: &[String],
-    skip_boot: bool,
-    name: &str,
-    normalize_cycles: bool,
-) -> Result<(gbtrace::TraceHeader, Vec<(u64, Row)>), String> {
-    let reader = AnyTraceReader::open(path).map_err(|e| format!("Error opening {}: {e}", path.display()))?;
+fn load_trace_entries(path: &PathBuf) -> Result<(gbtrace::TraceHeader, Vec<gbtrace::TraceEntry>), String> {
+    let reader = AnyTraceReader::open(path)
+        .map_err(|e| format!("Error opening {}: {e}", path.display()))?;
     let header = reader.header().clone();
-    let cy_unit = &header.cy_unit;
-
-    let mut rows: Vec<(u64, Row)> = Vec::new();
-    let mut skipping_boot = skip_boot;
-
-    for result in reader {
-        let entry = result.map_err(|e| format!("Error reading {}: {e}", path.display()))?;
-        let raw_cy = entry.cy().unwrap_or(0);
-
-        if skipping_boot {
-            if entry.get_u16("pc") == Some(0x0100) {
-                skipping_boot = false;
-            } else {
-                continue;
-            }
-        }
-
-        // Normalize to T-cycles for cycle-based alignment
-        let cy = if normalize_cycles {
-            cy_unit.to_tcycles(raw_cy).unwrap_or(raw_cy)
-        } else {
-            raw_cy
-        };
-
-        let row = entry_to_row(&entry, all_fields);
-        rows.push((cy, row));
-    }
-
-    if skip_boot && rows.is_empty() && skipping_boot {
-        eprintln!("  WARNING: {name} has no entry with pc=0x0100, cannot skip boot");
-    }
-
-    Ok((header, rows))
+    let entries: Vec<gbtrace::TraceEntry> = reader
+        .collect::<std::result::Result<Vec<_>, _>>()
+        .map_err(|e| format!("Error reading {}: {e}", path.display()))?;
+    Ok((header, entries))
 }
 
 fn cmd_diff(
     path_a: &PathBuf,
-    path_b: &PathBuf,
+    trace_b_paths: &[PathBuf],
     max_regions: usize,
     context: usize,
     fields_filter: Option<String>,
     exclude_filter: Option<String>,
     skip_boot: bool,
     align: &str,
+    summary: bool,
+    json: bool,
+    classify: bool,
 ) -> i32 {
-    // Peek headers first to get field lists and names
-    let reader_a = match AnyTraceReader::open(path_a) {
-        Ok(r) => r,
-        Err(e) => { eprintln!("Error: {e}"); return 1; }
-    };
-    let reader_b = match AnyTraceReader::open(path_b) {
-        Ok(r) => r,
-        Err(e) => { eprintln!("Error: {e}"); return 1; }
+    use gbtrace::diff::{AlignmentStrategy, DiffConfig, TraceDiffer};
+
+    let alignment = match align {
+        "sequence" => AlignmentStrategy::Sequence,
+        "cycle" => AlignmentStrategy::Cycle,
+        _ => AlignmentStrategy::Auto,
     };
 
-    let header_a = reader_a.header().clone();
-    let header_b = reader_b.header().clone();
-    drop(reader_a);
-    drop(reader_b);
+    let config = DiffConfig {
+        include_fields: fields_filter.as_ref().map(|s| s.split(',').map(String::from).collect()),
+        exclude_fields: exclude_filter.as_ref().map(|s| s.split(',').map(String::from).collect()),
+        alignment,
+        skip_boot,
+        max_regions,
+        context,
+    };
 
-    let name_a = &header_a.emulator;
-    let name_b = &header_b.emulator;
+    let differ = TraceDiffer::new(config);
 
-    // Determine alignment strategy
-    let use_sequence = match align {
-        "sequence" => true,
-        "cycle" => {
-            if header_a.cy_unit == gbtrace::CycleUnit::Instruction
-                || header_b.cy_unit == gbtrace::CycleUnit::Instruction
-            {
-                eprintln!("ERROR: --align cycle requested but one trace uses instruction counting");
-                return 1;
+    // Load reference trace
+    let (header_a, entries_a) = match load_trace_entries(path_a) {
+        Ok(v) => v,
+        Err(e) => { eprintln!("{e}"); return 1; }
+    };
+
+    // Multi-trace comparison
+    if trace_b_paths.len() > 1 {
+        let mut traces = vec![(header_a, entries_a)];
+        for path in trace_b_paths {
+            match load_trace_entries(path) {
+                Ok((h, e)) => traces.push((h, e)),
+                Err(e) => { eprintln!("{e}"); return 1; }
             }
-            false
         }
-        _ => {
-            // auto: use sequence if either trace uses instruction counting
-            header_a.cy_unit == gbtrace::CycleUnit::Instruction
-                || header_b.cy_unit == gbtrace::CycleUnit::Instruction
+        let multi = match differ.compare_multi(traces) {
+            Ok(r) => r,
+            Err(e) => { eprintln!("Error: {e}"); return 1; }
+        };
+        if json {
+            println!("{}", serde_json::to_string_pretty(&multi).unwrap());
+            return if multi.pairwise.iter().all(|r| r.is_identical()) { 0 } else { 1 };
         }
+        let mut any_divergent = false;
+        for result in &multi.pairwise {
+            print_diff_result(result, max_regions, summary, classify);
+            if !result.is_identical() { any_divergent = true; }
+            println!();
+        }
+        return if any_divergent { 1 } else { 0 };
+    }
+
+    // Single pair comparison
+    let (header_b, entries_b) = match load_trace_entries(&trace_b_paths[0]) {
+        Ok(v) => v,
+        Err(e) => { eprintln!("{e}"); return 1; }
     };
+
+    let result = match differ.compare(&header_a, entries_a, &header_b, entries_b) {
+        Ok(r) => r,
+        Err(e) => { eprintln!("Error: {e}"); return 1; }
+    };
+
+    if json {
+        println!("{}", serde_json::to_string_pretty(&result).unwrap());
+        return if result.is_identical() { 0 } else { 1 };
+    }
+
+    print_diff_result(&result, max_regions, summary, classify);
+    if result.is_identical() { 0 } else { 1 }
+}
+
+fn print_diff_result(
+    result: &gbtrace::DiffResult,
+    max_regions: usize,
+    summary: bool,
+    classify: bool,
+) {
+    let name_a = &result.name_a;
+    let name_b = &result.name_b;
+
+    if summary {
+        // Compact one-line-per-field output
+        println!("{name_a} vs {name_b}: {} ({} entries, {:.1}% overlap)",
+            result.classification, result.aligned_count, result.overlap_pct);
+        for d in &result.field_divergences {
+            println!("  {:<8} {:>8} diffs, first at idx={}: {}={}  {}={}",
+                d.field, d.count, d.first_index,
+                name_a, display_val(&d.first_val_a),
+                name_b, display_val(&d.first_val_b));
+        }
+        return;
+    }
 
     println!("Comparing: {name_a} vs {name_b}");
 
-    // Report cy_unit info
-    if header_a.cy_unit != header_b.cy_unit {
-        println!("  Cycle units: {name_a}={:?}  {name_b}={:?}", header_a.cy_unit, header_b.cy_unit);
-    }
-    if use_sequence {
-        println!("  Alignment: sequence (by instruction index)");
-    }
-
     // Boot ROM info
-    let boot_a = format_boot_rom(&header_a.boot_rom);
-    let boot_b = format_boot_rom(&header_b.boot_rom);
-    if boot_a != boot_b {
-        println!("  Boot ROM: {name_a}={boot_a}  {name_b}={boot_b}");
-        if skip_boot {
-            println!("  Aligning at program start (--skip-boot)");
-        } else {
-            println!("  HINT: use --skip-boot to ignore boot ROM differences");
-        }
+    if result.boot_rom_mismatch {
+        println!("  Boot ROM mismatch");
     }
-
-    // ROM hash check
-    if header_a.rom_sha256 != header_b.rom_sha256 {
+    if result.rom_mismatch {
         println!("  WARNING: ROM hashes differ!");
-        println!("    {name_a}: {}...", &header_a.rom_sha256[..16.min(header_a.rom_sha256.len())]);
-        println!("    {name_b}: {}...", &header_b.rom_sha256[..16.min(header_b.rom_sha256.len())]);
     }
-
-    // Determine common fields
-    let fields_a: BTreeSet<&str> = header_a.fields.iter().map(|s| s.as_str()).collect();
-    let fields_b: BTreeSet<&str> = header_b.fields.iter().map(|s| s.as_str()).collect();
-
-    let mut common_fields: Vec<String> = fields_a
-        .intersection(&fields_b)
-        .filter(|f| **f != "cy")
-        .map(|s| s.to_string())
-        .collect();
-    common_fields.sort();
-
-    // Apply field filters
-    if let Some(ref include) = fields_filter {
-        let include: BTreeSet<&str> = include.split(',').collect();
-        common_fields.retain(|f| include.contains(f.as_str()));
+    if !result.only_in_a.is_empty() {
+        println!("  Fields only in {name_a}: {}", result.only_in_a.join(", "));
     }
-    if let Some(ref exclude) = exclude_filter {
-        let exclude: BTreeSet<&str> = exclude.split(',').collect();
-        common_fields.retain(|f| !exclude.contains(f.as_str()));
+    if !result.only_in_b.is_empty() {
+        println!("  Fields only in {name_b}: {}", result.only_in_b.join(", "));
     }
-
-    if common_fields.is_empty() {
-        println!("ERROR: No common fields to compare.");
-        return 1;
-    }
-
-    let only_a: Vec<&str> = fields_a.difference(&fields_b).copied().collect();
-    let only_b: Vec<&str> = fields_b.difference(&fields_a).copied().collect();
-    if !only_a.is_empty() {
-        println!("  Fields only in {name_a}: {}", only_a.join(", "));
-    }
-    if !only_b.is_empty() {
-        println!("  Fields only in {name_b}: {}", only_b.join(", "));
-    }
-    println!("  Comparing fields: {}", common_fields.join(", "));
+    println!("  Comparing fields: {}", result.common_fields.join(", "));
     println!();
+    println!("  Entries:  {} vs {}", result.entries_a, result.entries_b);
+    println!("Aligned {} entries ({:.1}% overlap)", result.aligned_count, result.overlap_pct);
 
-    // All fields we need to read (common + cy for alignment)
-    let mut all_fields: Vec<String> = vec!["cy".to_string()];
-    all_fields.extend(common_fields.iter().cloned());
-    // Also grab pc, op, a for context display if available
-    for extra in &["pc", "op", "a"] {
-        let s = extra.to_string();
-        if !all_fields.contains(&s) && (fields_a.contains(extra) || fields_b.contains(extra)) {
-            all_fields.push(s);
-        }
+    if classify || !result.is_identical() {
+        println!("  Classification: {}", result.classification);
     }
 
-    // Load traces (normalize cycles to T-cycles for cycle-based alignment)
-    let normalize = !use_sequence;
-    let (_, mut rows_a) = match load_trace(path_a, &all_fields, skip_boot, name_a, normalize) {
-        Ok(v) => v,
-        Err(e) => { eprintln!("{e}"); return 1; }
-    };
-    let (_, mut rows_b) = match load_trace(path_b, &all_fields, skip_boot, name_b, normalize) {
-        Ok(v) => v,
-        Err(e) => { eprintln!("{e}"); return 1; }
-    };
-
-    println!("  Entries:  {} vs {}", rows_a.len(), rows_b.len());
-
-    // Rebase cycle counts if skip_boot and bases differ (only for cycle alignment)
-    if !use_sequence && skip_boot && !rows_a.is_empty() && !rows_b.is_empty() {
-        let base_a = rows_a[0].0;
-        let base_b = rows_b[0].0;
-        if base_a != base_b {
-            for row in &mut rows_a {
-                row.0 -= base_a;
-                row.1.insert("cy".to_string(), (row.0).to_string());
-            }
-            for row in &mut rows_b {
-                row.0 -= base_b;
-                row.1.insert("cy".to_string(), (row.0).to_string());
-            }
-            println!("  Rebased cycle counts: {name_a} -{base_a}, {name_b} -{base_b}");
-        }
-    }
-
-    // Align traces
-    let mut merged: Vec<MergedRow> = Vec::new();
-
-    if use_sequence {
-        // Sequence alignment: match by entry index (1st vs 1st, 2nd vs 2nd)
-        let len = rows_a.len().min(rows_b.len());
-        for idx in 0..len {
-            merged.push(MergedRow {
-                cy: idx as u64,
-                vals_a: rows_a[idx].1.clone(),
-                vals_b: rows_b[idx].1.clone(),
-            });
-        }
-        if rows_a.len() != rows_b.len() {
-            println!(
-                "  WARNING: traces differ in length ({} vs {}), comparing first {len}",
-                rows_a.len(),
-                rows_b.len()
-            );
-        }
-    } else {
-        // Merge-join by cycle count (both are sorted by cy)
-        let mut i = 0;
-        let mut j = 0;
-        while i < rows_a.len() && j < rows_b.len() {
-            let cy_a = rows_a[i].0;
-            let cy_b = rows_b[j].0;
-            match cy_a.cmp(&cy_b) {
-                std::cmp::Ordering::Equal => {
-                    merged.push(MergedRow {
-                        cy: cy_a,
-                        vals_a: rows_a[i].1.clone(),
-                        vals_b: rows_b[j].1.clone(),
-                    });
-                    i += 1;
-                    j += 1;
-                }
-                std::cmp::Ordering::Less => i += 1,
-                std::cmp::Ordering::Greater => j += 1,
-            }
-        }
-    }
-
-    if merged.is_empty() {
-        if use_sequence {
-            println!("ERROR: One or both traces are empty.");
-        } else {
-            println!("ERROR: No matching cycle counts. Traces may not be aligned.");
-            println!("  HINT: use --align sequence to compare by instruction order instead");
-            if !rows_a.is_empty() && !rows_b.is_empty() {
-                println!(
-                    "  {name_a} cy range: {} .. {}",
-                    rows_a.first().unwrap().0,
-                    rows_a.last().unwrap().0
-                );
-                println!(
-                    "  {name_b} cy range: {} .. {}",
-                    rows_b.first().unwrap().0,
-                    rows_b.last().unwrap().0
-                );
-            }
-        }
-        return 1;
-    }
-
-    let matched_pct = merged.len() as f64 / rows_a.len().max(rows_b.len()) as f64 * 100.0;
-    let align_label = if use_sequence { "instruction index" } else { "cycle count" };
-    println!("Aligned {} entries by {align_label} ({matched_pct:.1}% overlap)", merged.len());
-
-    // Find divergences per field
-    let mut field_divergences: Vec<FieldDivergence> = Vec::new();
-    for field in &common_fields {
-        let mut count = 0u64;
-        let mut first: Option<(u64, String, String)> = None;
-        for row in &merged {
-            let a = row.vals_a.get(field);
-            let b = row.vals_b.get(field);
-            if a != b {
-                count += 1;
-                if first.is_none() {
-                    first = Some((
-                        row.cy,
-                        a.cloned().unwrap_or_default(),
-                        b.cloned().unwrap_or_default(),
-                    ));
-                }
-            }
-        }
-        if count > 0 {
-            let (cy, va, vb) = first.unwrap();
-            field_divergences.push(FieldDivergence {
-                field: field.clone(),
-                count,
-                first_cy: cy,
-                val_a: va,
-                val_b: vb,
-            });
-        }
-    }
-
-    if field_divergences.is_empty() {
+    if result.is_identical() {
         println!("\nNo divergences found! Traces match perfectly.");
-        return 0;
+        return;
     }
 
-    field_divergences.sort_by_key(|d| d.first_cy);
-
-    println!("\nFound divergences in {} field(s):\n", field_divergences.len());
-    for d in &field_divergences {
+    println!("\nFound divergences in {} field(s):\n", result.field_divergences.len());
+    for d in &result.field_divergences {
         println!(
-            "  {:6}  {:>8} differences, first at cy={}: {name_a}={}  {name_b}={}",
-            d.field, d.count, d.first_cy, display_val(&d.val_a), display_val(&d.val_b)
+            "  {:6}  {:>8} differences, first at idx={}: {name_a}={}  {name_b}={}",
+            d.field, d.count, d.first_index,
+            display_val(&d.first_val_a), display_val(&d.first_val_b)
         );
     }
 
-    // Mark divergent rows and collect indices
-    let div_indices: Vec<usize> = merged
-        .iter()
-        .enumerate()
-        .filter(|(_, row)| row.is_divergent(&common_fields))
-        .map(|(i, _)| i)
-        .collect();
-
-    let total_div = div_indices.len();
-
-    // Group consecutive divergences into regions
-    let ranges = group_divergence_ranges(&merged, &div_indices);
-
-    println!("\n{total_div} divergent entries in {} region(s):\n", ranges.len());
-    for (j, r) in ranges.iter().enumerate().take(max_regions) {
-        if r.start_cy == r.end_cy {
-            println!("  Region {}: cy={} ({} entry)", j + 1, r.start_cy, r.count);
+    println!("\n{} divergent entries in {} region(s):\n",
+        result.total_divergent, result.regions.len());
+    for (j, r) in result.regions.iter().enumerate().take(max_regions) {
+        if r.start_index == r.end_index {
+            println!("  Region {}: idx={} ({} entry)", j + 1, r.start_index, r.count);
         } else {
-            println!(
-                "  Region {}: cy={}..{} ({} entries)",
-                j + 1,
-                r.start_cy,
-                r.end_cy,
-                r.count
-            );
+            println!("  Region {}: idx={}..{} ({} entries)",
+                j + 1, r.start_index, r.end_index, r.count);
         }
     }
-    if ranges.len() > max_regions {
-        println!("  ... and {} more regions", ranges.len() - max_regions);
+    if result.regions.len() > max_regions {
+        println!("  ... and {} more regions", result.regions.len() - max_regions);
     }
 
-    // Detailed view of first divergence with context
-    let first_div_idx = div_indices[0];
-    let first_div_cy = merged[first_div_idx].cy;
-
-    println!("\n{}", "=".repeat(72));
-    println!("Detail: first divergence at cy={first_div_cy}");
-    println!("{}\n", "=".repeat(72));
-
-    let window_start = first_div_idx.saturating_sub(context);
-    let window_end = (first_div_idx + 5 + context).min(merged.len());
-
-    for idx in window_start..window_end {
-        let row = &merged[idx];
-        let is_div = row.is_divergent(&common_fields);
-        let marker = if is_div { ">" } else { " " };
-        print_entry_row(row, &common_fields, name_a, name_b, marker);
-    }
-
-    let remaining = total_div.saturating_sub(5);
-    if remaining > 0 {
-        println!("\n... {remaining} more divergent entries");
-    }
-
-    1
-}
-
-struct FieldDivergence {
-    field: String,
-    count: u64,
-    first_cy: u64,
-    val_a: String,
-    val_b: String,
-}
-
-struct DivRange {
-    start_cy: u64,
-    end_cy: u64,
-    count: usize,
-}
-
-fn group_divergence_ranges(merged: &[MergedRow], div_indices: &[usize]) -> Vec<DivRange> {
-    if div_indices.is_empty() {
-        return vec![];
-    }
-
-    let mut ranges: Vec<DivRange> = Vec::new();
-    let mut range_start = 0usize; // index into div_indices
-    let mut range_end = 0usize;
-
-    for k in 1..div_indices.len() {
-        let prev_merged_idx = div_indices[k - 1];
-        let cur_merged_idx = div_indices[k];
-        if cur_merged_idx - prev_merged_idx <= 2 {
-            range_end = k;
-        } else {
-            // Close current range
-            ranges.push(DivRange {
-                start_cy: merged[div_indices[range_start]].cy,
-                end_cy: merged[div_indices[range_end]].cy,
-                count: range_end - range_start + 1,
-            });
-            range_start = k;
-            range_end = k;
+    // Context window
+    if !result.context_window.is_empty() {
+        let first_div = result.context_window.iter().find(|c| c.is_divergent);
+        if let Some(first) = first_div {
+            println!("\n{}", "=".repeat(72));
+            println!("Detail: first divergence at idx={}", first.index);
+            println!("{}\n", "=".repeat(72));
         }
-    }
-    // Close last range
-    ranges.push(DivRange {
-        start_cy: merged[div_indices[range_start]].cy,
-        end_cy: merged[div_indices[range_end]].cy,
-        count: range_end - range_start + 1,
-    });
 
-    ranges
-}
+        for entry in &result.context_window {
+            let marker = if entry.is_divergent { ">" } else { " " };
+            if !entry.divergent_fields.is_empty() {
+                let diff_strs: Vec<String> = entry.divergent_fields
+                    .iter()
+                    .map(|f| {
+                        let a = entry.vals_a.get(f).map(|v| display_val(v)).unwrap_or_else(|| "?".into());
+                        let b = entry.vals_b.get(f).map(|v| display_val(v)).unwrap_or_else(|| "?".into());
+                        format!("{f}: {a} vs {b}")
+                    })
+                    .collect();
+                println!("{marker} idx={:>10}  {}", entry.index, diff_strs.join(", "));
+            } else {
+                let pc = entry.vals_a.get("pc").map(|v| display_val(v)).unwrap_or_else(|| "?".into());
+                let op = entry.vals_a.get("op").map(|v| display_val(v)).unwrap_or_else(|| "?".into());
+                let a = entry.vals_a.get("a").map(|v| display_val(v)).unwrap_or_else(|| "?".into());
+                println!("{marker} idx={:>10}  pc={pc} op={op} a={a}  (match)", entry.index);
+            }
+        }
 
-fn print_entry_row(
-    row: &MergedRow,
-    compare_fields: &[String],
-    _name_a: &str,
-    _name_b: &str,
-    marker: &str,
-) {
-    let diff_fields = row.divergent_fields(compare_fields);
-
-    if !diff_fields.is_empty() {
-        let diff_strs: Vec<String> = diff_fields
-            .iter()
-            .map(|f| {
-                let a = row.vals_a.get(f).map(|s| display_val(s)).unwrap_or_else(|| "?".into());
-                let b = row.vals_b.get(f).map(|s| display_val(s)).unwrap_or_else(|| "?".into());
-                format!("{f}: {a} vs {b}")
-            })
-            .collect();
-        println!("{marker} cy={:>10}  {}", row.cy, diff_strs.join(", "));
-    } else {
-        let pc = row.vals_a.get("pc").map(|s| display_val(s)).unwrap_or_else(|| "?".into());
-        let op = row.vals_a.get("op").map(|s| display_val(s)).unwrap_or_else(|| "?".into());
-        let a = row.vals_a.get("a").map(|s| display_val(s)).unwrap_or_else(|| "?".into());
-        println!("{marker} cy={:>10}  pc={pc} op={op} a={a}  (match)", row.cy);
+        let remaining = result.total_divergent.saturating_sub(5);
+        if remaining > 0 {
+            println!("\n... {remaining} more divergent entries");
+        }
     }
 }

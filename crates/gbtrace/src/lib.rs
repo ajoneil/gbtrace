@@ -1,3 +1,4 @@
+pub mod diff;
 pub mod entry;
 pub mod error;
 pub mod header;
@@ -9,6 +10,7 @@ pub mod writer;
 #[cfg(feature = "parquet")]
 pub mod parquet;
 
+pub use diff::{AlignmentStrategy, DiffConfig, DiffResult, DivergenceClass, MultiDiffResult, TraceDiffer};
 pub use entry::TraceEntry;
 pub use error::Error;
 pub use header::{BootRom, CycleUnit, TraceHeader, Trigger};
