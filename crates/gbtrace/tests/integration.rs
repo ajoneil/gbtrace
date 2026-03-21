@@ -62,15 +62,9 @@ fn roundtrip_plain() {
     assert_eq!(entries[1].cy(), Some(4));
     assert_eq!(entries[2].cy(), Some(8));
 
-    // Check hex formatting
-    assert_eq!(
-        entries[2].get("a").unwrap().as_str().unwrap(),
-        "0xFF"
-    );
-    assert_eq!(
-        entries[0].get("pc").unwrap().as_str().unwrap(),
-        "0x0100"
-    );
+    // Check numeric values
+    assert_eq!(entries[2].get("a").unwrap().as_u64().unwrap(), 0xFF);
+    assert_eq!(entries[0].get("pc").unwrap().as_u64().unwrap(), 0x0100);
 }
 
 #[test]
@@ -178,9 +172,9 @@ fn entry_hex_formatting() {
     e.set_u16("sp", 0xFFFF);
     e.set_bool("ime", true);
 
-    assert_eq!(e.get("a").unwrap().as_str().unwrap(), "0x0F");
-    assert_eq!(e.get("f").unwrap().as_str().unwrap(), "0x00");
-    assert_eq!(e.get("pc").unwrap().as_str().unwrap(), "0x0100");
-    assert_eq!(e.get("sp").unwrap().as_str().unwrap(), "0xFFFF");
+    assert_eq!(e.get("a").unwrap().as_u64().unwrap(), 0x0F);
+    assert_eq!(e.get("f").unwrap().as_u64().unwrap(), 0x00);
+    assert_eq!(e.get("pc").unwrap().as_u64().unwrap(), 0x0100);
+    assert_eq!(e.get("sp").unwrap().as_u64().unwrap(), 0xFFFF);
     assert_eq!(e.get("ime").unwrap().as_bool().unwrap(), true);
 }

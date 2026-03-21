@@ -46,6 +46,20 @@ pub enum Condition {
     /// Requires `if_` field.
     InterruptFires(u8),
 
+    /// CPU flag is set. Derived from F register bits.
+    /// Flag: Z=7, N=6, H=5, C=4.
+    /// Requires `f` field.
+    FlagSet(u8),
+
+    /// CPU flag is clear. Requires `f` field.
+    FlagClear(u8),
+
+    /// CPU flag transitions to set (was clear, now set). Requires `f` field.
+    FlagBecomesSet(u8),
+
+    /// CPU flag transitions to clear (was set, now clear). Requires `f` field.
+    FlagBecomesClear(u8),
+
     // --- Compound ---
     /// All sub-conditions must match.
     All(Vec<Condition>),
@@ -58,7 +72,9 @@ impl Condition {
     /// Whether this condition requires state from the previous entry.
     pub fn is_stateful(&self) -> bool {
         match self {
-            Condition::FieldEquals { .. } => false,
+            Condition::FieldEquals { .. }
+            | Condition::FlagSet(_)
+            | Condition::FlagClear(_) => false,
             Condition::FieldChanges { .. }
             | Condition::FieldChangesTo { .. }
             | Condition::FieldChangesFrom { .. }
@@ -66,7 +82,9 @@ impl Condition {
             | Condition::LcdTurnsOn
             | Condition::LcdTurnsOff
             | Condition::TimerOverflow
-            | Condition::InterruptFires(_) => true,
+            | Condition::InterruptFires(_)
+            | Condition::FlagBecomesSet(_)
+            | Condition::FlagBecomesClear(_) => true,
             Condition::All(cs) | Condition::Any(cs) => cs.iter().any(|c| c.is_stateful()),
         }
     }
@@ -109,7 +127,18 @@ impl ConditionEvaluator {
 fn eval_condition(cond: &Condition, entry: &TraceEntry, prev: Option<&TraceEntry>) -> bool {
     match cond {
         Condition::FieldEquals { field, value } => {
-            entry_field_str(entry, field).as_deref() == Some(value.as_str())
+            match entry.get(field) {
+                Some(Value::Number(n)) => {
+                    // Compare numerically: parse the condition value as hex or decimal
+                    if let Some(target) = parse_number(value) {
+                        n.as_u64() == Some(target)
+                    } else {
+                        false
+                    }
+                }
+                Some(v) => entry_field_str_raw(v) == *value,
+                None => false,
+            }
         }
 
         Condition::FieldChanges { field } => {
@@ -119,15 +148,13 @@ fn eval_condition(cond: &Condition, entry: &TraceEntry, prev: Option<&TraceEntry
         }
 
         Condition::FieldChangesTo { field, value } => {
-            let cur = entry_field_str(entry, field);
-            let prv = prev.and_then(|p| entry_field_str(p, field));
-            cur.as_deref() == Some(value.as_str()) && prv.as_deref() != Some(value.as_str())
+            let matches_val = |e: &TraceEntry| field_matches_value(e, field, value);
+            matches_val(entry) && prev.map_or(true, |p| !matches_val(p))
         }
 
         Condition::FieldChangesFrom { field, value } => {
-            let cur = entry_field_str(entry, field);
-            let prv = prev.and_then(|p| entry_field_str(p, field));
-            prv.as_deref() == Some(value.as_str()) && cur.as_deref() != Some(value.as_str())
+            let matches_val = |e: &TraceEntry| field_matches_value(e, field, value);
+            prev.map_or(false, |p| matches_val(p)) && !matches_val(entry)
         }
 
         Condition::PpuEntersMode(mode) => {
@@ -158,32 +185,67 @@ fn eval_condition(cond: &Condition, entry: &TraceEntry, prev: Option<&TraceEntry
             bit_transitions(entry, prev, "if_", *bit, false, true)
         }
 
+        Condition::FlagSet(bit) => {
+            entry_field_u8(entry, "f").map_or(false, |f| (f >> bit) & 1 == 1)
+        }
+
+        Condition::FlagClear(bit) => {
+            entry_field_u8(entry, "f").map_or(false, |f| (f >> bit) & 1 == 0)
+        }
+
+        Condition::FlagBecomesSet(bit) => {
+            bit_transitions(entry, prev, "f", *bit, false, true)
+        }
+
+        Condition::FlagBecomesClear(bit) => {
+            bit_transitions(entry, prev, "f", *bit, true, false)
+        }
+
         Condition::All(cs) => cs.iter().all(|c| eval_condition(c, entry, prev)),
         Condition::Any(cs) => cs.iter().any(|c| eval_condition(c, entry, prev)),
     }
 }
 
-/// Get a field value as its display string.
+/// Get a field value as its raw string representation.
 fn entry_field_str(entry: &TraceEntry, field: &str) -> Option<String> {
-    entry.get(field).map(|v| match v {
+    entry.get(field).map(|v| entry_field_str_raw(v))
+}
+
+fn entry_field_str_raw(v: &Value) -> String {
+    match v {
         Value::String(s) => s.clone(),
         Value::Number(n) => n.to_string(),
         Value::Bool(b) => b.to_string(),
         Value::Null => "null".to_string(),
         _ => v.to_string(),
-    })
+    }
 }
 
-/// Parse a hex string field (e.g. "0xFF") to a u8.
-fn entry_field_u8(entry: &TraceEntry, field: &str) -> Option<u8> {
-    entry.get(field).and_then(|v| match v {
-        Value::String(s) => {
-            let s = s.strip_prefix("0x").or_else(|| s.strip_prefix("0X")).unwrap_or(s);
-            u8::from_str_radix(s, 16).ok()
+/// Parse a number from user input. Always treats as hex (with or without 0x prefix).
+fn parse_number(s: &str) -> Option<u64> {
+    let s = s.trim();
+    let hex = s.strip_prefix("0x").or_else(|| s.strip_prefix("0X")).unwrap_or(s);
+    u64::from_str_radix(hex, 16).ok()
+}
+
+/// Check if a field in an entry matches a value string (numeric or string comparison).
+fn field_matches_value(entry: &TraceEntry, field: &str, value: &str) -> bool {
+    match entry.get(field) {
+        Some(Value::Number(n)) => {
+            if let Some(target) = parse_number(value) {
+                n.as_u64() == Some(target)
+            } else {
+                false
+            }
         }
-        Value::Number(n) => n.as_u64().map(|n| n as u8),
-        _ => None,
-    })
+        Some(v) => entry_field_str_raw(v) == *value,
+        None => false,
+    }
+}
+
+/// Get a field as u8 (delegates to TraceEntry::get_u8).
+fn entry_field_u8(entry: &TraceEntry, field: &str) -> Option<u8> {
+    entry.get_u8(field)
 }
 
 /// Check if a specific bit in a hex field transitioned between two states.
@@ -222,8 +284,39 @@ fn bit_transitions(
 /// - `lcd on` / `lcd off` — LCD turns on/off
 /// - `timer overflow` — TIMA overflows
 /// - `interrupt N` — interrupt bit N fires (0=vblank, 1=stat, 2=timer, 3=serial, 4=joypad)
+/// Map a CPU flag name to its bit position in the F register.
+fn flag_bit(name: &str) -> Result<u8, String> {
+    match name.to_lowercase().as_str() {
+        "z" | "zero" => Ok(7),
+        "n" | "sub" | "subtract" => Ok(6),
+        "h" | "half" | "halfcarry" => Ok(5),
+        "c" | "carry" => Ok(4),
+        _ => Err(format!("unknown flag '{name}': expected z, n, h, or c")),
+    }
+}
+
 pub fn parse_condition(s: &str) -> Result<Condition, String> {
     let s = s.trim();
+
+    // Flag conditions: "flag z set", "flag c clear", "flag z becomes set", etc.
+    if let Some(rest) = s.strip_prefix("flag ") {
+        let rest = rest.trim();
+        // "flag z becomes set" / "flag z becomes clear"
+        if let Some(inner) = rest.strip_suffix(" becomes set") {
+            return Ok(Condition::FlagBecomesSet(flag_bit(inner.trim())?));
+        }
+        if let Some(inner) = rest.strip_suffix(" becomes clear") {
+            return Ok(Condition::FlagBecomesClear(flag_bit(inner.trim())?));
+        }
+        // "flag z set" / "flag z clear"
+        if let Some(inner) = rest.strip_suffix(" set") {
+            return Ok(Condition::FlagSet(flag_bit(inner.trim())?));
+        }
+        if let Some(inner) = rest.strip_suffix(" clear") {
+            return Ok(Condition::FlagClear(flag_bit(inner.trim())?));
+        }
+        return Err(format!("invalid flag condition: '{s}'. Expected: flag z set, flag c clear, flag z becomes set, flag c becomes clear"));
+    }
 
     // Semantic conditions
     if let Some(rest) = s.strip_prefix("ppu enters mode ") {

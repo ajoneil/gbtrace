@@ -166,13 +166,12 @@ static inline unsigned long long samples_to_tcycles(unsigned long long samples) 
     return samples * 4;
 }
 
-// Write a hex8 value directly to the output buffer.
-static inline void fput_hex8(FILE *out, int val) {
-    std::fprintf(out, "\"0x%02X\"", val & 0xFF);
+static inline void fput_u8(FILE *out, int val) {
+    std::fprintf(out, "%d", val & 0xFF);
 }
 
-static inline void fput_hex16(FILE *out, int val) {
-    std::fprintf(out, "\"0x%04X\"", val & 0xFFFF);
+static inline void fput_u16(FILE *out, int val) {
+    std::fprintf(out, "%d", val & 0xFFFF);
 }
 
 // --- Trace callback ---
@@ -190,16 +189,16 @@ static void trace_callback(void *data) {
         std::fprintf(g_output, ",\"%s\":", em.name.c_str());
         switch (em.source) {
         case FieldEmitter::CALLBACK_8:
-            fput_hex8(g_output, r[em.cb_index]);
+            fput_u8(g_output, r[em.cb_index]);
             break;
         case FieldEmitter::CALLBACK_16:
-            fput_hex16(g_output, r[em.cb_index]);
+            fput_u16(g_output, r[em.cb_index]);
             break;
         case FieldEmitter::IO_READ:
-            fput_hex8(g_output, g_gb->externalRead(em.io_addr));
+            fput_u8(g_output, g_gb->externalRead(em.io_addr));
             break;
         case FieldEmitter::OPCODE:
-            fput_hex8(g_output, (r[12] >> 16) & 0xFF);
+            fput_u8(g_output, (r[12] >> 16) & 0xFF);
             break;
         case FieldEmitter::IME:
             // IME isn't directly exposed; read from callback data isn't available.
