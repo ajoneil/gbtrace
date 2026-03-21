@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use std::process;
 
 use clap::{Parser, Subcommand};
-use gbtrace::{TraceEntry, TraceReader};
+use gbtrace::{AnyTraceReader, ParquetTraceWriter, TraceEntry, TraceWriter};
 use serde_json::Value;
 
 #[derive(Parser)]
@@ -19,6 +19,14 @@ enum Command {
     Info {
         /// Trace file to inspect
         input: PathBuf,
+    },
+    /// Convert between trace file formats (JSONL <-> Parquet)
+    Convert {
+        /// Input file (.gbtrace, .gbtrace.gz, or .parquet)
+        input: PathBuf,
+        /// Output file (.gbtrace, .gbtrace.gz, or .parquet)
+        #[arg(short, long)]
+        output: Option<PathBuf>,
     },
     /// Compare two trace files and report divergences
     Diff {
@@ -48,6 +56,7 @@ fn main() {
     let cli = Cli::parse();
     let code = match cli.command {
         Command::Info { input } => cmd_info(&input),
+        Command::Convert { input, output } => cmd_convert(&input, output),
         Command::Diff {
             trace_a,
             trace_b,
@@ -66,7 +75,7 @@ fn main() {
 // ---------------------------------------------------------------------------
 
 fn cmd_info(path: &PathBuf) -> i32 {
-    let reader = match TraceReader::open(path) {
+    let reader = match AnyTraceReader::open(path) {
         Ok(r) => r,
         Err(e) => {
             eprintln!("Error: {e}");
@@ -115,6 +124,111 @@ fn cmd_info(path: &PathBuf) -> i32 {
     if let Ok(meta) = std::fs::metadata(path) {
         let size = meta.len();
         println!("File size: {size} bytes ({:.1} MB)", size as f64 / 1024.0 / 1024.0);
+    }
+
+    0
+}
+
+// ---------------------------------------------------------------------------
+// convert
+// ---------------------------------------------------------------------------
+
+fn cmd_convert(input: &PathBuf, output: Option<PathBuf>) -> i32 {
+    let output = output.unwrap_or_else(|| {
+        let ext = input.extension().and_then(|e| e.to_str()).unwrap_or("");
+        if ext == "parquet" {
+            input.with_extension("gbtrace")
+        } else {
+            // .gbtrace or .gbtrace.gz -> .parquet
+            let stem = input.file_stem().and_then(|s| s.to_str()).unwrap_or("trace");
+            let stem = stem.strip_suffix(".gbtrace").unwrap_or(stem);
+            input.with_file_name(format!("{stem}.parquet"))
+        }
+    });
+
+    let reader = match AnyTraceReader::open(input) {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("Error opening input: {e}");
+            return 1;
+        }
+    };
+
+    let header = reader.header().clone();
+    let is_parquet_output = output.extension().is_some_and(|e| e == "parquet");
+
+    if is_parquet_output {
+        let mut writer = match ParquetTraceWriter::create(&output, &header) {
+            Ok(w) => w,
+            Err(e) => {
+                eprintln!("Error creating output: {e}");
+                return 1;
+            }
+        };
+
+        let mut count: u64 = 0;
+        for result in reader {
+            match result {
+                Ok(entry) => {
+                    if let Err(e) = writer.write_entry(&entry) {
+                        eprintln!("Error writing entry {count}: {e}");
+                        return 1;
+                    }
+                    count += 1;
+                }
+                Err(e) => {
+                    eprintln!("Error reading entry {count}: {e}");
+                    return 1;
+                }
+            }
+        }
+
+        if let Err(e) = writer.finish() {
+            eprintln!("Error finalizing: {e}");
+            return 1;
+        }
+
+        let input_size = std::fs::metadata(input).map(|m| m.len()).unwrap_or(0);
+        let output_size = std::fs::metadata(&output).map(|m| m.len()).unwrap_or(0);
+        let ratio = if output_size > 0 {
+            input_size as f64 / output_size as f64
+        } else {
+            0.0
+        };
+        println!("Converted {count} entries to {}", output.display());
+        println!("  {input_size} bytes -> {output_size} bytes ({ratio:.1}x compression)");
+    } else {
+        // Output as JSONL
+        let mut writer = match TraceWriter::create(&output, &header) {
+            Ok(w) => w,
+            Err(e) => {
+                eprintln!("Error creating output: {e}");
+                return 1;
+            }
+        };
+
+        let mut count: u64 = 0;
+        for result in reader {
+            match result {
+                Ok(entry) => {
+                    if let Err(e) = writer.write_entry(&entry) {
+                        eprintln!("Error writing entry {count}: {e}");
+                        return 1;
+                    }
+                    count += 1;
+                }
+                Err(e) => {
+                    eprintln!("Error reading entry {count}: {e}");
+                    return 1;
+                }
+            }
+        }
+
+        if let Err(e) = writer.finish() {
+            eprintln!("Error finalizing: {e}");
+            return 1;
+        }
+        println!("Converted {count} entries to {}", output.display());
     }
 
     0
@@ -190,7 +304,7 @@ fn load_trace(
     skip_boot: bool,
     name: &str,
 ) -> Result<(gbtrace::TraceHeader, Vec<(u64, Row)>), String> {
-    let reader = TraceReader::open(path).map_err(|e| format!("Error opening {}: {e}", path.display()))?;
+    let reader = AnyTraceReader::open(path).map_err(|e| format!("Error opening {}: {e}", path.display()))?;
     let header = reader.header().clone();
 
     let mut rows: Vec<(u64, Row)> = Vec::new();
@@ -244,11 +358,11 @@ fn cmd_diff(
     skip_boot: bool,
 ) -> i32 {
     // Peek headers first to get field lists and names
-    let reader_a = match TraceReader::open(path_a) {
+    let reader_a = match AnyTraceReader::open(path_a) {
         Ok(r) => r,
         Err(e) => { eprintln!("Error: {e}"); return 1; }
     };
-    let reader_b = match TraceReader::open(path_b) {
+    let reader_b = match AnyTraceReader::open(path_b) {
         Ok(r) => r,
         Err(e) => { eprintln!("Error: {e}"); return 1; }
     };

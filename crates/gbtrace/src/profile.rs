@@ -58,6 +58,25 @@ const KNOWN_FIELDS: &[&str] = &[
     "sb", "sc",
 ];
 
+/// Native type of a trace field, used for Parquet column types.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FieldType {
+    UInt64,
+    UInt16,
+    UInt8,
+    Bool,
+}
+
+/// Return the native type for a known field name.
+pub fn field_type(name: &str) -> FieldType {
+    match name {
+        "cy" => FieldType::UInt64,
+        "pc" | "sp" => FieldType::UInt16,
+        "ime" => FieldType::Bool,
+        _ => FieldType::UInt8,
+    }
+}
+
 impl Profile {
     /// Load a profile from a TOML file.
     pub fn load(path: impl AsRef<Path>) -> Result<Self> {
