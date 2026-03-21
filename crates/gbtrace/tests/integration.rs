@@ -20,6 +20,7 @@ fn test_header() -> TraceHeader {
             "f".into(),
         ],
         trigger: Trigger::Instruction,
+        cy_unit: CycleUnit::Tcycle,
         notes: String::new(),
     }
 }
