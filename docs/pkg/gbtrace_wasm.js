@@ -17,6 +17,36 @@ export class TraceStore {
         wasm.__wbg_tracestore_free(ptr, 0);
     }
     /**
+     * Compare ALL fields between this store and another, returning indices where any field differs.
+     * @param {TraceStore} other
+     * @returns {Uint32Array}
+     */
+    diffAll(other) {
+        _assertClass(other, TraceStore);
+        const ret = wasm.tracestore_diffAll(this.__wbg_ptr, other.__wbg_ptr);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return takeFromExternrefTable0(ret[0]);
+    }
+    /**
+     * Compare a field between this store and another, returning indices where values differ.
+     * Returns a Uint32Array of differing entry indices.
+     * @param {TraceStore} other
+     * @param {string} field
+     * @returns {Uint32Array}
+     */
+    diffField(other, field) {
+        _assertClass(other, TraceStore);
+        const ptr0 = passStringToWasm0(field, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.tracestore_diffField(this.__wbg_ptr, other.__wbg_ptr, ptr0, len0);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return takeFromExternrefTable0(ret[0]);
+    }
+    /**
      * Get a range of entries as a JS array. Used for virtual scrolling.
      * @param {number} start
      * @param {number} count
@@ -226,6 +256,12 @@ function __wbg_get_imports() {
 const TraceStoreFinalization = (typeof FinalizationRegistry === 'undefined')
     ? { register: () => {}, unregister: () => {} }
     : new FinalizationRegistry(ptr => wasm.__wbg_tracestore_free(ptr >>> 0, 1));
+
+function _assertClass(instance, klass) {
+    if (!(instance instanceof klass)) {
+        throw new Error(`expected instance of ${klass.name}`);
+    }
+}
 
 function getArrayF64FromWasm0(ptr, len) {
     ptr = ptr >>> 0;

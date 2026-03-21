@@ -144,6 +144,70 @@ impl TraceStore {
         arr.copy_from(&out);
         Ok(arr)
     }
+
+    /// Compare a field between this store and another, returning indices where values differ.
+    /// Returns a Uint32Array of differing entry indices.
+    #[wasm_bindgen(js_name = diffField)]
+    pub fn diff_field(
+        &self,
+        other: &TraceStore,
+        field: &str,
+    ) -> Result<js_sys::Uint32Array, JsError> {
+        let col_a = self.store.field_col(field)
+            .ok_or_else(|| JsError::new(&format!("unknown field in A: {field}")))?;
+        let col_b = other.store.field_col(field)
+            .ok_or_else(|| JsError::new(&format!("unknown field in B: {field}")))?;
+
+        let len = self.store.entry_count().min(other.store.entry_count());
+        let ca = self.store.column(col_a);
+        let cb = other.store.column(col_b);
+
+        let mut indices = Vec::new();
+        for i in 0..len {
+            if ca.get_numeric(i) != cb.get_numeric(i) {
+                indices.push(i as u32);
+            }
+        }
+
+        let arr = js_sys::Uint32Array::new_with_length(indices.len() as u32);
+        arr.copy_from(&indices);
+        Ok(arr)
+    }
+
+    /// Compare ALL fields between this store and another, returning indices where any field differs.
+    #[wasm_bindgen(js_name = diffAll)]
+    pub fn diff_all(
+        &self,
+        other: &TraceStore,
+    ) -> Result<js_sys::Uint32Array, JsError> {
+        let len = self.store.entry_count().min(other.store.entry_count());
+        let header = self.store.header();
+
+        // Collect column pairs for fields present in both stores
+        let mut col_pairs: Vec<(usize, usize)> = Vec::new();
+        for (i, name) in header.fields.iter().enumerate() {
+            if name == "cy" { continue; }
+            if let Some(j) = other.store.field_col(name) {
+                col_pairs.push((i, j));
+            }
+        }
+
+        let mut indices = Vec::new();
+        for row in 0..len {
+            for &(ca, cb) in &col_pairs {
+                if self.store.column(ca).get_numeric(row)
+                    != other.store.column(cb).get_numeric(row)
+                {
+                    indices.push(row as u32);
+                    break;
+                }
+            }
+        }
+
+        let arr = js_sys::Uint32Array::new_with_length(indices.len() as u32);
+        arr.copy_from(&indices);
+        Ok(arr)
+    }
 }
 
 impl TraceStore {
