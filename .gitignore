@@ -5,3 +5,6 @@ adapters/gambatte/build/
 adapters/sameboy/SameBoy/
 adapters/sameboy/gbtrace-sameboy
 adapters/sameboy/boot_roms/
+adapters/mgba/mgba/
+adapters/mgba/gbtrace-mgba
+adapters/mgba/gbtrace-mgba-dbg
