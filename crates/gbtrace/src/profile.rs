@@ -1,6 +1,7 @@
 use crate::error::{Error, Result};
 use crate::header::Trigger;
 use serde::Deserialize;
+use std::collections::BTreeMap;
 use std::path::Path;
 
 /// A capture profile loaded from a TOML file.
@@ -12,6 +13,9 @@ pub struct Profile {
     /// Flattened, ordered list of field names to capture.
     /// `cy` is always implicitly included.
     pub fields: Vec<String>,
+    /// Memory address reads: maps field name -> address.
+    /// These are read via safe/peek memory access each instruction.
+    pub memory: BTreeMap<String, u16>,
 }
 
 /// Raw TOML structure for deserialization.
@@ -40,6 +44,9 @@ struct FieldGroups {
     interrupt: Vec<String>,
     #[serde(default)]
     serial: Vec<String>,
+    /// Arbitrary memory reads: name = "hex_address"
+    #[serde(default)]
+    memory: BTreeMap<String, String>,
 }
 
 /// All known field names in the spec.
@@ -75,6 +82,11 @@ pub fn field_type(name: &str) -> FieldType {
         "ime" => FieldType::Bool,
         _ => FieldType::UInt8,
     }
+}
+
+fn parse_hex_addr(s: &str) -> std::result::Result<u16, String> {
+    let s = s.strip_prefix("0x").or_else(|| s.strip_prefix("0X")).unwrap_or(s);
+    u16::from_str_radix(s, 16).map_err(|_| format!("invalid hex address: {s}"))
 }
 
 impl Profile {
@@ -113,11 +125,26 @@ impl Profile {
             }
         }
 
+        // Parse memory address fields
+        let mut memory = BTreeMap::new();
+        for (name, addr_str) in &raw.fields.memory {
+            if fields.contains(name) || KNOWN_FIELDS.contains(&name.as_str()) {
+                return Err(Error::Profile(format!(
+                    "memory field '{name}' conflicts with a built-in field"
+                )));
+            }
+            let addr = parse_hex_addr(addr_str)
+                .map_err(|e| Error::Profile(format!("memory field '{name}': {e}")))?;
+            fields.push(name.clone());
+            memory.insert(name.clone(), addr);
+        }
+
         Ok(Profile {
             name: raw.profile.name,
             description: raw.profile.description,
             trigger: raw.profile.trigger,
             fields,
+            memory,
         })
     }
 }

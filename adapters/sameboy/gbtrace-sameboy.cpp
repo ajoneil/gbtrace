@@ -69,6 +69,7 @@ struct Profile {
     std::string name;
     std::string trigger;
     std::vector<std::string> fields; // ordered, including "cy"
+    std::unordered_map<std::string, unsigned short> memory; // name -> address
 };
 
 static Profile parse_profile(const std::string &path) {
@@ -83,33 +84,46 @@ static Profile parse_profile(const std::string &path) {
     }
 
     // Minimal TOML parser — enough for our profile format.
+    auto trim = [](std::string &s) {
+        while (!s.empty() && std::isspace(s.front())) s.erase(0, 1);
+        while (!s.empty() && std::isspace(s.back())) s.pop_back();
+    };
+    auto strip_quotes = [](std::string &s) {
+        if (s.size() >= 2 && s.front() == '"' && s.back() == '"')
+            s = s.substr(1, s.size() - 2);
+    };
+
     std::string line;
+    bool in_memory_section = false;
     while (std::getline(f, line)) {
         auto hash = line.find('#');
         if (hash != std::string::npos) line = line.substr(0, hash);
+        trim(line);
+
+        if (line.size() >= 2 && line.front() == '[') {
+            in_memory_section = (line == "[fields.memory]");
+            continue;
+        }
 
         auto eq = line.find('=');
         if (eq == std::string::npos) continue;
 
         std::string key = line.substr(0, eq);
         std::string val = line.substr(eq + 1);
+        trim(key); trim(val);
 
-        auto trim = [](std::string &s) {
-            while (!s.empty() && std::isspace(s.front())) s.erase(0, 1);
-            while (!s.empty() && std::isspace(s.back())) s.pop_back();
-        };
-        trim(key);
-        trim(val);
-
-        if (key == "name") {
-            if (val.size() >= 2 && val.front() == '"' && val.back() == '"')
-                val = val.substr(1, val.size() - 2);
+        if (in_memory_section) {
+            strip_quotes(val);
+            unsigned long addr = std::strtoul(val.c_str(), nullptr, 16);
+            prof.memory[key] = static_cast<unsigned short>(addr);
+            prof.fields.push_back(key);
+        } else if (key == "name") {
+            strip_quotes(val);
             prof.name = val;
         } else if (key == "trigger") {
-            if (val.size() >= 2 && val.front() == '"' && val.back() == '"')
-                val = val.substr(1, val.size() - 2);
+            strip_quotes(val);
             prof.trigger = val;
-        } else if (val.front() == '[') {
+        } else if (!val.empty() && val.front() == '[') {
             auto start = val.find('[');
             auto end = val.find(']');
             if (start != std::string::npos && end != std::string::npos) {
@@ -117,9 +131,7 @@ static Profile parse_profile(const std::string &path) {
                 std::istringstream ss(inner);
                 std::string token;
                 while (std::getline(ss, token, ',')) {
-                    trim(token);
-                    if (token.size() >= 2 && token.front() == '"' && token.back() == '"')
-                        token = token.substr(1, token.size() - 2);
+                    trim(token); strip_quotes(token);
                     if (!token.empty() && token != "cy") {
                         prof.fields.push_back(token);
                     }
@@ -165,6 +177,9 @@ static void build_emitters(const Profile &prof) {
         } else if (auto it2 = IO_FIELD_ADDR.find(field); it2 != IO_FIELD_ADDR.end()) {
             em.source = FieldEmitter::IO_READ;
             em.io_addr = it2->second;
+        } else if (auto it3 = prof.memory.find(field); it3 != prof.memory.end()) {
+            em.source = FieldEmitter::IO_READ;
+            em.io_addr = it3->second;
         } else {
             std::fprintf(stderr, "Warning: unknown field '%s', skipping\n", field.c_str());
             continue;
