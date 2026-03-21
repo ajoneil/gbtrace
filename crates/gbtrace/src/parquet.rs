@@ -206,7 +206,16 @@ impl ParquetTraceReader {
     /// Open a Parquet trace file and read its header from file metadata.
     pub fn open(path: impl AsRef<Path>) -> Result<Self> {
         let file = File::open(path.as_ref())?;
-        let builder = ParquetRecordBatchReaderBuilder::try_new(file)?;
+        Self::from_chunk_reader(file)
+    }
+
+    /// Load from in-memory bytes. Useful for WASM where filesystem isn't available.
+    pub fn from_bytes(data: Vec<u8>) -> Result<Self> {
+        Self::from_chunk_reader(bytes::Bytes::from(data))
+    }
+
+    fn from_chunk_reader<R: parquet::file::reader::ChunkReader + 'static>(reader: R) -> Result<Self> {
+        let builder = ParquetRecordBatchReaderBuilder::try_new(reader)?;
 
         // Extract header from Arrow schema metadata (preserved in Parquet file)
         let schema = builder.schema();
