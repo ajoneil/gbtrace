@@ -127,7 +127,6 @@ export class AppShell extends LitElement {
   render() {
     return html`
       <div class="layout"
-        @trace-loaded=${this._onTestPicked}
         @trace-selected=${this._onTraceSwitch}
         @trace-compare=${this._onTraceCompare}
         @trace-deselect-b=${this._exitCompare}
@@ -153,7 +152,7 @@ export class AppShell extends LitElement {
   _renderLanding() {
     return html`
       <file-loader @trace-loaded=${this._onFileLoaded}></file-loader>
-      <test-picker></test-picker>
+      <test-picker @trace-loaded=${this._onTestPicked}></test-picker>
     `;
   }
 
