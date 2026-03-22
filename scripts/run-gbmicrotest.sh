@@ -106,7 +106,9 @@ for emu_name in $EMUS; do
     adapter_dir="$PROJECT_DIR/adapters/$emu_name"
     if [[ -f "$adapter_dir/Makefile" ]]; then
         echo "Building $emu_name adapter..."
-        make -C "$adapter_dir" -j"$(nproc)" 2>&1 | tail -1
+        if ! make -C "$adapter_dir" -j"$(nproc)" > /dev/null 2>&1; then
+            echo "  WARNING: $emu_name build failed, skipping"
+        fi
     fi
 done
 

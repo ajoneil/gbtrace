@@ -46,7 +46,9 @@ for adapter in "${ADAPTERS[@]}"; do
     adapter_dir="$PROJECT_DIR/adapters/$adapter"
     if [[ -f "$adapter_dir/Makefile" ]]; then
         echo "Building $adapter adapter..."
-        make -C "$adapter_dir" -j"$(nproc)" 2>&1 | tail -1
+        if ! make -C "$adapter_dir" -j"$(nproc)" > /dev/null 2>&1; then
+            echo "  WARNING: $adapter build failed, skipping"
+        fi
     fi
 done
 
