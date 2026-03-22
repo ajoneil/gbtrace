@@ -29,12 +29,18 @@ const TEST_SUITES = [
     ],
   },
   {
-    name: 'Blargg CPU',
+    name: 'Blargg',
     base: 'tests/blargg',
     profile: 'tests/blargg/blargg_cpu.toml',
     manifest: 'tests/blargg/manifest.json',
     preferredEmu: 'gambatte',
     tests: null,
+    categories: [
+      { name: 'cpu', filter: 'cpu_instrs' },
+      { name: 'sound', filter: 'dmg_sound' },
+      { name: 'mem timing', filter: 'mem_timing' },
+      { name: 'oam bug', filter: 'oam_bug' },
+    ],
   },
 ];
 

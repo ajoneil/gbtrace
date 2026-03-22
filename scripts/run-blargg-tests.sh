@@ -12,8 +12,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-ROM_DIR="$PROJECT_DIR/docs/tests/blargg/cpu_instrs/individual"
-PROFILE="$PROJECT_DIR/docs/tests/blargg/blargg_cpu.toml"
+BLARGG_DIR="$PROJECT_DIR/docs/tests/blargg"
+PROFILE="$BLARGG_DIR/blargg_cpu.toml"
 CLI="$PROJECT_DIR/target/release/gbtrace-cli"
 
 # Serial stop: 4th newline = after "Passed\n" or "Failed\n"
@@ -75,11 +75,12 @@ for adapter in "${ADAPTERS[@]}"; do
 
     printf "\n=== %s ===\n\n" "$adapter"
 
-    for rom in "$ROM_DIR"/*.gb; do
+    while IFS= read -r rom; do
         name="$(basename "$rom" .gb)"
-        jsonl="$ROM_DIR/${name}_${adapter}.gbtrace"
+        rom_dir="$(dirname "$rom")"
+        jsonl="${rom_dir}/${name}_${adapter}.gbtrace"
 
-        printf "  %-30s  " "$name"
+        printf "  %-40s  " "$name"
 
         stderr_out=$(env "$bin" \
             --rom "$rom" \
@@ -107,7 +108,7 @@ for adapter in "${ADAPTERS[@]}"; do
         fi
 
         # Convert to parquet with pass/fail suffix
-        parquet="$ROM_DIR/${name}_${adapter}${suffix}.gbtrace.parquet"
+        parquet="${rom_dir}/${name}_${adapter}${suffix}.gbtrace.parquet"
         jsonl_size=$(du -h "$jsonl" 2>/dev/null | cut -f1)
         "$CLI" convert "$jsonl" -o "$parquet" >/dev/null 2>&1 && rm -f "$jsonl"
         parquet_size=$(du -h "$parquet" 2>/dev/null | cut -f1)
@@ -116,7 +117,7 @@ for adapter in "${ADAPTERS[@]}"; do
 
         # Clean up sav files
         rm -f "${rom%.gb}.sav"
-    done
+    done < <(find "$BLARGG_DIR" -name "*.gb" | sort)
 done
 
 printf "\n=== Summary ===\n"
@@ -125,26 +126,28 @@ printf "  Pass: %d  Fail: %d  Unknown: %d  Total: %d\n" "$PASS" "$FAIL" "$ERROR"
 # Generate manifest
 echo "Generating manifest..."
 python3 -c "
-import json, glob, os, re
+import json, os
 
-rom_dir = '$ROM_DIR'
-roms = sorted(glob.glob(os.path.join(rom_dir, '*.gb')))
+blargg_dir = '$BLARGG_DIR'
 emus = ['gateboy', 'gambatte', 'sameboy', 'mgba']
 
 manifest = []
-for rom in roms:
-    name = os.path.splitext(os.path.basename(rom))[0]
-    rom_rel = 'cpu_instrs/individual/' + os.path.basename(rom)
-    entry = {'name': name, 'rom': rom_rel, 'emulators': {}}
-    for emu in emus:
-        for status in ['pass', 'fail']:
-            fname = f'{name}_{emu}_{status}.gbtrace.parquet'
-            if os.path.exists(os.path.join(rom_dir, fname)):
-                entry['emulators'][emu] = status
-                break
-    manifest.append(entry)
+for dirpath, dirnames, filenames in sorted(os.walk(blargg_dir)):
+    for fname in sorted(filenames):
+        if not fname.endswith('.gb'):
+            continue
+        name = fname[:-3]
+        rom_rel = os.path.relpath(os.path.join(dirpath, fname), blargg_dir)
+        entry = {'name': name, 'rom': rom_rel, 'emulators': {}}
+        for emu in emus:
+            for status in ['pass', 'fail']:
+                trace = f'{name}_{emu}_{status}.gbtrace.parquet'
+                if os.path.exists(os.path.join(dirpath, trace)):
+                    entry['emulators'][emu] = status
+                    break
+        manifest.append(entry)
 
-out_path = os.path.join(rom_dir, '..', '..', 'manifest.json')
+out_path = os.path.join(blargg_dir, 'manifest.json')
 with open(out_path, 'w') as f:
     json.dump(manifest, f)
 print(f'  {len(manifest)} tests, {sum(1 for t in manifest for e in t[\"emulators\"])} traces')
