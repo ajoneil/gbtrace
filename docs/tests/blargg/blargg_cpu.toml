@@ -6,11 +6,3 @@ trigger = "instruction"
 [fields]
 cpu = ["pc", "sp", "a", "f", "b", "c", "d", "e", "h", "l"]
 serial = ["sb", "sc"]
-
-[fields.memory]
-# Blargg test status: 0x80=running, 0x00=passed, other=failed
-test_status = "A000"
-# Magic signature 0xDE 0xB0 0x61 when test is done
-test_sig1   = "A001"
-test_sig2   = "A002"
-test_sig3   = "A003"

@@ -76,13 +76,12 @@ for adapter in "${ADAPTERS[@]}"; do
             --output "$jsonl" \
             --stop-on-serial "$STOP_SERIAL_BYTE" \
             --stop-serial-count "$STOP_SERIAL_COUNT" \
-            --stop-when A001=DE \
             --frames "$MAX_FRAMES" \
             2>&1) || true
 
         frame_info=$(echo "$stderr_out" | grep -oP 'frame \K[0-9]+' | tail -1)
 
-        # Determine pass/fail: try serial output first, fall back to memory status
+        # Determine pass/fail from serial output
         serial=$(extract_serial "$jsonl" 2>/dev/null || echo "")
 
         if echo "$serial" | grep -qi "passed"; then
@@ -92,21 +91,8 @@ for adapter in "${ADAPTERS[@]}"; do
             status="FAIL"; suffix="_fail"
             ((FAIL++)) || true
         else
-            # No serial — check test_status field (0xA000): 0=pass, other=fail
-            mem_status=$("$CLI" query "$jsonl" -w "test_sig1=DE" --max 1 2>&1 || true)
-            if echo "$mem_status" | grep -qP '^\d+ match'; then
-                # Signature found — check test_status value
-                if echo "$mem_status" | grep -qP 'test_status=0\b'; then
-                    status="PASS"; suffix="_pass"
-                    ((PASS++)) || true
-                else
-                    status="FAIL"; suffix="_fail"
-                    ((FAIL++)) || true
-                fi
-            else
-                status="????"; suffix="_fail"
-                ((ERROR++)) || true
-            fi
+            status="????"; suffix="_fail"
+            ((ERROR++)) || true
         fi
 
         # Convert to parquet with pass/fail suffix
