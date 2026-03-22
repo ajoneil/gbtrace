@@ -1,7 +1,7 @@
 import { LitElement, html, css } from 'lit';
 import './file-loader.js';
 import './test-picker.js';
-import './compare-bar.js';
+import './trace-selector.js';
 import './trace-header.js';
 import './trace-table.js';
 import './trace-query.js';
@@ -42,16 +42,6 @@ export class AppShell extends LitElement {
       font-weight: 400;
       font-size: 0.9rem;
     }
-    .new-trace {
-      padding: 6px 12px;
-      background: none;
-      border: 1px solid var(--border);
-      border-radius: 6px;
-      color: var(--text-muted);
-      cursor: pointer;
-      font-size: 0.8rem;
-    }
-    .new-trace:hover { border-color: var(--accent); color: var(--accent); }
     test-picker {
       display: flex;
       justify-content: center;
@@ -69,29 +59,24 @@ export class AppShell extends LitElement {
       flex: 1;
       min-height: 0;
     }
-    .compare-header {
+    .compare-stats {
       display: flex;
       align-items: center;
-      gap: 12px;
-      padding: 8px 12px;
+      gap: 8px;
+      padding: 6px 12px;
+      font-size: 0.8rem;
       background: var(--bg-surface);
       border: 1px solid var(--border);
       border-radius: 8px;
-      font-size: 0.8rem;
     }
-    .compare-header .label { color: var(--text-muted); }
-    .compare-header .name-a { color: #58a6ff; font-weight: 600; font-family: var(--mono); }
-    .compare-header .vs { color: var(--text-muted); }
-    .compare-header .name-b { color: #d29922; font-weight: 600; font-family: var(--mono); }
-    .compare-header .entries { color: var(--text-muted); margin-left: auto; }
-    .compare-header .match-pct {
+    .compare-stats .match-pct {
       font-family: var(--mono);
       font-weight: 600;
     }
-    .compare-header .match-pct.good { color: var(--green); }
-    .compare-header .match-pct.partial { color: var(--yellow); }
-    .compare-header .match-pct.bad { color: var(--red); }
-    .diff-fields {
+    .compare-stats .match-pct.good { color: var(--green); }
+    .compare-stats .match-pct.partial { color: var(--yellow); }
+    .compare-stats .match-pct.bad { color: var(--red); }
+    .compare-stats .diff-fields {
       display: flex;
       gap: 6px;
       flex-wrap: wrap;
@@ -99,34 +84,22 @@ export class AppShell extends LitElement {
       font-family: var(--mono);
       color: var(--text-muted);
     }
-    .diff-fields .diff-field {
-      color: var(--red);
-    }
-    .compare-header .exit-btn {
-      padding: 2px 8px;
-      background: none;
-      border: 1px solid var(--border);
-      border-radius: 4px;
-      color: var(--text-muted);
-      cursor: pointer;
-      font-size: 0.75rem;
-    }
-    .compare-header .exit-btn:hover {
-      border-color: var(--red);
-      color: var(--red);
-    }
+    .compare-stats .diff-field { color: var(--red); }
+    .compare-stats .entries { color: var(--text-muted); margin-left: auto; }
   `;
 
   static properties = {
-    _store: { state: true },
-    _storeB: { state: true },
-    _header: { state: true },
-    _filename: { state: true },
-    _nameA: { state: true },
-    _nameB: { state: true },
+    // ROM context
     _suite: { state: true },
     _testRom: { state: true },
-    _emulator: { state: true },
+    _testName: { state: true },
+    // Trace stores
+    _store: { state: true },
+    _storeB: { state: true },
+    _nameA: { state: true },
+    _nameB: { state: true },
+    // Viewer state
+    _header: { state: true },
     _highlightIndices: { state: true },
     _chartField: { state: true },
     _hoverIndex: { state: true },
@@ -135,15 +108,14 @@ export class AppShell extends LitElement {
 
   constructor() {
     super();
-    this._store = null;
-    this._storeB = null;
-    this._header = null;
-    this._filename = null;
-    this._nameA = '';
-    this._nameB = '';
     this._suite = null;
     this._testRom = null;
-    this._emulator = null;
+    this._testName = '';
+    this._store = null;
+    this._storeB = null;
+    this._nameA = '';
+    this._nameB = '';
+    this._header = null;
     this._highlightIndices = null;
     this._chartField = null;
     this._hoverIndex = null;
@@ -152,47 +124,56 @@ export class AppShell extends LitElement {
 
   render() {
     return html`
-      <div class="layout">
+      <div class="layout"
+        @trace-loaded=${this._onTestPicked}
+        @trace-selected=${this._onTraceSelected}
+        @trace-deselect-b=${this._exitCompare}
+        @change-rom=${this._reset}
+        @highlight-changed=${this._onHighlightChanged}
+        @jump-to-index=${this._onJumpToIndex}
+        @field-selected=${this._onFieldSelected}
+        @hover-index=${this._onHoverIndex}
+      >
         <header>
           <h1>gbtrace <span>Game Boy Trace Viewer</span></h1>
-          ${this._store ? html`
-            <button class="new-trace" @click=${this._reset}>Load another</button>
-          ` : ''}
         </header>
 
-        ${this._store
-          ? (this._storeB ? this._renderCompare() : this._renderViewer())
-          : html`
-            <file-loader @trace-loaded=${this._onTraceLoaded}></file-loader>
-            <test-picker @trace-loaded=${this._onTraceLoaded}></test-picker>
-          `
+        ${this._suite
+          ? this._renderWithRom()
+          : this._renderLanding()
         }
       </div>
     `;
   }
 
-  _renderViewer() {
+  _renderLanding() {
+    return html`
+      <file-loader @trace-loaded=${this._onFileLoaded}></file-loader>
+      <test-picker></test-picker>
+    `;
+  }
+
+  _renderWithRom() {
+    return html`
+      <trace-selector
+        .suite=${this._suite}
+        .testRom=${this._testRom}
+        .testName=${this._testName}
+        .activeA=${this._nameA}
+        .activeB=${this._nameB}
+      ></trace-selector>
+
+      ${this._store
+        ? (this._storeB ? this._renderCompare() : this._renderSingle())
+        : ''
+      }
+    `;
+  }
+
+  _renderSingle() {
     const fields = this._header?.fields || [];
     return html`
-      <div class="sections"
-        @highlight-changed=${this._onHighlightChanged}
-        @jump-to-index=${this._onJumpToIndex}
-        @field-selected=${this._onFieldSelected}
-        @hover-index=${this._onHoverIndex}
-        @compare-loaded=${this._onCompareLoaded}
-      >
-        <trace-header
-          .header=${this._header}
-          .entryCount=${this._store.entryCount()}
-          .filename=${this._filename}
-        ></trace-header>
-
-        <compare-bar
-          .suite=${this._suite}
-          .testRom=${this._testRom}
-          .emulator=${this._emulator}
-        ></compare-bar>
-
+      <div class="sections">
         <trace-query .store=${this._store} .fields=${fields}></trace-query>
 
         ${this._chartField ? html`
@@ -220,18 +201,9 @@ export class AppShell extends LitElement {
     const minCount = Math.min(countA, countB);
 
     return html`
-      <div class="sections"
-        @highlight-changed=${this._onHighlightChanged}
-        @jump-to-index=${this._onJumpToIndex}
-        @field-selected=${this._onFieldSelected}
-        @hover-index=${this._onHoverIndex}
-      >
-        <div class="compare-header">
-          <span class="label">Comparing</span>
-          <span class="name-a">${this._nameA}</span>
-          <span class="vs">vs</span>
-          <span class="name-b">${this._nameB}</span>
-          ${this._diffStats ? html`
+      <div class="sections">
+        ${this._diffStats ? html`
+          <div class="compare-stats">
             <span class="match-pct ${this._diffStats.match_pct === 100 ? 'good' : this._diffStats.match_pct > 90 ? 'partial' : 'bad'}">
               ${this._diffStats.match_pct}% match
             </span>
@@ -243,10 +215,9 @@ export class AppShell extends LitElement {
                 })}
               </span>
             ` : ''}
-          ` : ''}
-          <span class="entries">${minCount.toLocaleString()} entries</span>
-          <button class="exit-btn" @click=${this._exitCompare}>exit compare</button>
-        </div>
+            <span class="entries">${minCount.toLocaleString()} entries</span>
+          </div>
+        ` : ''}
 
         <trace-query
           .store=${this._store}
@@ -279,24 +250,55 @@ export class AppShell extends LitElement {
     `;
   }
 
-  _onTraceLoaded(e) {
-    const { store, filename, suite, testRom, emulator } = e.detail;
+  // --- Events ---
+
+  /** User picked a test from the test picker — enters ROM context */
+  _onTestPicked(e) {
+    const { store, suite, testRom, emulator } = e.detail;
+    this._suite = suite;
+    this._testRom = testRom;
+    this._testName = testRom?.replace('.gb', '').split('/').pop() || '';
+    this._setStoreA(store, emulator);
+  }
+
+  /** User dropped/browsed a file — no ROM context */
+  _onFileLoaded(e) {
+    const { store, filename } = e.detail;
+    // No suite context — just show the trace
+    this._suite = { base: '', profile: '' };
+    this._testRom = null;
+    this._testName = filename;
+    this._setStoreA(store, filename);
+  }
+
+  /** Trace selected from the selector bar */
+  _onTraceSelected(e) {
+    const { store, name } = e.detail;
+    if (!this._store) {
+      // First trace — set as A
+      this._setStoreA(store, name);
+    } else {
+      // Second trace — compare mode
+      this._setStoreB(store, name);
+    }
+  }
+
+  _setStoreA(store, name) {
+    if (this._store) this._store.free();
+    if (this._storeB) this._storeB.free();
     this._store = store;
     this._storeB = null;
     this._header = store.header();
-    this._filename = filename;
-    this._nameA = emulator || filename;
+    this._nameA = name || '';
     this._nameB = '';
-    this._suite = suite || null;
-    this._testRom = testRom || null;
-    this._emulator = emulator || null;
     this._highlightIndices = null;
     this._chartField = null;
     this._hoverIndex = null;
+    this._diffStats = null;
   }
 
-  _onCompareLoaded(e) {
-    const { store, name } = e.detail;
+  _setStoreB(store, name) {
+    if (this._storeB) this._storeB.free();
     this._storeB = store;
     this._nameB = name;
     this._highlightIndices = null;
@@ -320,6 +322,23 @@ export class AppShell extends LitElement {
     this._diffStats = null;
   }
 
+  _reset() {
+    if (this._store) this._store.free();
+    if (this._storeB) this._storeB.free();
+    this._suite = null;
+    this._testRom = null;
+    this._testName = '';
+    this._store = null;
+    this._storeB = null;
+    this._nameA = '';
+    this._nameB = '';
+    this._header = null;
+    this._highlightIndices = null;
+    this._chartField = null;
+    this._hoverIndex = null;
+    this._diffStats = null;
+  }
+
   _onHighlightChanged(e) {
     this._highlightIndices = e.detail.indices;
   }
@@ -336,23 +355,6 @@ export class AppShell extends LitElement {
 
   _onHoverIndex(e) {
     this._hoverIndex = e.detail.index;
-  }
-
-  _reset() {
-    if (this._store) this._store.free();
-    if (this._storeB) this._storeB.free();
-    this._store = null;
-    this._storeB = null;
-    this._header = null;
-    this._filename = null;
-    this._nameA = '';
-    this._nameB = '';
-    this._suite = null;
-    this._testRom = null;
-    this._emulator = null;
-    this._highlightIndices = null;
-    this._chartField = null;
-    this._hoverIndex = null;
   }
 }
 
