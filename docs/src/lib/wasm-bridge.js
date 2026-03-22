@@ -27,3 +27,9 @@ export async function prepareForDiff(storeA, storeB) {
   const mod = await loadWasm();
   return mod.prepareForDiff(storeA, storeB);
 }
+
+/** Synchronous version — only works after WASM is already loaded. */
+export function prepareForDiffSync(storeA, storeB) {
+  if (!wasmModule) throw new Error('WASM not loaded');
+  return wasmModule.prepareForDiff(storeA, storeB);
+}
