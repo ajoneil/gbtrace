@@ -11,19 +11,13 @@ import './trace-diff-table.js';
 export class AppShell extends LitElement {
   static styles = css`
     :host {
-      display: flex;
-      flex-direction: column;
-      height: 100vh;
+      display: block;
     }
     .layout {
-      max-width: 1400px;
       margin: 0 auto;
       padding: 24px;
       width: 100%;
-      display: flex;
-      flex-direction: column;
-      flex: 1;
-      min-height: 0;
+      box-sizing: border-box;
     }
     header {
       display: flex;
@@ -47,17 +41,11 @@ export class AppShell extends LitElement {
       justify-content: center;
       margin-top: 16px;
     }
-    .sections {
-      display: flex;
-      flex-direction: column;
-      flex: 1;
-      min-height: 0;
-    }
     .sections > * { margin-bottom: 12px; }
     .sections > trace-table,
     .sections > trace-diff-table {
-      flex: 1;
-      min-height: 0;
+      min-height: 500px;
+      height: 70vh;
     }
     .compare-stats {
       display: flex;
