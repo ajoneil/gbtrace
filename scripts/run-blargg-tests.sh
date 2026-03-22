@@ -38,11 +38,9 @@ adapter_bin() {
     echo "$PROJECT_DIR/adapters/$1/gbtrace-$1"
 }
 
-# Build CLI if needed
-if [[ ! -x "$CLI" ]]; then
-    echo "Building gbtrace-cli..."
-    cargo build --release -p gbtrace-cli --manifest-path "$PROJECT_DIR/Cargo.toml"
-fi
+# Always rebuild CLI to ensure latest features
+echo "Building gbtrace-cli..."
+cargo build --release -p gbtrace-cli --manifest-path "$PROJECT_DIR/Cargo.toml" 2>&1 | tail -1
 
 # Build requested adapters
 for adapter in $ADAPTERS; do
