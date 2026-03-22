@@ -76,7 +76,7 @@ for adapter in $ADAPTERS; do
         printf "  %-40s  " "$name"
 
         # Stream adapter output directly to parquet (no temp JSONL)
-        local stderr_file="/tmp/gbtrace_blargg_${name}_stderr"
+        stderr_file="/tmp/gbtrace_blargg_${name}_stderr"
         if ! (
             set +e
             "$bin" \
