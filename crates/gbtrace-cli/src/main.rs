@@ -178,23 +178,42 @@ fn cmd_info(path: &PathBuf) -> i32 {
 // ---------------------------------------------------------------------------
 
 fn cmd_convert(input: &PathBuf, output: Option<PathBuf>) -> i32 {
-    let output = output.unwrap_or_else(|| {
-        let ext = input.extension().and_then(|e| e.to_str()).unwrap_or("");
-        if ext == "parquet" {
-            input.with_extension("gbtrace")
-        } else {
-            // .gbtrace or .gbtrace.gz -> .gbtrace.parquet
-            let stem = input.file_stem().and_then(|s| s.to_str()).unwrap_or("trace");
-            let stem = stem.strip_suffix(".gbtrace").unwrap_or(stem);
-            input.with_file_name(format!("{stem}.gbtrace.parquet"))
-        }
-    });
+    let is_stdin = input.as_os_str() == "-";
 
-    let reader = match AnyTraceReader::open(input) {
-        Ok(r) => r,
-        Err(e) => {
-            eprintln!("Error opening input: {e}");
+    let output = match output {
+        Some(o) => o,
+        None if is_stdin => {
+            eprintln!("Error: --output required when reading from stdin");
             return 1;
+        }
+        None => {
+            let ext = input.extension().and_then(|e| e.to_str()).unwrap_or("");
+            if ext == "parquet" {
+                input.with_extension("gbtrace")
+            } else {
+                let stem = input.file_stem().and_then(|s| s.to_str()).unwrap_or("trace");
+                let stem = stem.strip_suffix(".gbtrace").unwrap_or(stem);
+                input.with_file_name(format!("{stem}.gbtrace.parquet"))
+            }
+        }
+    };
+
+    let reader = if is_stdin {
+        use std::io::BufReader;
+        match gbtrace::TraceReader::from_reader(BufReader::new(std::io::stdin())) {
+            Ok(r) => AnyTraceReader::Jsonl(r),
+            Err(e) => {
+                eprintln!("Error reading stdin: {e}");
+                return 1;
+            }
+        }
+    } else {
+        match AnyTraceReader::open(input) {
+            Ok(r) => r,
+            Err(e) => {
+                eprintln!("Error opening input: {e}");
+                return 1;
+            }
         }
     };
 

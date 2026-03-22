@@ -44,6 +44,21 @@ impl TraceReader {
         })
     }
 
+    /// Create a reader from any buffered reader (e.g. stdin).
+    pub fn from_reader<R: BufRead + 'static>(mut reader: R) -> Result<Self> {
+        let mut header_line = String::new();
+        reader.read_line(&mut header_line)?;
+        if header_line.is_empty() {
+            return Err(Error::MissingHeader);
+        }
+        let header: TraceHeader = serde_json::from_str(&header_line)?;
+        header.validate()?;
+        Ok(Self {
+            lines: Box::new(reader),
+            header,
+        })
+    }
+
     /// Get a reference to the parsed header.
     pub fn header(&self) -> &TraceHeader {
         &self.header

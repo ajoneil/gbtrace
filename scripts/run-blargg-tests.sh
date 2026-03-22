@@ -59,16 +59,6 @@ PASS=0
 FAIL=0
 ERROR=0
 
-extract_serial() {
-    local trace_file="$1"
-    awk -F'"sc":' '{
-        split($2, a, /[,}]/); sc = a[1] + 0
-        split($0, b, "\"sb\":"); split(b[2], c, /[,}]/); sb = c[1] + 0
-        if (sc == 255 && prev_sc != 255) printf "%c", sb
-        prev_sc = sc
-    }' "$trace_file"
-}
-
 for adapter in $ADAPTERS; do
     bin="$(adapter_bin "$adapter")"
     if [[ ! -x "$bin" ]]; then
@@ -81,28 +71,31 @@ for adapter in $ADAPTERS; do
     while IFS= read -r rom; do
         name="$(basename "$rom" .gb)"
         rom_dir="$(dirname "$rom")"
-        jsonl="${rom_dir}/${name}_${adapter}.gbtrace"
+        tmp_parquet="/tmp/gbtrace_blargg_${name}_${adapter}.gbtrace.parquet"
 
         printf "  %-40s  " "$name"
 
+        # Pipe adapter output directly to parquet conversion (streaming, no OOM)
         stderr_out=$("$bin" \
             --rom "$rom" \
             --profile "$PROFILE" \
-            --output "$jsonl" \
             --stop-on-serial "$STOP_SERIAL_BYTE" \
             --stop-serial-count "$STOP_SERIAL_COUNT" \
             --frames "$MAX_FRAMES" \
-            2>&1) || {
+            2>/tmp/gbtrace_blargg_stderr | \
+            "$CLI" convert - -o "$tmp_parquet" 2>&1) || {
             printf "ERROR (adapter crashed)\n"
             ((ERROR++)) || true
-            rm -f "$jsonl" "${rom%.gb}.sav"
+            rm -f "$tmp_parquet" "${rom%.gb}.sav" /tmp/gbtrace_blargg_stderr
             continue
         }
 
-        frame_info=$(echo "$stderr_out" | grep -oP 'frame \K[0-9]+' | tail -1)
+        frame_info=$(grep -oP 'frame \K[0-9]+' /tmp/gbtrace_blargg_stderr 2>/dev/null | tail -1)
 
-        # Determine pass/fail from serial output
-        serial=$(extract_serial "$jsonl" 2>/dev/null || echo "")
+        # Determine pass/fail by querying the parquet for serial output
+        # SC=255 (bit 7 set) means a byte was sent. Check SB values.
+        serial=$("$CLI" query "$tmp_parquet" -w "sc changes to FF" --max 100 2>&1 | \
+            grep -oP 'sb=\K[0-9a-f]+' | while read hex; do printf "\\x$hex"; done) || serial=""
 
         if echo "$serial" | grep -qi "passed"; then
             status="PASS"; suffix="_pass"
@@ -115,13 +108,13 @@ for adapter in $ADAPTERS; do
             ((ERROR++)) || true
         fi
 
-        # Convert to parquet with pass/fail suffix
+        # Move to final location with pass/fail suffix
         parquet="${rom_dir}/${name}_${adapter}${suffix}.gbtrace.parquet"
-        jsonl_size=$(du -h "$jsonl" 2>/dev/null | cut -f1)
-        "$CLI" convert "$jsonl" -o "$parquet" >/dev/null 2>&1 && rm -f "$jsonl"
+        mv "$tmp_parquet" "$parquet"
         parquet_size=$(du -h "$parquet" 2>/dev/null | cut -f1)
+        entries=$("$CLI" info "$parquet" 2>/dev/null | grep Entries | awk '{print $2}')
 
-        printf "%-4s  frame %-5s  %s -> %s\n" "$status" "${frame_info:-?}" "$jsonl_size" "$parquet_size"
+        printf "%-4s  frame %-5s  %s entries  %s\n" "$status" "${frame_info:-?}" "${entries:-?}" "$parquet_size"
 
         # Clean up sav files
         rm -f "${rom%.gb}.sav"
