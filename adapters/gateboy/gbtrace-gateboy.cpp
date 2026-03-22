@@ -139,7 +139,7 @@ static Profile parse_profile(const std::string &path) {
 
 struct FieldEmitter {
     std::string name;
-    enum Source { CPU_REG8, CPU_REG16, CPU_IME, IO_READ, OPCODE } source;
+    enum Source { CPU_REG8, CPU_REG16, CPU_IME, IO_READ } source;
     unsigned short io_addr; // for IO_READ
 };
 
@@ -185,8 +185,6 @@ static void build_emitters(const Profile &prof) {
             std::fprintf(stderr, "Note: skipping '%s' (serial not simulated in GateBoy)\n",
                          field.c_str());
             continue;
-        } else if (field == "op") {
-            em.source = FieldEmitter::OPCODE;
         } else if (field == "ime") {
             em.source = FieldEmitter::CPU_IME;
         } else if (field == "pc" || field == "sp") {
@@ -297,9 +295,6 @@ static void emit_entry(FILE *out, GateBoy &gb) {
             std::fprintf(out, "%d", val);
             break;
         }
-        case FieldEmitter::OPCODE:
-            std::fprintf(out, "%d", reg.op_next);
-            break;
         }
     }
 

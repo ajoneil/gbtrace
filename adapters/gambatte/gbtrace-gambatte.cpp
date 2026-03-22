@@ -140,7 +140,7 @@ static bool g_stop_serial_triggered = false;
 // Pre-computed list of what to emit per entry, for fast callback execution.
 struct FieldEmitter {
     std::string name;
-    enum Source { CALLBACK_8, CALLBACK_16, IO_READ, OPCODE, IME } source;
+    enum Source { CALLBACK_8, CALLBACK_16, IO_READ, IME } source;
     int cb_index;           // for CALLBACK_8/16
     unsigned short io_addr; // for IO_READ
 };
@@ -152,9 +152,7 @@ static void build_emitters(const Profile &prof) {
         FieldEmitter em;
         em.name = field;
 
-        if (field == "op") {
-            em.source = FieldEmitter::OPCODE;
-        } else if (field == "ime") {
+        if (field == "ime") {
             // gambatte doesn't expose IME — skip rather than emit fake data
             std::fprintf(stderr, "Note: skipping 'ime' (not available in gambatte)\n");
             continue;
@@ -206,9 +204,6 @@ static void trace_callback(void *data) {
             break;
         case FieldEmitter::IO_READ:
             fput_u8(g_output, g_gb->externalRead(em.io_addr));
-            break;
-        case FieldEmitter::OPCODE:
-            fput_u8(g_output, (r[12] >> 16) & 0xFF);
             break;
         case FieldEmitter::IME:
             // IME isn't directly exposed; read from callback data isn't available.
