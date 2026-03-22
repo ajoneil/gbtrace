@@ -75,27 +75,27 @@ for adapter in $ADAPTERS; do
 
         printf "  %-40s  " "$name"
 
-        # Write to temp JSONL, convert to parquet, delete JSONL
-        jsonl="/tmp/gbtrace_blargg_${name}_${adapter}.gbtrace"
-
-        "$bin" \
-            --rom "$rom" \
-            --profile "$PROFILE" \
-            --output "$jsonl" \
-            --stop-on-serial "$STOP_SERIAL_BYTE" \
-            --stop-serial-count "$STOP_SERIAL_COUNT" \
-            --frames "$MAX_FRAMES" \
-            2>/tmp/gbtrace_blargg_stderr || {
-            printf "ERROR (adapter crashed)\n"
+        # Stream adapter output directly to parquet (no temp JSONL)
+        local stderr_file="/tmp/gbtrace_blargg_${name}_stderr"
+        if ! (
+            set +e
+            "$bin" \
+                --rom "$rom" \
+                --profile "$PROFILE" \
+                --stop-on-serial "$STOP_SERIAL_BYTE" \
+                --stop-serial-count "$STOP_SERIAL_COUNT" \
+                --frames "$MAX_FRAMES" \
+                2>"$stderr_file" \
+            | "$CLI" convert - -o "$tmp_parquet" >/dev/null 2>&1
+        ) || [[ ! -s "$tmp_parquet" ]]; then
+            printf "ERROR (adapter failed)\n"
             ((ERROR++)) || true
-            rm -f "$jsonl" "${rom%.gb}.sav" /tmp/gbtrace_blargg_stderr
+            rm -f "$tmp_parquet" "${rom%.gb}.sav" "$stderr_file"
             continue
-        }
+        fi
 
-        "$CLI" convert "$jsonl" -o "$tmp_parquet" >/dev/null 2>&1
-        rm -f "$jsonl"
-
-        frame_info=$(grep -oP 'frame \K[0-9]+' /tmp/gbtrace_blargg_stderr 2>/dev/null | tail -1)
+        frame_info=$(grep -oP 'frame \K[0-9]+' "$stderr_file" 2>/dev/null | tail -1)
+        rm -f "$stderr_file"
 
         # Determine pass/fail by querying the parquet for serial output
         # SC=255 (bit 7 set) means a byte was sent. Check SB values.
