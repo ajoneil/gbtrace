@@ -257,6 +257,49 @@ impl TraceStore {
         Ok(arr)
     }
 
+    /// Create a new TraceStore with T-cycle entries collapsed to instruction
+    /// boundaries. Groups consecutive entries with the same PC and keeps the
+    /// last entry of each group (the state after the instruction completed).
+    #[wasm_bindgen(js_name = collapseToInstructions)]
+    pub fn collapse_to_instructions(&self) -> Result<TraceStore, JsError> {
+        let pc_col = self.store.field_col("pc")
+            .ok_or_else(|| JsError::new("no pc field for collapse"))?;
+        let count = self.store.entry_count();
+        if count == 0 {
+            return Ok(TraceStore { store: gbtrace::column_store::ColumnStore::new(self.store.header().clone()), rom: self.rom.clone() });
+        }
+
+        let header = self.store.header().clone();
+        let mut new_store = gbtrace::column_store::ColumnStore::with_capacity(header.clone(), count / 4);
+
+        let mut prev_pc = self.store.column(pc_col).get_numeric(0);
+        let mut last_idx = 0;
+
+        for i in 1..count {
+            let cur_pc = self.store.column(pc_col).get_numeric(i);
+            if cur_pc != prev_pc {
+                // PC changed — emit the previous entry (last state of that instruction)
+                for (col, name) in header.fields.iter().enumerate() {
+                    let val = self.store.column(col).get_numeric(last_idx);
+                    new_store.push_u64(col, val);
+                }
+                new_store.finish_row();
+                last_idx = i;
+            } else {
+                last_idx = i;
+            }
+            prev_pc = cur_pc;
+        }
+        // Emit final instruction
+        for (col, _) in header.fields.iter().enumerate() {
+            let val = self.store.column(col).get_numeric(last_idx);
+            new_store.push_u64(col, val);
+        }
+        new_store.finish_row();
+
+        Ok(TraceStore { store: new_store, rom: self.rom.clone() })
+    }
+
     /// Load ROM bytes for disassembly.
     #[wasm_bindgen(js_name = loadRom)]
     pub fn load_rom(&mut self, data: &[u8]) {
