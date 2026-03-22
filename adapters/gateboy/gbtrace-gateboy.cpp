@@ -417,7 +417,7 @@ int main(int argc, char *argv[]) {
     static constexpr int PHASES_PER_TCYCLE = 8;
     int64_t total_phases = static_cast<int64_t>(max_frames) * PHASES_PER_FRAME;
 
-    bool tcycle_mode = (prof.trigger == "tcycle");
+    bool tcycle_mode = (profile.trigger == "tcycle");
 
     uint16_t prev_op_addr = gb.cpu.core.reg.op_addr;
     int prev_op_state = gb.cpu.core.reg.op_state;
