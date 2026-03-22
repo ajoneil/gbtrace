@@ -160,10 +160,10 @@ export class TraceDiffTable extends LitElement {
           <div class="panel panel-a" id="panel-a" @scroll=${this._onScrollA}>
             <div class="inner">
               <div class="header-row">
-                ${sf.map(f => html`
-                  <span style="${this._hdr(COL_WIDTH)}">${f}</span>
-                  ${hasRom && !this._pcMatches && f === 'pc' ? html`<span style="${this._hdr(ASM_WIDTH, 'text-align:left;')}">asm</span>` : ''}
-                `)}
+                ${sf.map(f => {
+                  const showAsmHdr = hasRom && !this._pcMatches && f === 'pc';
+                  return html`<span style="${this._hdr(COL_WIDTH)}">${f}</span>${showAsmHdr ? html`<span style="${this._hdr(ASM_WIDTH, 'text-align:left;')}">asm</span>` : ''}`;
+                })}
               </div>
               <div class="spacer" style="height:${this._spacerHeight()}px"></div>
               <div class="rows" id="rows-a"></div>
@@ -172,10 +172,10 @@ export class TraceDiffTable extends LitElement {
           <div class="panel panel-b" id="panel-b" @scroll=${this._onScrollB}>
             <div class="inner">
               <div class="header-row">
-                ${sf.map(f => html`
-                  <span style="${this._hdr(COL_WIDTH)}">${f}</span>
-                  ${hasRom && !this._pcMatches && f === 'pc' ? html`<span style="${this._hdr(ASM_WIDTH, 'text-align:left;')}">asm</span>` : ''}
-                `)}
+                ${sf.map(f => {
+                  const showAsmHdr = hasRom && !this._pcMatches && f === 'pc';
+                  return html`<span style="${this._hdr(COL_WIDTH)}">${f}</span>${showAsmHdr ? html`<span style="${this._hdr(ASM_WIDTH, 'text-align:left;')}">asm</span>` : ''}`;
+                })}
               </div>
               <div class="spacer" style="height:${this._spacerHeight()}px"></div>
               <div class="rows" id="rows-b"></div>
