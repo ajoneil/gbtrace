@@ -272,28 +272,30 @@ impl TraceStore {
         let header = self.store.header().clone();
         let mut new_store = gbtrace::column_store::ColumnStore::with_capacity(header.clone(), count / 4);
 
+        // Emit the first T-cycle of each new PC group. This matches what
+        // instruction-level adapters emit: the CPU state at the start of
+        // the instruction (which reflects the completed state of the
+        // previous instruction).
         let mut prev_pc = self.store.column(pc_col).get_numeric(0);
-        let mut last_idx = 0;
+
+        // Emit the first entry (first T-cycle of first instruction)
+        for (col, _) in header.fields.iter().enumerate() {
+            let val = self.store.column(col).get_numeric(0);
+            new_store.push_u64(col, val);
+        }
+        new_store.finish_row();
 
         for i in 1..count {
             let cur_pc = self.store.column(pc_col).get_numeric(i);
             if cur_pc != prev_pc {
-                // PC changed — emit the previous entry (last state of that instruction)
-                for (col, name) in header.fields.iter().enumerate() {
-                    let val = self.store.column(col).get_numeric(last_idx);
+                // New instruction — emit this entry (first T-cycle of new PC)
+                for (col, _) in header.fields.iter().enumerate() {
+                    let val = self.store.column(col).get_numeric(i);
                     new_store.push_u64(col, val);
                 }
                 new_store.finish_row();
-                last_idx = i;
-            } else {
-                last_idx = i;
             }
             prev_pc = cur_pc;
-        }
-        // Emit final instruction
-        for (col, _) in header.fields.iter().enumerate() {
-            let val = self.store.column(col).get_numeric(last_idx);
-            new_store.push_u64(col, val);
         }
         new_store.finish_row();
 
