@@ -239,8 +239,9 @@ impl ColumnStore {
     // --- Transform ---
 
     /// Collapse T-cycle entries to instruction boundaries.
-    /// Groups consecutive entries with the same PC and keeps the first entry
-    /// of each new PC group (matching instruction-level adapter behaviour).
+    /// Groups consecutive entries with the same PC and keeps the LAST
+    /// T-cycle of each group (the post-execution state, matching what
+    /// instruction-level adapters capture).
     pub fn collapse_to_instructions(&self) -> Result<Self> {
         let pc_col = self.field_col("pc")
             .ok_or_else(|| Error::Diff("no pc field for collapse".into()))?;
@@ -250,25 +251,27 @@ impl ColumnStore {
         }
 
         let mut new_store = Self::with_capacity(self.header.clone(), count / 4);
-        let mut prev_pc = self.columns[pc_col].get_numeric(0);
         let ncols = self.header.fields.len();
-
-        // Emit first entry
-        for col in 0..ncols {
-            new_store.push_u64(col, self.columns[col].get_numeric(0));
-        }
-        new_store.finish_row();
+        let mut prev_pc = self.columns[pc_col].get_numeric(0);
 
         for i in 1..count {
             let cur_pc = self.columns[pc_col].get_numeric(i);
             if cur_pc != prev_pc {
+                // PC changed — emit i-1 (last T-cycle of previous instruction)
+                let emit = i - 1;
                 for col in 0..ncols {
-                    new_store.push_u64(col, self.columns[col].get_numeric(i));
+                    new_store.push_u64(col, self.columns[col].get_numeric(emit));
                 }
                 new_store.finish_row();
             }
             prev_pc = cur_pc;
         }
+
+        // Emit the last instruction (last T-cycle of the trace)
+        for col in 0..ncols {
+            new_store.push_u64(col, self.columns[col].get_numeric(count - 1));
+        }
+        new_store.finish_row();
 
         Ok(new_store)
     }
