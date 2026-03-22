@@ -142,6 +142,19 @@ export class TraceSelector extends LitElement {
       text-decoration: none;
     }
     .downloads a:hover { color: var(--accent); }
+    .trigger-badge {
+      font-size: 0.65rem;
+      color: var(--text-muted);
+      font-family: var(--mono);
+      padding: 1px 5px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      margin-left: 4px;
+    }
+    .trigger-badge.downsampled {
+      color: var(--yellow);
+      border-color: var(--yellow);
+    }
   `;
 
   static properties = {
@@ -153,6 +166,9 @@ export class TraceSelector extends LitElement {
     activeB: { type: String },
     allFields: { type: Array },
     hiddenFields: { type: Object },
+    triggerA: { type: String },
+    triggerB: { type: String },
+    downsampled: { type: Boolean },
     _uploads: { state: true },
     _loading: { state: true },
     _error: { state: true },
@@ -168,6 +184,9 @@ export class TraceSelector extends LitElement {
     this.activeB = null;
     this.allFields = [];
     this.hiddenFields = new Set();
+    this.triggerA = null;
+    this.triggerB = null;
+    this.downsampled = false;
     this._uploads = []; // { name, store }
     this._loading = null;
     this._error = null;
@@ -190,6 +209,7 @@ export class TraceSelector extends LitElement {
     return html`
       <div class="bar">
         <span class="rom-name">${this.testName || this.testRom || 'trace'}</span>
+        ${this.triggerA ? html`<span class="trigger-badge ${this.downsampled ? 'downsampled' : ''}">${this.downsampled ? 'instruction (downsampled)' : this.triggerA}</span>` : ''}
         <span class="sep">|</span>
 
         ${traces.map(t => {

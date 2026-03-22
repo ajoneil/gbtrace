@@ -103,6 +103,7 @@ export class AppShell extends LitElement {
     _hoverIndex: { state: true },
     _diffStats: { state: true },
     _hiddenFields: { state: true },
+    _downsampled: { state: true },
   };
 
   constructor() {
@@ -121,6 +122,7 @@ export class AppShell extends LitElement {
     this._hiddenFields = new Set();
     this._hoverIndex = null;
     this._diffStats = null;
+    this._downsampled = false;
   }
 
   /** All fields from the trace header. */
@@ -177,6 +179,9 @@ export class AppShell extends LitElement {
         .activeB=${this._nameB}
         .allFields=${this._allFields}
         .hiddenFields=${this._hiddenFields}
+        .triggerA=${this._header?.trigger || null}
+        .triggerB=${this._storeB?.header()?.trigger || null}
+        .downsampled=${this._downsampled}
       ></trace-selector>
 
       ${this._store
@@ -331,6 +336,7 @@ export class AppShell extends LitElement {
     this._chartField = null;
     this._hoverIndex = null;
     this._diffStats = null;
+    this._downsampled = false;
     // Don't reset _hiddenFields — persist across trace switches
   }
 
@@ -340,6 +346,7 @@ export class AppShell extends LitElement {
     // If triggers differ, collapse the T-cycle trace to instruction level
     const trigA = this._store?.header()?.trigger;
     const trigB = store.header()?.trigger;
+    this._downsampled = false;
     if (trigA && trigB && trigA !== trigB) {
       try {
         if (trigA === 'tcycle') {
@@ -347,10 +354,12 @@ export class AppShell extends LitElement {
           this._store.free();
           this._store = collapsed;
           this._header = collapsed.header();
+          this._downsampled = true;
         } else if (trigB === 'tcycle') {
           const collapsed = store.collapseToInstructions();
           store.free();
           store = collapsed;
+          this._downsampled = true;
         }
       } catch (err) {
         console.error('Failed to collapse T-cycle trace:', err);
@@ -373,6 +382,7 @@ export class AppShell extends LitElement {
     this._chartField = null;
     this._hoverIndex = null;
     this._diffStats = null;
+    this._downsampled = false;
   }
 
   _reset() {
@@ -391,12 +401,14 @@ export class AppShell extends LitElement {
     this._chartField = null;
     this._hoverIndex = null;
     this._diffStats = null;
+    this._downsampled = false;
     this._hiddenFields = new Set();
   }
 
   _recomputeDiffStats() {
     if (!this._store || !this._storeB) {
       this._diffStats = null;
+    this._downsampled = false;
       return;
     }
     try {
@@ -404,6 +416,7 @@ export class AppShell extends LitElement {
     } catch (err) {
       console.error('Failed to compute diff stats:', err);
       this._diffStats = null;
+    this._downsampled = false;
     }
   }
 
