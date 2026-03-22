@@ -4,6 +4,9 @@ import { displayVal } from '../lib/format.js';
 const ROW_HEIGHT = 24;
 const OVERSCAN = 10;
 const MAX_SPACER = 10_000_000;
+const COL_WIDTH = 56;
+const IDX_WIDTH = 50;
+const ASM_WIDTH = 120;
 
 export class TraceTable extends LitElement {
   static styles = css`
@@ -19,7 +22,6 @@ export class TraceTable extends LitElement {
       background: var(--bg-surface);
       flex: 1;
       min-height: 200px;
-      position: relative;
     }
     .inner {
       min-width: fit-content;
@@ -29,22 +31,10 @@ export class TraceTable extends LitElement {
       display: flex;
       background: var(--bg);
       border-bottom: 1px solid var(--border);
-      font-size: 0.75rem;
-      color: var(--text-muted);
       position: sticky;
       top: 0;
       z-index: 2;
     }
-    .header-row span, .cell {
-      padding: 6px 8px;
-      min-width: 56px;
-      text-align: right;
-      font-family: var(--mono);
-      white-space: nowrap;
-      box-sizing: border-box;
-    }
-    .header-row .idx { min-width: 50px; }
-    .header-row .asm { min-width: 120px; text-align: left; }
     .spacer { width: 1px; }
     .rows { position: absolute; left: 0; right: 0; }
   `;
@@ -78,18 +68,24 @@ export class TraceTable extends LitElement {
     }
   }
 
+  _cellStyle(width, extra = '') {
+    return `padding:0 4px;width:${width}px;min-width:${width}px;max-width:${width}px;text-align:right;white-space:nowrap;font-family:var(--mono);font-size:0.75rem;box-sizing:border-box;${extra}`;
+  }
+
   render() {
     if (!this.store || !this.fields?.length) return '';
     const vf = this._visibleFields;
     const hasRom = this.store.hasRom?.() ?? false;
 
+    const hdrStyle = (w, extra = '') => `${this._cellStyle(w, extra)}padding-top:6px;padding-bottom:6px;color:var(--text-muted);`;
+
     return html`
       <div class="container" @scroll=${this._onScroll}>
         <div class="inner">
           <div class="header-row">
-            <span class="idx">#</span>
-            ${vf.map(f => html`<span>${f}</span>`)}
-            ${hasRom ? html`<span class="asm">asm</span>` : ''}
+            <span style="${hdrStyle(IDX_WIDTH)}">#</span>
+            ${vf.map(f => html`<span style="${hdrStyle(COL_WIDTH)}">${f}</span>`)}
+            ${hasRom ? html`<span style="${hdrStyle(ASM_WIDTH, 'text-align:left;')}">asm</span>` : ''}
           </div>
           <div class="spacer" style="height:${this._spacerHeight()}px"></div>
           <div class="rows"></div>
@@ -169,19 +165,20 @@ export class TraceTable extends LitElement {
       try { disasmArr = this.store.disassembleRange(startIdx, count); } catch (_) {}
     }
 
+    const cs = this._cellStyle.bind(this);
     const hl = this.highlightIndices;
     const parts = [];
     for (let i = 0; i < entries.length; i++) {
       const idx = startIdx + i;
       const data = entries[i];
-      const cls = hl?.has(idx) ? 'highlight' : '';
-      parts.push(`<div style="display:flex;height:${ROW_HEIGHT}px;align-items:center;font-family:var(--mono);font-size:0.75rem;border-bottom:1px solid var(--bg);${cls ? 'background:var(--accent-subtle)' : ''}" data-idx="${idx}">`);
-      parts.push(`<span style="padding:0 8px;min-width:50px;text-align:right;color:var(--text-muted)">${idx}</span>`);
+      const bg = hl?.has(idx) ? 'background:var(--accent-subtle);' : '';
+      parts.push(`<div style="display:flex;height:${ROW_HEIGHT}px;align-items:center;border-bottom:1px solid var(--bg);${bg}" data-idx="${idx}">`);
+      parts.push(`<span style="${cs(IDX_WIDTH, 'color:var(--text-muted);')}">${idx}</span>`);
       for (const f of vf) {
-        parts.push(`<span style="padding:0 8px;min-width:56px;text-align:right;white-space:nowrap">${displayVal(data[f])}</span>`);
+        parts.push(`<span style="${cs(COL_WIDTH)}">${displayVal(data[f])}</span>`);
       }
       if (disasmArr) {
-        parts.push(`<span style="padding:0 8px;min-width:120px;text-align:left;color:var(--green);white-space:nowrap">${disasmArr[i] || ''}</span>`);
+        parts.push(`<span style="${cs(ASM_WIDTH, 'text-align:left;color:var(--green);')}">${disasmArr[i] || ''}</span>`);
       }
       parts.push('</div>');
     }
