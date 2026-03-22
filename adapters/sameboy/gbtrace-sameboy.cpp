@@ -370,7 +370,7 @@ int main(int argc, char *argv[]) {
     int max_frames = 3000;
     std::string model = "DMG-B";
     GB_model_t gb_model = GB_MODEL_DMG_B;
-    StopCondition stop_when;
+    std::vector<StopCondition> stop_conditions;
 
     for (int i = 1; i < argc; i++) {
         std::string arg = argv[i];
@@ -383,7 +383,7 @@ int main(int argc, char *argv[]) {
         } else if (arg == "--frames" && i + 1 < argc) {
             max_frames = std::atoi(argv[++i]);
         } else if (arg == "--stop-when" && i + 1 < argc) {
-            stop_when = parse_stop_when(argv[++i]);
+            stop_conditions.push_back(parse_stop_when(argv[++i]));
         } else if (arg == "--stop-on-serial" && i + 1 < argc) {
             g_stop_serial_byte = static_cast<unsigned char>(
                 std::strtoul(argv[++i], nullptr, 16));
@@ -495,9 +495,9 @@ int main(int argc, char *argv[]) {
     GB_set_execution_callback(g_gb, exec_callback);
 
     // Run: GB_run executes one CPU step and returns 8MHz ticks consumed.
-    if (stop_when.active) {
+    for (const auto &cond : stop_conditions) {
         std::fprintf(stderr, "Stop condition: [0x%04X] == 0x%02X\n",
-                     stop_when.addr, stop_when.value);
+                     cond.addr, cond.value);
     }
     if (g_stop_serial_active) {
         std::fprintf(stderr, "Serial stop: byte=0x%02X count=%d\n",
@@ -511,11 +511,13 @@ int main(int argc, char *argv[]) {
         g_total_8mhz_ticks += ticks;
         if (g_gb->vblank_just_occured) {
             frames++;
-            if (stop_when.active &&
-                GB_safe_read_memory(g_gb, stop_when.addr) == stop_when.value) {
-                stopped_early = true;
-                break;
+            for (const auto &cond : stop_conditions) {
+                if (GB_safe_read_memory(g_gb, cond.addr) == cond.value) {
+                    stopped_early = true;
+                    break;
+                }
             }
+            if (stopped_early) break;
             if (g_stop_serial_triggered) {
                 stopped_early = true;
                 break;

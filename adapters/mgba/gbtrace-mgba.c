@@ -379,9 +379,8 @@ int main(int argc, char *argv[]) {
     const char *boot_rom_path = NULL;
     int max_frames = 3000;
     const char *model = "DMG-B";
-    unsigned short stop_addr = 0;
-    unsigned char stop_val = 0;
-    int stop_active = 0;
+    struct { unsigned short addr; unsigned char value; } stop_conditions[16];
+    int num_stop_conditions = 0;
 
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--rom") == 0 && i + 1 < argc) {
@@ -396,9 +395,11 @@ int main(int argc, char *argv[]) {
             const char *spec = argv[++i];
             const char *eq = strchr(spec, '=');
             if (!eq) { fprintf(stderr, "Error: --stop-when format is ADDR=VAL (e.g. A000=80)\n"); return 1; }
-            stop_addr = (unsigned short)strtoul(spec, NULL, 16);
-            stop_val = (unsigned char)strtoul(eq + 1, NULL, 16);
-            stop_active = 1;
+            if (num_stop_conditions < 16) {
+                stop_conditions[num_stop_conditions].addr = (unsigned short)strtoul(spec, NULL, 16);
+                stop_conditions[num_stop_conditions].value = (unsigned char)strtoul(eq + 1, NULL, 16);
+                num_stop_conditions++;
+            }
         } else if (strcmp(argv[i], "--stop-on-serial") == 0 && i + 1 < argc) {
             g_stop_serial_byte = (unsigned char)strtoul(argv[++i], NULL, 16);
             g_stop_serial_active = 1;
@@ -529,8 +530,9 @@ int main(int argc, char *argv[]) {
     mDebuggerModuleSetNeedsCallback(&trace_mod.d);
 
     // Run
-    if (stop_active) {
-        fprintf(stderr, "Stop condition: [0x%04X] == 0x%02X\n", stop_addr, stop_val);
+    for (int i = 0; i < num_stop_conditions; i++) {
+        fprintf(stderr, "Stop condition: [0x%04X] == 0x%02X\n",
+                stop_conditions[i].addr, stop_conditions[i].value);
     }
     if (g_stop_serial_active) {
         fprintf(stderr, "Stop on serial byte: 0x%02X (after %d occurrence%s)\n",
@@ -542,8 +544,13 @@ int main(int argc, char *argv[]) {
     int stopped_early = 0;
     for (frames = 0; frames < max_frames; frames++) {
         mDebuggerRunFrame(&debugger);
-        if (stop_active && g_core->rawRead8(g_core, stop_addr, -1) == stop_val) {
-            stopped_early = 1;
+        for (int sc = 0; sc < num_stop_conditions; sc++) {
+            if (g_core->rawRead8(g_core, stop_conditions[sc].addr, -1) == stop_conditions[sc].value) {
+                stopped_early = 1;
+                break;
+            }
+        }
+        if (stopped_early) {
             frames++;
             break;
         }

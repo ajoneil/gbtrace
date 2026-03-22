@@ -339,7 +339,7 @@ int main(int argc, char *argv[]) {
     int max_frames = 3000;
     std::string model = "DMG-B";
     unsigned load_flags = gambatte::GB::LoadFlag::NO_BIOS;
-    StopCondition stop_when;
+    std::vector<StopCondition> stop_conditions;
 
     for (int i = 1; i < argc; i++) {
         std::string arg = argv[i];
@@ -352,7 +352,7 @@ int main(int argc, char *argv[]) {
         } else if (arg == "--frames" && i + 1 < argc) {
             max_frames = std::atoi(argv[++i]);
         } else if (arg == "--stop-when" && i + 1 < argc) {
-            stop_when = parse_stop_when(argv[++i]);
+            stop_conditions.push_back(parse_stop_when(argv[++i]));
         } else if (arg == "--stop-on-serial" && i + 1 < argc) {
             g_stop_serial_byte = static_cast<unsigned char>(
                 std::strtoul(argv[++i], nullptr, 16));
@@ -439,9 +439,9 @@ int main(int argc, char *argv[]) {
     std::vector<gambatte::uint_least32_t> video_buf(160 * 144, 0);
     std::vector<gambatte::uint_least32_t> audio_buf(SAMPLES_PER_FRAME * 2 + 2064, 0);
 
-    if (stop_when.active) {
+    for (const auto &cond : stop_conditions) {
         std::fprintf(stderr, "Stop condition: [0x%04X] == 0x%02X\n",
-                     stop_when.addr, stop_when.value);
+                     cond.addr, cond.value);
     }
     if (g_stop_serial_active) {
         std::fprintf(stderr, "Stop on serial byte: 0x%02X (after %d occurrence%s)\n",
@@ -458,11 +458,13 @@ int main(int argc, char *argv[]) {
             audio_buf.data(), samples);
         if (result >= 0) {
             frames++;
-            if (stop_when.active &&
-                gb.externalRead(stop_when.addr) == stop_when.value) {
-                stopped_early = true;
-                break;
+            for (const auto &cond : stop_conditions) {
+                if (gb.externalRead(cond.addr) == cond.value) {
+                    stopped_early = true;
+                    break;
+                }
             }
+            if (stopped_early) break;
             if (g_stop_serial_triggered) {
                 stopped_early = true;
                 break;
