@@ -35,11 +35,20 @@ ADAPTER_BIN[gateboy]="$PROJECT_DIR/adapters/gateboy/gbtrace-gateboy"
 
 export LD_LIBRARY_PATH="$PROJECT_DIR/adapters/sameboy/SameBoy/build/lib:${LD_LIBRARY_PATH:-}"
 
+# Build CLI if needed
 if [[ ! -x "$CLI" ]]; then
-    echo "ERROR: gbtrace-cli not found at $CLI"
-    echo "Build with: cargo build --release -p gbtrace-cli"
-    exit 1
+    echo "Building gbtrace-cli..."
+    cargo build --release -p gbtrace-cli --manifest-path "$PROJECT_DIR/Cargo.toml"
 fi
+
+# Build requested adapters
+for adapter in "${ADAPTERS[@]}"; do
+    adapter_dir="$PROJECT_DIR/adapters/$adapter"
+    if [[ -f "$adapter_dir/Makefile" ]]; then
+        echo "Building $adapter adapter..."
+        make -C "$adapter_dir" -j"$(nproc)" 2>&1 | tail -1
+    fi
+done
 
 PASS=0
 FAIL=0

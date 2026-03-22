@@ -95,12 +95,27 @@ while [ "${1:-}" != "" ]; do
     esac
 done
 
+# Build CLI if needed
+if [[ ! -x "$CLI" ]]; then
+    echo "Building gbtrace-cli..."
+    cargo build --release -p gbtrace-cli --manifest-path "$PROJECT_DIR/Cargo.toml"
+fi
+
+# Build requested adapters
+for emu_name in $EMUS; do
+    adapter_dir="$PROJECT_DIR/adapters/$emu_name"
+    if [[ -f "$adapter_dir/Makefile" ]]; then
+        echo "Building $emu_name adapter..."
+        make -C "$adapter_dir" -j"$(nproc)" 2>&1 | tail -1
+    fi
+done
+
 for emu_name in $EMUS; do
     case "$emu_name" in
         gambatte)  emu_bin="$GAMBATTE" ;;
         sameboy)   emu_bin="$SAMEBOY" ;;
         mgba)      emu_bin="$MGBA" ;;
-        gateboy)  emu_bin="$GATEBOY" ;;
+        gateboy)   emu_bin="$GATEBOY" ;;
         *) echo "Unknown emulator: $emu_name"; exit 1 ;;
     esac
 
