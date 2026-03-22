@@ -17,7 +17,7 @@ export class AppShell extends LitElement {
     }
     .layout {
       margin: 0 auto;
-      padding: 24px;
+      padding: 8px 24px 24px;
       width: 100%;
       box-sizing: border-box;
     }
