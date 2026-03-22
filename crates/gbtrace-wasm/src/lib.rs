@@ -257,28 +257,6 @@ impl TraceStore {
         Ok(arr)
     }
 
-    /// Create a new TraceStore with T-cycle entries collapsed to instruction
-    /// boundaries. Groups consecutive entries with the same PC and keeps the
-    /// last entry of each group (the state after the instruction completed).
-    /// Collapse T-cycle entries to instruction boundaries.
-    #[wasm_bindgen(js_name = collapseToInstructions)]
-    pub fn collapse_to_instructions(&self) -> Result<TraceStore, JsError> {
-        let new_store = self.store.collapse_to_instructions()
-            .map_err(|e| JsError::new(&format!("{e}")))?;
-        Ok(TraceStore { store: new_store, rom: self.rom.clone() })
-    }
-
-    /// Create a new TraceStore with leading entries trimmed so the first
-    /// entry's PC matches the given value. Used to align traces that start
-    /// at different points (e.g. 0x0100 vs 0x0101).
-    /// Skip entries until the first entry with the given PC value.
-    #[wasm_bindgen(js_name = alignToPC)]
-    pub fn align_to_pc(&self, target_pc: u16) -> Result<TraceStore, JsError> {
-        let new_store = self.store.skip_to_pc(target_pc)
-            .map_err(|e| JsError::new(&format!("{e}")))?;
-        Ok(TraceStore { store: new_store, rom: self.rom.clone() })
-    }
-
     /// Load ROM bytes for disassembly.
     #[wasm_bindgen(js_name = loadRom)]
     pub fn load_rom(&mut self, data: &[u8]) {
@@ -341,4 +319,19 @@ impl TraceStore {
         }
         map
     }
+}
+
+/// Prepare two TraceStores for comparison: auto-collapse T-cycle traces
+/// to instruction level and align by first common PC value.
+/// Returns a JS array [storeA, storeB] with the prepared stores.
+#[wasm_bindgen(js_name = prepareForDiff)]
+pub fn prepare_for_diff(a: TraceStore, b: TraceStore) -> Result<js_sys::Array, JsError> {
+    let rom_a = a.rom;
+    let rom_b = b.rom;
+    let (new_a, new_b) = gbtrace::column_store::ColumnStore::prepare_for_diff(a.store, b.store)
+        .map_err(|e| JsError::new(&format!("{e}")))?;
+    let arr = js_sys::Array::new();
+    arr.push(&JsValue::from(TraceStore { store: new_a, rom: rom_a }));
+    arr.push(&JsValue::from(TraceStore { store: new_b, rom: rom_b }));
+    Ok(arr)
 }

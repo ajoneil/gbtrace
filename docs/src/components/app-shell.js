@@ -1,4 +1,5 @@
 import { LitElement, html, css } from 'lit';
+import { prepareForDiff } from '../lib/wasm-bridge.js';
 import './file-loader.js';
 import './test-picker.js';
 import './trace-selector.js';
@@ -328,72 +329,22 @@ export class AppShell extends LitElement {
     // Don't reset _hiddenFields — persist across trace switches
   }
 
-  _setStoreB(store, name) {
+  async _setStoreB(store, name) {
     if (this._storeB) this._storeB.free();
 
-    // If triggers differ, collapse the T-cycle trace to instruction level
+    // Use the library to handle collapse + alignment in one call
     const trigA = this._store?.header()?.trigger;
     const trigB = store.header()?.trigger;
     this._downsampled = false;
-    if (trigA && trigB && trigA !== trigB) {
-      try {
-        if (trigA === 'tcycle') {
-          const collapsed = this._store.collapseToInstructions();
-          this._store.free();
-          this._store = collapsed;
-          this._header = collapsed.header();
-          this._downsampled = true;
-        } else if (trigB === 'tcycle') {
-          const collapsed = store.collapseToInstructions();
-          store.free();
-          store = collapsed;
-          this._downsampled = true;
-        }
-      } catch (err) {
-        console.error('Failed to collapse T-cycle trace:', err);
-      }
-    }
 
-    // Align traces by first common PC value.
-    // Find the first PC in trace B that also exists in the first few entries
-    // of trace A (or vice versa), then align both to that PC.
     try {
-      const pcA = this._store.entry(0)?.pc;
-      const pcB = store.entry(0)?.pc;
-      if (pcA != null && pcB != null && pcA !== pcB) {
-        // Try aligning A to B's starting PC, or B to A's starting PC
-        // Whichever start PC appears first in the other trace wins
-        let targetPC = null;
-        const countA = Math.min(this._store.entryCount(), 100);
-        const countB = Math.min(store.entryCount(), 100);
-
-        // Check if B's start PC exists in A's first entries
-        for (let i = 0; i < countA; i++) {
-          if (this._store.entry(i)?.pc === pcB) { targetPC = pcB; break; }
-        }
-        // If not, check if A's start PC exists in B's first entries
-        if (targetPC == null) {
-          for (let i = 0; i < countB; i++) {
-            if (store.entry(i)?.pc === pcA) { targetPC = pcA; break; }
-          }
-        }
-
-        if (targetPC != null) {
-          if (pcA !== targetPC) {
-            const aligned = this._store.alignToPC(targetPC);
-            this._store.free();
-            this._store = aligned;
-            this._header = aligned.header();
-          }
-          if (pcB !== targetPC) {
-            const aligned = store.alignToPC(targetPC);
-            store.free();
-            store = aligned;
-          }
-        }
-      }
+      const [prepA, prepB] = await prepareForDiff(this._store, store);
+      this._store = prepA;
+      this._header = prepA.header();
+      store = prepB;
+      this._downsampled = (trigA !== trigB);
     } catch (err) {
-      console.error('Failed to align traces by PC:', err);
+      console.error('Failed to prepare traces for diff:', err);
     }
 
     this._storeB = store;

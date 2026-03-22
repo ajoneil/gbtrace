@@ -22,3 +22,8 @@ export async function createTraceStore(bytes) {
   const mod = await loadWasm();
   return new mod.TraceStore(bytes);
 }
+
+export async function prepareForDiff(storeA, storeB) {
+  const mod = await loadWasm();
+  return mod.prepareForDiff(storeA, storeB);
+}

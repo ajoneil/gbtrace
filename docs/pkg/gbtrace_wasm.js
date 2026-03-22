@@ -24,35 +24,6 @@ export class TraceStore {
         wasm.__wbg_tracestore_free(ptr, 0);
     }
     /**
-     * Create a new TraceStore with leading entries trimmed so the first
-     * entry's PC matches the given value. Used to align traces that start
-     * at different points (e.g. 0x0100 vs 0x0101).
-     * Skip entries until the first entry with the given PC value.
-     * @param {number} target_pc
-     * @returns {TraceStore}
-     */
-    alignToPC(target_pc) {
-        const ret = wasm.tracestore_alignToPC(this.__wbg_ptr, target_pc);
-        if (ret[2]) {
-            throw takeFromExternrefTable0(ret[1]);
-        }
-        return TraceStore.__wrap(ret[0]);
-    }
-    /**
-     * Create a new TraceStore with T-cycle entries collapsed to instruction
-     * boundaries. Groups consecutive entries with the same PC and keeps the
-     * last entry of each group (the state after the instruction completed).
-     * Collapse T-cycle entries to instruction boundaries.
-     * @returns {TraceStore}
-     */
-    collapseToInstructions() {
-        const ret = wasm.tracestore_collapseToInstructions(this.__wbg_ptr);
-        if (ret[2]) {
-            throw takeFromExternrefTable0(ret[1]);
-        }
-        return TraceStore.__wrap(ret[0]);
-    }
-    /**
      * Compare ALL fields between this store and another, returning indices where any field differs.
      * @param {TraceStore} other
      * @returns {Uint32Array}
@@ -252,6 +223,26 @@ export class TraceStore {
 }
 if (Symbol.dispose) TraceStore.prototype[Symbol.dispose] = TraceStore.prototype.free;
 
+/**
+ * Prepare two TraceStores for comparison: auto-collapse T-cycle traces
+ * to instruction level and align by first common PC value.
+ * Returns a JS array [storeA, storeB] with the prepared stores.
+ * @param {TraceStore} a
+ * @param {TraceStore} b
+ * @returns {Array<any>}
+ */
+export function prepareForDiff(a, b) {
+    _assertClass(a, TraceStore);
+    var ptr0 = a.__destroy_into_raw();
+    _assertClass(b, TraceStore);
+    var ptr1 = b.__destroy_into_raw();
+    const ret = wasm.prepareForDiff(ptr0, ptr1);
+    if (ret[2]) {
+        throw takeFromExternrefTable0(ret[1]);
+    }
+    return takeFromExternrefTable0(ret[0]);
+}
+
 function __wbg_get_imports() {
     const import0 = {
         __proto__: null,
@@ -301,6 +292,10 @@ function __wbg_get_imports() {
             const ret = new Float64Array(arg0 >>> 0);
             return ret;
         },
+        __wbg_push_e87b0e732085a946: function(arg0, arg1) {
+            const ret = arg0.push(arg1);
+            return ret;
+        },
         __wbg_set_1be21701d704e71d: function(arg0, arg1, arg2) {
             arg0.set(getArrayU32FromWasm0(arg1, arg2));
         },
@@ -315,6 +310,10 @@ function __wbg_get_imports() {
         },
         __wbg_set_bf7251625df30a02: function(arg0, arg1, arg2) {
             const ret = arg0.set(arg1, arg2);
+            return ret;
+        },
+        __wbg_tracestore_new: function(arg0) {
+            const ret = TraceStore.__wrap(arg0);
             return ret;
         },
         __wbindgen_cast_0000000000000001: function(arg0) {
