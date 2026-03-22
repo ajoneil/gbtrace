@@ -260,93 +260,22 @@ impl TraceStore {
     /// Create a new TraceStore with T-cycle entries collapsed to instruction
     /// boundaries. Groups consecutive entries with the same PC and keeps the
     /// last entry of each group (the state after the instruction completed).
+    /// Collapse T-cycle entries to instruction boundaries.
     #[wasm_bindgen(js_name = collapseToInstructions)]
     pub fn collapse_to_instructions(&self) -> Result<TraceStore, JsError> {
-        let pc_col = self.store.field_col("pc")
-            .ok_or_else(|| JsError::new("no pc field for collapse"))?;
-        let count = self.store.entry_count();
-        if count == 0 {
-            return Ok(TraceStore { store: gbtrace::column_store::ColumnStore::new(self.store.header().clone()), rom: self.rom.clone() });
-        }
-
-        let header = self.store.header().clone();
-        let mut new_store = gbtrace::column_store::ColumnStore::with_capacity(header.clone(), count / 4);
-
-        // Emit the first T-cycle of each new PC group. This matches what
-        // instruction-level adapters emit: the CPU state at the start of
-        // the instruction (which reflects the completed state of the
-        // previous instruction).
-        let mut prev_pc = self.store.column(pc_col).get_numeric(0);
-
-        // Emit the first entry (first T-cycle of first instruction)
-        for (col, _) in header.fields.iter().enumerate() {
-            let val = self.store.column(col).get_numeric(0);
-            new_store.push_u64(col, val);
-        }
-        new_store.finish_row();
-
-        for i in 1..count {
-            let cur_pc = self.store.column(pc_col).get_numeric(i);
-            if cur_pc != prev_pc {
-                // New instruction — emit this entry (first T-cycle of new PC)
-                for (col, _) in header.fields.iter().enumerate() {
-                    let val = self.store.column(col).get_numeric(i);
-                    new_store.push_u64(col, val);
-                }
-                new_store.finish_row();
-            }
-            prev_pc = cur_pc;
-        }
-        new_store.finish_row();
-
+        let new_store = self.store.collapse_to_instructions()
+            .map_err(|e| JsError::new(&format!("{e}")))?;
         Ok(TraceStore { store: new_store, rom: self.rom.clone() })
     }
 
     /// Create a new TraceStore with leading entries trimmed so the first
     /// entry's PC matches the given value. Used to align traces that start
     /// at different points (e.g. 0x0100 vs 0x0101).
+    /// Skip entries until the first entry with the given PC value.
     #[wasm_bindgen(js_name = alignToPC)]
     pub fn align_to_pc(&self, target_pc: u16) -> Result<TraceStore, JsError> {
-        let pc_col = match self.store.field_col("pc") {
-            Some(c) => c,
-            None => return Err(JsError::new("no pc field")),
-        };
-        let count = self.store.entry_count();
-        if count == 0 {
-            return Err(JsError::new("empty trace"));
-        }
-
-        // Find first entry where PC matches target
-        let mut start = None;
-        for i in 0..count {
-            let pc = self.store.column(pc_col).get_numeric(i);
-            if pc as u16 == target_pc {
-                start = Some(i);
-                break;
-            }
-        }
-
-        let start = match start {
-            Some(s) => s,
-            None => return Err(JsError::new(&format!(
-                "PC 0x{:04x} not found in {} entries (first PC: 0x{:04x})",
-                target_pc, count, self.store.column(pc_col).get_numeric(0)
-            ))),
-        };
-
-        // Build new store by copying entries from start..count
-        // Use the same header but copy field by field
-        let header = self.store.header().clone();
-        let new_count = count - start;
-        let mut new_store = gbtrace::column_store::ColumnStore::with_capacity(header.clone(), new_count);
-
-        for i in start..count {
-            for col in 0..header.fields.len() {
-                new_store.push_u64(col, self.store.column(col).get_numeric(i));
-            }
-            new_store.finish_row();
-        }
-
+        let new_store = self.store.skip_to_pc(target_pc)
+            .map_err(|e| JsError::new(&format!("{e}")))?;
         Ok(TraceStore { store: new_store, rom: self.rom.clone() })
     }
 
