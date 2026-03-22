@@ -10,7 +10,8 @@ interrupt = ["if_", "ie", "ime"]
 timer = ["div", "tima", "tma", "tac"]
 
 [fields.memory]
-# gbmicrotest result addresses
+# gbmicrotest result addresses (0xFF80-82)
+# test writes actual value to FF80, expected to FF81, 01=pass/FF=fail to FF82
 test_result = "FF80"
 test_expect = "FF81"
 test_pass   = "FF82"
