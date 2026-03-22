@@ -126,15 +126,6 @@ export class TraceStore {
         return ret >>> 0;
     }
     /**
-     * Get the cycle count for a specific entry. Returns 0 if not found.
-     * @param {number} index
-     * @returns {number}
-     */
-    entryCycle(index) {
-        const ret = wasm.tracestore_entryCycle(this.__wbg_ptr, index);
-        return ret;
-    }
-    /**
      * Get the field names from the header.
      * @returns {any}
      */
