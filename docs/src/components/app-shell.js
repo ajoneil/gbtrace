@@ -1,5 +1,5 @@
 import { LitElement, html, css } from 'lit';
-import { prepareForDiff } from '../lib/wasm-bridge.js';
+import { prepareForDiffSync } from '../lib/wasm-bridge.js';
 import './file-loader.js';
 import './test-picker.js';
 import './trace-selector.js';
@@ -329,7 +329,7 @@ export class AppShell extends LitElement {
     // Don't reset _hiddenFields — persist across trace switches
   }
 
-  async _setStoreB(store, name) {
+  _setStoreB(store, name) {
     if (this._storeB) this._storeB.free();
 
     // Use the library to handle collapse + alignment in one call
@@ -338,7 +338,7 @@ export class AppShell extends LitElement {
     this._downsampled = false;
 
     try {
-      const [prepA, prepB] = await prepareForDiff(this._store, store);
+      const [prepA, prepB] = prepareForDiffSync(this._store, store);
       this._store = prepA;
       this._header = prepA.header();
       store = prepB;
