@@ -78,7 +78,6 @@ for adapter in $ADAPTERS; do
         # Stream adapter output directly to parquet (no temp JSONL)
         stderr_file="/tmp/gbtrace_blargg_${name}_stderr"
         if ! (
-            set +e
             "$bin" \
                 --rom "$rom" \
                 --profile "$PROFILE" \
@@ -87,8 +86,16 @@ for adapter in $ADAPTERS; do
                 --frames "$MAX_FRAMES" \
                 2>"$stderr_file" \
             | "$CLI" convert - -o "$tmp_parquet" >/dev/null 2>&1
-        ) || [[ ! -s "$tmp_parquet" ]]; then
-            printf "ERROR (adapter failed)\n"
+        ); then
+            err_msg=$(head -1 "$stderr_file" 2>/dev/null || echo "unknown")
+            printf "ERROR (%s)\n" "$err_msg"
+            ((ERROR++)) || true
+            rm -f "$tmp_parquet" "${rom%.gb}.sav" "$stderr_file"
+            continue
+        fi
+
+        if [[ ! -s "$tmp_parquet" ]]; then
+            printf "ERROR (empty parquet)\n"
             ((ERROR++)) || true
             rm -f "$tmp_parquet" "${rom%.gb}.sav" "$stderr_file"
             continue
