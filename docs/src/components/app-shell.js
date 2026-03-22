@@ -139,7 +139,7 @@ export class AppShell extends LitElement {
         @hidden-fields-changed=${this._onHiddenFieldsChanged}
       >
         <header>
-          <h1>gbtrace <span>Game Boy Trace Viewer</span></h1>
+          <h1 style="cursor:pointer" @click=${this._reset}>gbtrace <span>Game Boy Trace Viewer</span></h1>
         </header>
 
         ${this._suite

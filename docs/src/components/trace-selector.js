@@ -79,21 +79,6 @@ export class TraceSelector extends LitElement {
       border-color: var(--accent);
       color: var(--accent);
     }
-    .change-btn {
-      padding: 4px 10px;
-      background: none;
-      border: 1px solid var(--border);
-      border-radius: 6px;
-      color: var(--text-muted);
-      cursor: pointer;
-      font-size: 0.75rem;
-      font-family: inherit;
-      margin-left: auto;
-    }
-    .change-btn:hover {
-      border-color: var(--accent);
-      color: var(--accent);
-    }
     input[type="file"] { display: none; }
     .status { font-size: 0.75rem; }
     .status.loading { color: var(--accent); }
@@ -253,7 +238,6 @@ export class TraceSelector extends LitElement {
         ${this._loading ? html`<span class="status loading">loading ${this._loading}...</span>` : ''}
         ${this._error ? html`<span class="status error">${this._error}</span>` : ''}
 
-        <button class="change-btn" @click=${this._changeRom}>change ROM</button>
 
         ${this.allFields.length ? html`
           <div class="fields-row">
@@ -393,11 +377,6 @@ export class TraceSelector extends LitElement {
     }
   }
 
-  _changeRom() {
-    this.dispatchEvent(new CustomEvent('change-rom', {
-      bubbles: true, composed: true,
-    }));
-  }
 }
 
 customElements.define('trace-selector', TraceSelector);
