@@ -185,10 +185,19 @@ export class TestPicker extends LitElement {
       const buffer = await resp.arrayBuffer();
       const bytes = new Uint8Array(buffer);
       const store = await createTraceStore(bytes);
+
+      // Load the ROM for disassembly
+      try {
+        const romResp = await fetch(`tests/blargg/${test.rom}`);
+        if (romResp.ok) {
+          const romBuf = await romResp.arrayBuffer();
+          store.loadRom(new Uint8Array(romBuf));
+        }
+      } catch (_) { /* ROM is optional */ }
+
       this.dispatchEvent(new CustomEvent('trace-loaded', {
         detail: {
           store, filename,
-          // Pass test metadata so the viewer can offer comparison
           testRom: test.rom,
           emulator,
         },

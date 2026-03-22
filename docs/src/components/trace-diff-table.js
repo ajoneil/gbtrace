@@ -87,6 +87,7 @@ export class TraceDiffTable extends LitElement {
       <div class="container">
         <div class="header-row">
           <span class="idx-col">#</span>
+          ${this._hasRom() ? html`<span style="min-width:100px;text-align:left">asm</span>` : ''}
           ${displayFields.map(f => html`<span title="${this.nameA}: ${f}">${f}</span>`)}
           <span class="sep"></span>
           ${displayFields.map(f => html`<span title="${this.nameB}: ${f}">${f}</span>`)}
@@ -97,6 +98,10 @@ export class TraceDiffTable extends LitElement {
         </div>
       </div>
     `;
+  }
+
+  _hasRom() {
+    return (this.storeA?.hasRom?.() ?? false) || (this.storeB?.hasRom?.() ?? false);
   }
 
   _entryCount() {
@@ -181,6 +186,17 @@ export class TraceDiffTable extends LitElement {
 
     const displayFields = this.fields.filter(f => f !== 'cy');
     const hl = this.highlightIndices;
+    const hasRom = this._hasRom();
+
+    // Batch-fetch disassembly from whichever store has the ROM
+    let disasmArr = null;
+    if (hasRom) {
+      const disasmStore = this.storeA.hasRom?.() ? this.storeA : this.storeB;
+      try {
+        disasmArr = disasmStore.disassembleRange(startIdx, count);
+      } catch (_) { /* no disasm */ }
+    }
+
     const parts = [];
 
     for (let i = 0; i < entriesA.length; i++) {
@@ -188,7 +204,6 @@ export class TraceDiffTable extends LitElement {
       const a = entriesA[i];
       const b = entriesB[i];
 
-      // Check if any field differs
       let anyDiff = false;
       for (const f of displayFields) {
         if (a[f] !== b[f]) { anyDiff = true; break; }
@@ -200,7 +215,10 @@ export class TraceDiffTable extends LitElement {
       parts.push(`<div data-idx="${idx}" style="display:flex;height:${ROW_HEIGHT}px;align-items:center;font-family:var(--mono);font-size:0.7rem;border-bottom:1px solid var(--bg);${rowBg}" class="${rowCls}">`);
       parts.push(`<span style="padding:0 4px;min-width:50px;text-align:right;color:var(--text-muted)">${idx}</span>`);
 
-      // Side A values
+      if (disasmArr) {
+        parts.push(`<span style="padding:0 4px;min-width:100px;text-align:left;color:var(--green);white-space:nowrap">${disasmArr[i] || ''}</span>`);
+      }
+
       for (const f of displayFields) {
         const va = displayVal(a[f]);
         const differs = a[f] !== b[f];
@@ -208,10 +226,8 @@ export class TraceDiffTable extends LitElement {
         parts.push(`<span style="padding:0 4px;min-width:36px;text-align:right;white-space:nowrap;${color}">${va}</span>`);
       }
 
-      // Separator
       parts.push(`<span style="width:2px;min-width:2px;background:var(--border);align-self:stretch"></span>`);
 
-      // Side B values
       for (const f of displayFields) {
         const vb = displayVal(b[f]);
         const differs = a[f] !== b[f];

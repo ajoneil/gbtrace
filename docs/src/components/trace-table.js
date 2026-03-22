@@ -111,6 +111,7 @@ export class TraceTable extends LitElement {
         <div class="header-row">
           <span>#</span>
           ${this.fields.map(f => html`<span>${f}</span>`)}
+          ${this.store?.hasRom?.() ? html`<span style="min-width:120px;text-align:left">asm</span>` : ''}
         </div>
         <div class="scroll-area" @scroll=${this._onScroll}>
           <div class="spacer" style="height:${this._spacerHeight()}px"></div>
@@ -213,6 +214,16 @@ export class TraceTable extends LitElement {
 
     const fields = this.fields;
     const hl = this.highlightIndices;
+    const hasRom = this.store.hasRom?.() ?? false;
+
+    // Batch-fetch disassembly if ROM is loaded
+    let disasmArr = null;
+    if (hasRom) {
+      try {
+        disasmArr = this.store.disassembleRange(startIdx, count);
+      } catch (_) { /* no disasm */ }
+    }
+
     const parts = [];
     for (let i = 0; i < entries.length; i++) {
       const idx = startIdx + i;
@@ -222,6 +233,9 @@ export class TraceTable extends LitElement {
       parts.push(`<span>${idx}</span>`);
       for (const f of fields) {
         parts.push(`<span>${displayVal(data[f])}</span>`);
+      }
+      if (disasmArr) {
+        parts.push(`<span style="min-width:120px;text-align:left;color:var(--green)">${disasmArr[i] || ''}</span>`);
       }
       parts.push('</div>');
     }
