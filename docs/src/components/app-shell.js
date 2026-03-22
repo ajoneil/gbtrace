@@ -336,6 +336,27 @@ export class AppShell extends LitElement {
 
   _setStoreB(store, name) {
     if (this._storeB) this._storeB.free();
+
+    // If triggers differ, collapse the T-cycle trace to instruction level
+    const trigA = this._store?.header()?.trigger;
+    const trigB = store.header()?.trigger;
+    if (trigA && trigB && trigA !== trigB) {
+      try {
+        if (trigA === 'tcycle') {
+          const collapsed = this._store.collapseToInstructions();
+          this._store.free();
+          this._store = collapsed;
+          this._header = collapsed.header();
+        } else if (trigB === 'tcycle') {
+          const collapsed = store.collapseToInstructions();
+          store.free();
+          store = collapsed;
+        }
+      } catch (err) {
+        console.error('Failed to collapse T-cycle trace:', err);
+      }
+    }
+
     this._storeB = store;
     this._nameB = name;
     this._highlightIndices = null;
