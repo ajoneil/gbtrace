@@ -6,6 +6,8 @@ const OVERSCAN = 10;
 const MAX_SPACER = 10_000_000;
 const COL_WIDTH = 48;
 const IDX_WIDTH = 50;
+const CY_WIDTH = 70;
+const PC_WIDTH = 48;
 const ASM_WIDTH = 100;
 
 export class TraceDiffTable extends LitElement {
@@ -15,14 +17,26 @@ export class TraceDiffTable extends LitElement {
       flex-direction: column;
       min-height: 0;
     }
-    .split {
+    .outer {
       display: flex;
       flex: 1;
       min-height: 200px;
-      gap: 0;
       border: 1px solid var(--border);
       border-radius: 8px;
       overflow: hidden;
+    }
+    .shared {
+      flex-shrink: 0;
+      overflow: hidden;
+      background: var(--bg-surface);
+      border-right: 1px solid var(--border);
+      position: relative;
+    }
+    .shared .inner { position: relative; }
+    .panels {
+      display: flex;
+      flex: 1;
+      min-width: 0;
     }
     .panel {
       flex: 1;
@@ -30,12 +44,8 @@ export class TraceDiffTable extends LitElement {
       background: var(--bg-surface);
       position: relative;
     }
-    .panel:first-child {
-      border-right: 2px solid var(--accent);
-    }
-    .panel:last-child {
-      border-left: 2px solid #d29922;
-    }
+    .panel-a { border-right: 2px solid #58a6ff; }
+    .panel-b { border-left: 2px solid #d29922; }
     .inner {
       min-width: fit-content;
       position: relative;
@@ -75,74 +85,118 @@ export class TraceDiffTable extends LitElement {
     this._renderedCount = 0;
     this._rafId = null;
     this._syncing = false;
+    this._pcMatches = true;
   }
 
   get _visibleFields() {
     return (this.fields || []).filter(f => f !== 'cy' && !this.hiddenFields?.has(f));
   }
 
+  /** Fields shown in the per-side panels (exclude shared fields). */
+  get _sideFields() {
+    const shared = this._sharedFields;
+    return this._visibleFields.filter(f => !shared.has(f));
+  }
+
+  /** Fields pulled into the shared left column. */
+  get _sharedFields() {
+    const s = new Set();
+    if (this._pcMatches) {
+      if (this._visibleFields.includes('pc')) s.add('pc');
+      if (this._visibleFields.includes('op')) s.add('op');
+    }
+    return s;
+  }
+
   updated(changed) {
     if (changed.has('storeA') || changed.has('storeB') || changed.has('fields') || changed.has('highlightIndices') || changed.has('hiddenFields')) {
       this._renderedStart = -1;
+      this._checkPcMatch();
       this.updateComplete.then(() => {
-        this._setupSyncScroll();
         this._renderRows();
       });
     }
   }
 
-  _cellStyle(width, extra = '') {
+  /** Quick check: do PC values match between traces for the first 1000 entries? */
+  _checkPcMatch() {
+    if (!this.storeA || !this.storeB) { this._pcMatches = false; return; }
+    try {
+      const indices = this.storeA.diffField(this.storeB, 'pc');
+      // If first diff is beyond 1000, consider them matching
+      this._pcMatches = indices.length === 0 || indices[0] > 1000;
+    } catch (_) {
+      this._pcMatches = false;
+    }
+  }
+
+  _cs(width, extra = '') {
     return `padding:0 4px;width:${width}px;min-width:${width}px;max-width:${width}px;text-align:right;white-space:nowrap;font-family:var(--mono);font-size:0.7rem;box-sizing:border-box;${extra}`;
+  }
+
+  _hdr(width, extra = '') {
+    return `${this._cs(width, extra)}padding-top:6px;padding-bottom:6px;color:var(--text-muted);`;
   }
 
   render() {
     if (!this.storeA || !this.storeB || !this.fields?.length) return '';
-    const vf = this._visibleFields;
+    const sf = this._sideFields;
+    const shared = this._sharedFields;
     const hasRom = (this.storeA.hasRom?.() || this.storeB.hasRom?.()) ?? false;
-
-    const hdrStyle = (w, extra = '') => `${this._cellStyle(w, extra)}padding-top:6px;padding-bottom:6px;color:var(--text-muted);`;
-
-    const panelHeader = (name, color) => html`
-      <div class="header-row">
-        <span style="${hdrStyle(IDX_WIDTH)}"><span style="color:${color};font-weight:600">${name}</span> #</span>
-        ${hasRom ? html`<span style="${hdrStyle(ASM_WIDTH, 'text-align:left;')}">asm</span>` : ''}
-        ${vf.map(f => html`<span style="${hdrStyle(COL_WIDTH)}">${f}</span>`)}
-      </div>
-    `;
+    const showAsm = hasRom && this._pcMatches;
 
     return html`
-      <div class="split">
-        <div class="panel" id="panel-a" @scroll=${this._onScroll}>
+      <div class="outer">
+        <div class="shared" id="shared-panel">
           <div class="inner">
-            ${panelHeader(this.nameA, '#58a6ff')}
+            <div class="header-row">
+              <span style="${this._hdr(IDX_WIDTH)}">#</span>
+              <span style="${this._hdr(CY_WIDTH)}">cy</span>
+              ${shared.has('pc') ? html`<span style="${this._hdr(PC_WIDTH)}">pc</span>` : ''}
+              ${shared.has('op') ? html`<span style="${this._hdr(COL_WIDTH)}">op</span>` : ''}
+              ${showAsm ? html`<span style="${this._hdr(ASM_WIDTH, 'text-align:left;')}">asm</span>` : ''}
+            </div>
             <div class="spacer" style="height:${this._spacerHeight()}px"></div>
-            <div class="rows" id="rows-a"></div>
+            <div class="rows" id="rows-shared"></div>
           </div>
         </div>
-        <div class="panel" id="panel-b" @scroll=${this._onScrollB}>
-          <div class="inner">
-            ${panelHeader(this.nameB, '#d29922')}
-            <div class="spacer" style="height:${this._spacerHeight()}px"></div>
-            <div class="rows" id="rows-b"></div>
+        <div class="panels">
+          <div class="panel panel-a" id="panel-a" @scroll=${this._onScrollA}>
+            <div class="inner">
+              <div class="header-row">
+                ${sf.map(f => html`<span style="${this._hdr(COL_WIDTH)}">${f}</span>`)}
+              </div>
+              <div class="spacer" style="height:${this._spacerHeight()}px"></div>
+              <div class="rows" id="rows-a"></div>
+            </div>
+          </div>
+          <div class="panel panel-b" id="panel-b" @scroll=${this._onScrollB}>
+            <div class="inner">
+              <div class="header-row">
+                ${sf.map(f => html`<span style="${this._hdr(COL_WIDTH)}">${f}</span>`)}
+              </div>
+              <div class="spacer" style="height:${this._spacerHeight()}px"></div>
+              <div class="rows" id="rows-b"></div>
+            </div>
           </div>
         </div>
       </div>
     `;
   }
 
-  _setupSyncScroll() {
-    // Sync is handled by _onScroll and _onScrollB
-  }
+  // Hmm, the header for A/B panels is wrong - the first field name is replaced by the emu name.
+  // Let me fix the render to show all side fields with a proper header.
 
-  _onScroll(e) {
+  _onScrollA(e) {
     if (this._syncing) return;
     this._syncing = true;
     const panelB = this.renderRoot?.querySelector('#panel-b');
-    const panelA = e.target;
+    const shared = this.renderRoot?.querySelector('#shared-panel');
     if (panelB) {
-      panelB.scrollTop = panelA.scrollTop;
-      panelB.scrollLeft = panelA.scrollLeft;
+      panelB.scrollTop = e.target.scrollTop;
+      panelB.scrollLeft = e.target.scrollLeft;
     }
+    if (shared) shared.scrollTop = e.target.scrollTop;
     this._syncing = false;
     this._scheduleRender();
   }
@@ -151,11 +205,12 @@ export class TraceDiffTable extends LitElement {
     if (this._syncing) return;
     this._syncing = true;
     const panelA = this.renderRoot?.querySelector('#panel-a');
-    const panelB = e.target;
+    const shared = this.renderRoot?.querySelector('#shared-panel');
     if (panelA) {
-      panelA.scrollTop = panelB.scrollTop;
-      panelA.scrollLeft = panelB.scrollLeft;
+      panelA.scrollTop = e.target.scrollTop;
+      panelA.scrollLeft = e.target.scrollLeft;
     }
+    if (shared) shared.scrollTop = e.target.scrollTop;
     this._syncing = false;
     this._scheduleRender();
   }
@@ -201,9 +256,11 @@ export class TraceDiffTable extends LitElement {
     const panelA = this.renderRoot?.querySelector('#panel-a');
     const rowsA = this.renderRoot?.querySelector('#rows-a');
     const rowsB = this.renderRoot?.querySelector('#rows-b');
-    if (!panelA || !rowsA || !rowsB || !this.storeA || !this.storeB) return;
+    const rowsShared = this.renderRoot?.querySelector('#rows-shared');
+    if (!panelA || !rowsA || !rowsB || !rowsShared || !this.storeA || !this.storeB) return;
 
-    const vf = this._visibleFields;
+    const sf = this._sideFields;
+    const shared = this._sharedFields;
     const total = this._entryCount();
     const firstVisible = this._scrollToEntry(panelA.scrollTop, panelA);
     const containerHeight = panelA.clientHeight || 500;
@@ -217,8 +274,8 @@ export class TraceDiffTable extends LitElement {
     this._renderedCount = count;
 
     if (count <= 0) {
-      rowsA.innerHTML = ''; rowsB.innerHTML = '';
-      rowsA.style.top = '0px'; rowsB.style.top = '0px';
+      rowsA.innerHTML = ''; rowsB.innerHTML = ''; rowsShared.innerHTML = '';
+      rowsA.style.top = rowsB.style.top = rowsShared.style.top = '0px';
       return;
     }
 
@@ -238,16 +295,19 @@ export class TraceDiffTable extends LitElement {
     }
     rowsA.style.top = `${top}px`;
     rowsB.style.top = `${top}px`;
+    rowsShared.style.top = `${top}px`;
 
     const hasRom = (this.storeA.hasRom?.() || this.storeB.hasRom?.()) ?? false;
+    const showAsm = hasRom && this._pcMatches;
     let disasmArr = null;
-    if (hasRom) {
+    if (showAsm) {
       const ds = this.storeA.hasRom?.() ? this.storeA : this.storeB;
       try { disasmArr = ds.disassembleRange(startIdx, count); } catch (_) {}
     }
 
-    const cs = this._cellStyle.bind(this);
+    const cs = this._cs.bind(this);
     const hl = this.highlightIndices;
+    const partsShared = [];
     const partsA = [];
     const partsB = [];
 
@@ -257,7 +317,11 @@ export class TraceDiffTable extends LitElement {
       const b = entriesB[i];
 
       let anyDiff = false;
-      for (const f of vf) {
+      for (const f of sf) {
+        if (a[f] !== b[f]) { anyDiff = true; break; }
+      }
+      // Also check shared fields for diff highlighting
+      for (const f of shared) {
         if (a[f] !== b[f]) { anyDiff = true; break; }
       }
 
@@ -266,13 +330,26 @@ export class TraceDiffTable extends LitElement {
       const bg = hlBg || diffBg;
       const rowStart = `<div data-idx="${idx}" style="display:flex;height:${ROW_HEIGHT}px;align-items:center;border-bottom:1px solid var(--bg);${bg}">`;
 
+      // Shared column
+      partsShared.push(rowStart);
+      partsShared.push(`<span style="${cs(IDX_WIDTH, 'color:var(--text-muted);')}">${idx}</span>`);
+      partsShared.push(`<span style="${cs(CY_WIDTH, 'color:var(--text-muted);')}">${a.cy ?? ''}</span>`);
+      if (shared.has('pc')) {
+        const pcDiff = a.pc !== b.pc;
+        partsShared.push(`<span style="${cs(PC_WIDTH, pcDiff ? 'color:var(--red);' : '')}">${displayVal(a.pc)}</span>`);
+      }
+      if (shared.has('op')) {
+        const opDiff = a.op !== b.op;
+        partsShared.push(`<span style="${cs(COL_WIDTH, opDiff ? 'color:var(--red);' : '')}">${displayVal(a.op)}</span>`);
+      }
+      if (disasmArr) {
+        partsShared.push(`<span style="${cs(ASM_WIDTH, 'text-align:left;color:var(--green);')}">${disasmArr[i] || ''}</span>`);
+      }
+      partsShared.push('</div>');
+
       // Panel A
       partsA.push(rowStart);
-      partsA.push(`<span style="${cs(IDX_WIDTH, 'color:var(--text-muted);')}">${idx}</span>`);
-      if (disasmArr) {
-        partsA.push(`<span style="${cs(ASM_WIDTH, 'text-align:left;color:var(--green);')}">${disasmArr[i] || ''}</span>`);
-      }
-      for (const f of vf) {
+      for (const f of sf) {
         const differs = a[f] !== b[f];
         const color = differs ? 'color:var(--red);font-weight:600;' : '';
         partsA.push(`<span style="${cs(COL_WIDTH, color)}">${displayVal(a[f])}</span>`);
@@ -281,11 +358,7 @@ export class TraceDiffTable extends LitElement {
 
       // Panel B
       partsB.push(rowStart);
-      partsB.push(`<span style="${cs(IDX_WIDTH, 'color:var(--text-muted);')}">${idx}</span>`);
-      if (disasmArr) {
-        partsB.push(`<span style="${cs(ASM_WIDTH, 'text-align:left;color:var(--green);')}">${disasmArr[i] || ''}</span>`);
-      }
-      for (const f of vf) {
+      for (const f of sf) {
         const differs = a[f] !== b[f];
         const color = differs ? 'color:var(--yellow);font-weight:600;' : '';
         partsB.push(`<span style="${cs(COL_WIDTH, color)}">${displayVal(b[f])}</span>`);
@@ -293,11 +366,11 @@ export class TraceDiffTable extends LitElement {
       partsB.push('</div>');
     }
 
+    rowsShared.innerHTML = partsShared.join('');
     rowsA.innerHTML = partsA.join('');
     rowsB.innerHTML = partsB.join('');
 
-    // Hover events on both panels
-    for (const rows of [rowsA, rowsB]) {
+    for (const rows of [rowsShared, rowsA, rowsB]) {
       for (const row of rows.children) {
         const idx = parseInt(row.dataset.idx, 10);
         row.addEventListener('mouseenter', () => this._emitHover(idx));
@@ -315,11 +388,13 @@ export class TraceDiffTable extends LitElement {
   scrollToIndex(index) {
     const panelA = this.renderRoot?.querySelector('#panel-a');
     const panelB = this.renderRoot?.querySelector('#panel-b');
+    const shared = this.renderRoot?.querySelector('#shared-panel');
     if (!panelA) return;
     this._renderedStart = -1;
     const scrollTop = this._entryToScroll(index, panelA);
     panelA.scrollTop = scrollTop;
     if (panelB) panelB.scrollTop = scrollTop;
+    if (shared) shared.scrollTop = scrollTop;
     this._renderRows();
   }
 }
