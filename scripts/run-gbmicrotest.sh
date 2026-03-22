@@ -14,6 +14,8 @@ GAMBATTE="$PROJECT_DIR/adapters/gambatte/build/gbtrace-gambatte"
 SAMEBOY="$PROJECT_DIR/adapters/sameboy/gbtrace-sameboy"
 MGBA="$PROJECT_DIR/adapters/mgba/gbtrace-mgba"
 
+export LD_LIBRARY_PATH="$PROJECT_DIR/adapters/sameboy/SameBoy/build/lib:${LD_LIBRARY_PATH:-}"
+
 FRAMES=2
 
 pass=0; fail=0; error=0; total=0
@@ -32,10 +34,25 @@ run_one() {
         return
     fi
 
-    # Trim to the instruction where test_pass is set
-    "$CLI" trim "$raw" --output "$raw.trimmed" --until "test_pass=01" 2>/dev/null || \
-    "$CLI" trim "$raw" --output "$raw.trimmed" --until "test_pass=FF" 2>/dev/null || \
-    cp "$raw" "$raw.trimmed"
+    # Strip boot ROM entries if present, then trim to test result
+    local stripped="$raw.stripped"
+    if "$CLI" strip-boot "$raw" --output "$stripped" 2>/dev/null; then
+        : # stripped successfully
+    else
+        cp "$raw" "$stripped"
+    fi
+
+    # Trim to the instruction where test_pass is set (pass=01 or fail=FF).
+    # Try pass first; if it wrote all entries (no match), try fail.
+    local total_entries
+    total_entries=$("$CLI" info "$stripped" 2>/dev/null | grep Entries | awk '{print $2}')
+    "$CLI" trim "$stripped" --output "$raw.trimmed" --until "test_pass=01" 2>/dev/null
+    local trimmed_entries
+    trimmed_entries=$("$CLI" info "$raw.trimmed" 2>/dev/null | grep Entries | awk '{print $2}')
+    if [ "$trimmed_entries" = "$total_entries" ]; then
+        # No pass found, try fail
+        "$CLI" trim "$stripped" --output "$raw.trimmed" --until "test_pass=FF" 2>/dev/null
+    fi
 
     # Convert to parquet
     "$CLI" convert "$raw.trimmed" --output "$out" 2>/dev/null
@@ -54,7 +71,7 @@ run_one() {
         fail=$((fail + 1))
     fi
 
-    rm -f "$raw" "$raw.trimmed"
+    rm -f "$raw" "$raw.trimmed" "$stripped"
     # Clean up .sav files that emulators create next to the ROM
     rm -f "${rom%.gb}.sav"
     total=$((total + 1))
