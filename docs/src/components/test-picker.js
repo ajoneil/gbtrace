@@ -296,12 +296,6 @@ export class TestPicker extends LitElement {
           `)}
         </div>
 
-        ${test ? html`
-          <div class="meta">
-            <a href="${suite.profile}" download>profile</a>
-            <a href="${romUrl(suite, test.rom)}" download>ROM</a>
-          </div>
-        ` : ''}
 
         ${this._loading ? html`<p class="status loading">Loading ${this._loading}...</p>` : ''}
         ${this._error ? html`<p class="status error">${this._error}</p>` : ''}

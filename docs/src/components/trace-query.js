@@ -255,6 +255,9 @@ export class TraceQuery extends LitElement {
     );
 
     return html`
+      <div class="chip-row">
+        <span class="section-label" style="font-weight:600;font-size:0.75rem">Search</span>
+      </div>
       ${semanticAvailable.length > 0 ? html`
         <div class="chip-row">
           ${this._renderSemanticInline(semanticAvailable)}

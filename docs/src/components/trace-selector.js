@@ -98,6 +98,47 @@ export class TraceSelector extends LitElement {
     .status { font-size: 0.75rem; }
     .status.loading { color: var(--accent); }
     .status.error { color: var(--red); }
+    .fields-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 3px;
+      align-items: center;
+      padding: 6px 12px 0;
+    }
+    .ft-label {
+      font-size: 0.7rem;
+      color: var(--text-muted);
+      margin-right: 2px;
+    }
+    .ft-chip {
+      padding: 1px 7px;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      color: var(--text-muted);
+      cursor: pointer;
+      font-size: 0.7rem;
+      font-family: var(--mono);
+      user-select: none;
+      transition: all 0.1s;
+    }
+    .ft-chip:hover { border-color: var(--accent); color: var(--accent); }
+    .ft-chip.on {
+      background: var(--accent-subtle);
+      border-color: var(--accent);
+      color: var(--accent);
+    }
+    .downloads {
+      display: flex;
+      gap: 8px;
+      font-size: 0.7rem;
+      margin-left: auto;
+    }
+    .downloads a {
+      color: var(--text-muted);
+      text-decoration: none;
+    }
+    .downloads a:hover { color: var(--accent); }
   `;
 
   static properties = {
@@ -107,6 +148,8 @@ export class TraceSelector extends LitElement {
     testInfo: { type: Object },
     activeA: { type: String },
     activeB: { type: String },
+    allFields: { type: Array },
+    hiddenFields: { type: Object },
     _uploads: { state: true },
     _loading: { state: true },
     _error: { state: true },
@@ -120,6 +163,8 @@ export class TraceSelector extends LitElement {
     this.testInfo = null;
     this.activeA = null;
     this.activeB = null;
+    this.allFields = [];
+    this.hiddenFields = new Set();
     this._uploads = []; // { name, store }
     this._loading = null;
     this._error = null;
@@ -187,7 +232,33 @@ export class TraceSelector extends LitElement {
 
         <button class="change-btn" @click=${this._changeRom}>change ROM</button>
       </div>
+      ${this.allFields.length ? html`
+        <div class="fields-row">
+          <span class="ft-label">columns</span>
+          ${this.allFields.map(f => html`
+            <span
+              class="ft-chip ${this.hiddenFields?.has(f) ? '' : 'on'}"
+              @click=${() => this._toggleField(f)}
+            >${f}</span>
+          `)}
+          ${this.suite?.profile || this.testRom ? html`
+            <span class="downloads">
+              ${this.suite?.profile ? html`<a href="${this.suite.profile}" download>profile</a>` : ''}
+              ${this.testRom ? html`<a href="${romUrl(this.suite, this.testRom)}" download>ROM</a>` : ''}
+            </span>
+          ` : ''}
+        </div>
+      ` : ''}
     `;
+  }
+
+  _toggleField(f) {
+    const s = new Set(this.hiddenFields || []);
+    if (s.has(f)) s.delete(f); else s.add(f);
+    this.dispatchEvent(new CustomEvent('hidden-fields-changed', {
+      detail: { hiddenFields: s },
+      bubbles: true, composed: true,
+    }));
   }
 
   _onTraceClick(name) {
