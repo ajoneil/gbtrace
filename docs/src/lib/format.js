@@ -1,13 +1,19 @@
-/** Format a value as zero-padded lowercase hex for display. */
-export function displayVal(v) {
+/** Known 16-bit fields — always display as 4 hex digits. */
+const FIELDS_16BIT = new Set(['pc', 'sp']);
+
+/** Format a value as zero-padded lowercase hex for display.
+ *  If fieldName is provided, uses field-aware width (e.g. pc always 4 digits). */
+export function displayVal(v, fieldName) {
   if (v === undefined || v === null) return '';
   if (typeof v === 'number') {
+    if (fieldName && FIELDS_16BIT.has(fieldName)) {
+      return v.toString(16).padStart(4, '0');
+    }
     if (v <= 0xFF) return v.toString(16).padStart(2, '0');
     if (v <= 0xFFFF) return v.toString(16).padStart(4, '0');
     return v.toString(16);
   }
   const s = String(v);
-  // Handle legacy 0x-prefixed string values
   if (s.startsWith('0x') || s.startsWith('0X')) return s.slice(2).toLowerCase();
   return s;
 }
@@ -18,7 +24,6 @@ export function displayVal(v) {
 export function normalizeInput(v) {
   const s = v.trim();
   if (!s) return s;
-  // Strip 0x prefix if user included it
   const bare = (s.startsWith('0x') || s.startsWith('0X')) ? s.slice(2) : s;
   return bare.toLowerCase();
 }

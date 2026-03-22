@@ -396,7 +396,7 @@ export class TraceQuery extends LitElement {
     }
 
     return traceFields.map(f =>
-      html`<span class="result-field"><span class="fname">${f}</span>=${displayVal(entry[f])}</span>`
+      html`<span class="result-field"><span class="fname">${f}</span>=${displayVal(entry[f], f)}</span>`
     );
   }
 

@@ -344,7 +344,7 @@ export class TraceDiffTable extends LitElement {
       // cy removed from format
       if (shared.has('pc')) {
         const pcDiff = a.pc !== b.pc;
-        partsShared.push(`<span style="${cs(PC_WIDTH, pcDiff ? 'color:var(--red);' : '')}">${displayVal(a.pc)}</span>`);
+        partsShared.push(`<span style="${cs(PC_WIDTH, pcDiff ? 'color:var(--red);' : '')}">${displayVal(a.pc, 'pc')}</span>`);
       }
       if (disasmArr) {
         partsShared.push(`<span style="${cs(ASM_WIDTH, 'text-align:left;color:var(--green);')}">${disasmArr[i] || ''}</span>`);
@@ -356,7 +356,7 @@ export class TraceDiffTable extends LitElement {
       for (const f of sf) {
         const differs = a[f] !== b[f];
         const color = differs ? 'color:var(--red);font-weight:600;' : '';
-        partsA.push(`<span style="${cs(COL_WIDTH, color)}">${displayVal(a[f])}</span>`);
+        partsA.push(`<span style="${cs(COL_WIDTH, color)}">${displayVal(a[f], f)}</span>`);
         if (disasmA && f === 'pc') {
           partsA.push(`<span style="${cs(ASM_WIDTH, 'text-align:left;color:var(--green);')}">${disasmA[i] || ''}</span>`);
         }
@@ -368,7 +368,7 @@ export class TraceDiffTable extends LitElement {
       for (const f of sf) {
         const differs = a[f] !== b[f];
         const color = differs ? 'color:var(--yellow);font-weight:600;' : '';
-        partsB.push(`<span style="${cs(COL_WIDTH, color)}">${displayVal(b[f])}</span>`);
+        partsB.push(`<span style="${cs(COL_WIDTH, color)}">${displayVal(b[f], f)}</span>`);
         if (disasmB && f === 'pc') {
           partsB.push(`<span style="${cs(ASM_WIDTH, 'text-align:left;color:var(--green);')}">${disasmB[i] || ''}</span>`);
         }
