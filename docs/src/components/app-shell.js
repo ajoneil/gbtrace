@@ -86,36 +86,6 @@ export class AppShell extends LitElement {
     }
     .compare-stats .diff-field { color: var(--red); }
     .compare-stats .entries { color: var(--text-muted); margin-left: auto; }
-    .field-toggles {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 3px;
-      align-items: center;
-      padding: 6px 0;
-    }
-    .ft-label {
-      font-size: 0.7rem;
-      color: var(--text-muted);
-      margin-right: 2px;
-    }
-    .ft-chip {
-      padding: 1px 7px;
-      background: var(--bg);
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      color: var(--text-muted);
-      cursor: pointer;
-      font-size: 0.7rem;
-      font-family: var(--mono);
-      user-select: none;
-      transition: all 0.1s;
-    }
-    .ft-chip:hover { border-color: var(--accent); color: var(--accent); }
-    .ft-chip.on {
-      background: var(--accent-subtle);
-      border-color: var(--accent);
-      color: var(--accent);
-    }
   `;
 
   static properties = {
@@ -205,30 +175,14 @@ export class AppShell extends LitElement {
         .testInfo=${this._testInfo}
         .activeA=${this._nameA}
         .activeB=${this._nameB}
+        .allFields=${this._allFields}
+        .hiddenFields=${this._hiddenFields}
       ></trace-selector>
-
-      ${this._store ? this._renderFieldToggles() : ''}
 
       ${this._store
         ? (this._storeB ? this._renderCompare() : this._renderSingle())
         : ''
       }
-    `;
-  }
-
-  _renderFieldToggles() {
-    const allFields = this._allFields;
-    if (!allFields.length) return '';
-    return html`
-      <div class="field-toggles">
-        <span class="ft-label">fields</span>
-        ${allFields.map(f => html`
-          <span
-            class="ft-chip ${this._hiddenFields.has(f) ? '' : 'on'}"
-            @click=${() => this._toggleField(f)}
-          >${f}</span>
-        `)}
-      </div>
     `;
   }
 
@@ -454,11 +408,6 @@ export class AppShell extends LitElement {
     this._hiddenFields = e.detail.hiddenFields;
   }
 
-  _toggleField(f) {
-    const s = new Set(this._hiddenFields);
-    if (s.has(f)) s.delete(f); else s.add(f);
-    this._hiddenFields = s;
-  }
 }
 
 customElements.define('app-shell', AppShell);
