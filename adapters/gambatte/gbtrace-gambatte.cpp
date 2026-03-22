@@ -185,9 +185,25 @@ static inline void fput_u16(FILE *out, int val) {
 
 // --- Trace callback ---
 
+// Cache for IO values — used to emit pre-execution state.
+// The callback fires AFTER the instruction executes, so externalRead()
+// gives post-execution values. We cache the IO values and emit them
+// on the NEXT callback, giving pre-execution state for that instruction.
+static std::unordered_map<unsigned short, unsigned char> g_io_cache;
+static bool g_io_cache_valid = false;
+
 static void trace_callback(void *data) {
     int *r = static_cast<int *>(data);
 
+    // Read current IO values (post-execution of this instruction)
+    std::unordered_map<unsigned short, unsigned char> io_now;
+    for (const auto &em : g_emitters) {
+        if (em.source == FieldEmitter::IO_READ) {
+            io_now[em.io_addr] = g_gb->externalRead(em.io_addr);
+        }
+    }
+
+    // Emit entry using cached IO values (pre-execution state)
     bool first = true;
     std::fprintf(g_output, "{");
 
@@ -203,17 +219,24 @@ static void trace_callback(void *data) {
             fput_u16(g_output, r[em.cb_index]);
             break;
         case FieldEmitter::IO_READ:
-            fput_u8(g_output, g_gb->externalRead(em.io_addr));
+            if (g_io_cache_valid) {
+                fput_u8(g_output, g_io_cache[em.io_addr]);
+            } else {
+                // First instruction — no cached value, use current
+                fput_u8(g_output, io_now[em.io_addr]);
+            }
             break;
         case FieldEmitter::IME:
-            // IME isn't directly exposed; read from callback data isn't available.
-            // For now, emit false. TODO: find a way to read IME from gambatte.
-            std::fprintf(g_output, "false");
+            // IME not available in gambatte — should be skipped by build_emitters
             break;
         }
     }
 
     std::fprintf(g_output, "}\n");
+
+    // Update cache for next callback
+    g_io_cache = io_now;
+    g_io_cache_valid = true;
 
     // Check serial stop condition: detect rising edge of SC bit 7
     if (g_stop_serial_active && !g_stop_serial_triggered) {
