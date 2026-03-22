@@ -116,13 +116,14 @@ export class TraceDiffTable extends LitElement {
     }
   }
 
-  /** Quick check: do PC values match between traces for the first 1000 entries? */
+  /** Check if PC values match between traces. Only share the PC column if
+   *  they're identical (or nearly so) — any early divergence means they should
+   *  be shown separately for comparison. */
   _checkPcMatch() {
     if (!this.storeA || !this.storeB) { this._pcMatches = false; return; }
     try {
       const indices = this.storeA.diffField(this.storeB, 'pc');
-      // If first diff is beyond 1000, consider them matching
-      this._pcMatches = indices.length === 0 || indices[0] > 1000;
+      this._pcMatches = indices.length === 0;
     } catch (_) {
       this._pcMatches = false;
     }
