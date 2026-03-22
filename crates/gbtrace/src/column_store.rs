@@ -310,6 +310,56 @@ impl ColumnStore {
         Ok(new_store)
     }
 
+    /// Skip entries until a field matches a condition.
+    ///
+    /// Condition format: `field=value` (exact match) or `field&mask` (bitmask test).
+    /// For bitmask: skips until `(field_value & mask) != 0`.
+    /// Values can be decimal or hex with `0x` prefix.
+    pub fn skip_until(&self, condition: &str) -> Result<Self> {
+        let (field, op, value) = if let Some(pos) = condition.find('&') {
+            (&condition[..pos], '&', &condition[pos + 1..])
+        } else if let Some(pos) = condition.find('=') {
+            (&condition[..pos], '=', &condition[pos + 1..])
+        } else {
+            return Err(Error::Diff(format!("invalid sync condition: {condition}")));
+        };
+
+        let val = if let Some(hex) = value.strip_prefix("0x") {
+            u64::from_str_radix(hex, 16)
+                .map_err(|_| Error::Diff(format!("invalid value: {value}")))?
+        } else {
+            value.parse::<u64>()
+                .map_err(|_| Error::Diff(format!("invalid value: {value}")))?
+        };
+
+        let col_idx = self.field_col(field)
+            .ok_or_else(|| Error::Diff(format!("field '{field}' not found")))?;
+        let count = self.entry_count();
+
+        let start = (0..count)
+            .find(|&i| {
+                let v = self.columns[col_idx].get_numeric(i);
+                match op {
+                    '&' => (v & val) != 0,
+                    '=' => v == val,
+                    _ => false,
+                }
+            })
+            .ok_or_else(|| Error::Diff(format!("sync condition '{condition}' never matched")))?;
+
+        let ncols = self.header.fields.len();
+        let mut new_store = Self::with_capacity(self.header.clone(), count - start);
+
+        for i in start..count {
+            for col in 0..ncols {
+                new_store.push_u64(col, self.columns[col].get_numeric(i));
+            }
+            new_store.finish_row();
+        }
+
+        Ok(new_store)
+    }
+
     /// Prepare two stores for comparison: collapse T-cycle traces to
     /// instruction level if triggers differ, then align by first common PC.
     /// Returns the two stores ready for direct index-by-index comparison.
