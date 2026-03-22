@@ -101,7 +101,7 @@ impl Profile {
         let raw: ProfileToml = toml::from_str(toml_str)?;
 
         // Flatten field groups into ordered list, cy always first.
-        let mut fields = vec!["cy".to_string()];
+        let mut fields = Vec::new();
         let groups = [
             &raw.fields.cpu,
             &raw.fields.ppu,
@@ -112,7 +112,7 @@ impl Profile {
 
         for group in groups {
             for field in group {
-                if field == "cy" {
+                if field == "cy" || field == "_cy" {
                     continue; // already included
                 }
                 if !KNOWN_FIELDS.contains(&field.as_str()) {

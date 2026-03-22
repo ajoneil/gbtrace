@@ -108,8 +108,6 @@ export class TraceHeader extends LitElement {
           <span class="value">${h.profile}</span>
           <span class="label">Trigger</span>
           <span class="value">${h.trigger}</span>
-          <span class="label">Cy unit</span>
-          <span class="value">${h.cy_unit || 'tcycle'}</span>
           <span class="label">Boot ROM</span>
           <span class="value">${h.boot_rom}</span>
           <span class="label">ROM hash</span>

@@ -133,8 +133,8 @@ pub struct TraceHeader {
     /// When entries are emitted.
     pub trigger: Trigger,
 
-    /// Unit of the `cy` field. Defaults to `tcycle` for backward compatibility.
-    #[serde(default)]
+    /// Deprecated: cycle unit. Ignored — traces use instruction index.
+    #[serde(default, skip_serializing)]
     pub cy_unit: CycleUnit,
 
     /// Optional freeform notes.
@@ -155,11 +155,7 @@ impl TraceHeader {
                 "fields must not be empty".into(),
             ));
         }
-        if !self.fields.contains(&"cy".to_string()) {
-            return Err(crate::error::Error::InvalidHeader(
-                "fields must contain 'cy'".into(),
-            ));
-        }
+        // cy is no longer required — traces use instruction index as timeline
         Ok(())
     }
 }

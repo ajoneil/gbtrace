@@ -84,15 +84,6 @@ impl TraceStore {
         Ok(arr)
     }
 
-    /// Get the cycle count for a specific entry. Returns 0 if not found.
-    #[wasm_bindgen(js_name = entryCycle)]
-    pub fn entry_cycle(&self, index: usize) -> f64 {
-        if index >= self.store.entry_count() {
-            return 0.0;
-        }
-        self.store.cy(index) as f64
-    }
-
     /// Downsample a field for chart display.
     /// Returns a Float64Array of [min0, max0, min1, max1, ...] for `buckets` buckets
     /// covering entries from `start` to `end`.
@@ -187,7 +178,7 @@ impl TraceStore {
         let mut any_diff_flags = vec![false; len];
 
         for (i, name) in header.fields.iter().enumerate() {
-            if name == "cy" { continue; }
+            // all fields compared
             if let Some(j) = other.store.field_col(name) {
                 let ca = self.store.column(i);
                 let cb = other.store.column(j);
@@ -243,7 +234,7 @@ impl TraceStore {
         // Collect column pairs for fields present in both stores
         let mut col_pairs: Vec<(usize, usize)> = Vec::new();
         for (i, name) in header.fields.iter().enumerate() {
-            if name == "cy" { continue; }
+            // all fields compared
             if let Some(j) = other.store.field_col(name) {
                 col_pairs.push((i, j));
             }

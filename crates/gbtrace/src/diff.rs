@@ -214,7 +214,6 @@ impl TraceDiffer {
 
         let mut common_fields: Vec<String> = fields_a
             .intersection(&fields_b)
-            .filter(|f| **f != "cy")
             .map(|s| s.to_string())
             .collect();
         common_fields.sort();
@@ -242,9 +241,8 @@ impl TraceDiffer {
             .map(|s| s.to_string())
             .collect();
 
-        // All fields we need (common + cy + extras for context)
-        let mut all_fields: Vec<String> = vec!["cy".to_string()];
-        all_fields.extend(common_fields.iter().cloned());
+        // All fields we need (common + extras for context)
+        let mut all_fields: Vec<String> = common_fields.clone();
         for extra in &["pc", "op", "a"] {
             let s = extra.to_string();
             if !all_fields.contains(&s)
@@ -584,10 +582,7 @@ pub fn classify(
 
     let div_names: BTreeSet<&str> = field_divergences.iter().map(|d| d.field.as_str()).collect();
 
-    // Only cy differs
-    if div_names.len() == 1 && div_names.contains("cy") {
-        return DivergenceClass::TimingOnly;
-    }
+    // TimingOnly no longer applies since cy is removed
 
     let pc_diverges = div_names.contains("pc");
     let op_diverges = div_names.contains("op");

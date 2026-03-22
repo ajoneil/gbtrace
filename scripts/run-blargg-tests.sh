@@ -1,12 +1,11 @@
 #!/usr/bin/env bash
 # Run Blargg CPU instruction tests across all adapters and report results.
+# Filenames include _pass or _fail suffix based on test result.
 #
 # Usage:
 #   ./scripts/run-blargg-tests.sh [adapter...]
 #
-# If no adapters specified, runs all three: gambatte sameboy mgba
-# Parquet traces are saved next to the ROMs for web access:
-#   docs/tests/blargg/cpu_instrs/individual/<testname>_<adapter>.gbtrace.parquet
+# If no adapters specified, runs all: gambatte sameboy mgba logicboy
 
 set -euo pipefail
 
@@ -22,17 +21,19 @@ STOP_SERIAL_BYTE="0A"
 STOP_SERIAL_COUNT=4
 MAX_FRAMES=3000
 
-ADAPTERS=("${@:-gambatte sameboy mgba}")
+ADAPTERS=("${@:-gambatte sameboy mgba logicboy}")
 if [[ $# -eq 0 ]]; then
-    ADAPTERS=(gambatte sameboy mgba)
+    ADAPTERS=(gambatte sameboy mgba logicboy)
 fi
 
-# Adapter binary paths and any required env
-declare -A ADAPTER_BIN ADAPTER_ENV
+# Adapter binary paths
+declare -A ADAPTER_BIN
 ADAPTER_BIN[gambatte]="$PROJECT_DIR/adapters/gambatte/build/gbtrace-gambatte"
 ADAPTER_BIN[sameboy]="$PROJECT_DIR/adapters/sameboy/gbtrace-sameboy"
 ADAPTER_BIN[mgba]="$PROJECT_DIR/adapters/mgba/gbtrace-mgba"
-ADAPTER_ENV[sameboy]="LD_LIBRARY_PATH=$PROJECT_DIR/adapters/sameboy/SameBoy/build/lib"
+ADAPTER_BIN[logicboy]="$PROJECT_DIR/adapters/logicboy/gbtrace-logicboy"
+
+export LD_LIBRARY_PATH="$PROJECT_DIR/adapters/sameboy/SameBoy/build/lib:${LD_LIBRARY_PATH:-}"
 
 if [[ ! -x "$CLI" ]]; then
     echo "ERROR: gbtrace-cli not found at $CLI"
@@ -40,13 +41,11 @@ if [[ ! -x "$CLI" ]]; then
     exit 1
 fi
 
-# Counters
 PASS=0
 FAIL=0
 ERROR=0
 
 extract_serial() {
-    # Extract serial output by detecting SC bit 7 rising edges.
     local trace_file="$1"
     awk -F'"sc":' '{
         split($2, a, /[,}]/); sc = a[1] + 0
@@ -68,14 +67,10 @@ for adapter in "${ADAPTERS[@]}"; do
     for rom in "$ROM_DIR"/*.gb; do
         name="$(basename "$rom" .gb)"
         jsonl="$ROM_DIR/${name}_${adapter}.gbtrace"
-        parquet="$ROM_DIR/${name}_${adapter}.gbtrace.parquet"
 
-        # Print test name immediately so user sees progress
         printf "  %-30s  " "$name"
 
-        # Run the adapter
-        env_prefix="${ADAPTER_ENV[$adapter]:-}"
-        stderr_out=$(env $env_prefix "$bin" \
+        stderr_out=$(env "$bin" \
             --rom "$rom" \
             --profile "$PROFILE" \
             --output "$jsonl" \
@@ -84,32 +79,33 @@ for adapter in "${ADAPTERS[@]}"; do
             --frames "$MAX_FRAMES" \
             2>&1) || true
 
-        # Extract frame count
         frame_info=$(echo "$stderr_out" | grep -oP 'frame \K[0-9]+' | tail -1)
 
-        # Extract serial output to check pass/fail
         serial=$(extract_serial "$jsonl" 2>/dev/null || echo "")
 
         if echo "$serial" | grep -qi "passed"; then
-            status="PASS"
+            status="PASS"; suffix="_pass"
             ((PASS++)) || true
         elif echo "$serial" | grep -qi "failed"; then
-            status="FAIL"
+            status="FAIL"; suffix="_fail"
             ((FAIL++)) || true
         else
-            status="????"
+            status="????"; suffix="_fail"
             ((ERROR++)) || true
         fi
 
-        # Convert to parquet and delete JSONL
+        # Convert to parquet with pass/fail suffix
+        parquet="$ROM_DIR/${name}_${adapter}${suffix}.gbtrace.parquet"
         jsonl_size=$(du -h "$jsonl" 2>/dev/null | cut -f1)
         "$CLI" convert "$jsonl" -o "$parquet" >/dev/null 2>&1 && rm -f "$jsonl"
         parquet_size=$(du -h "$parquet" 2>/dev/null | cut -f1)
 
         printf "%-4s  frame %-5s  %s -> %s\n" "$status" "${frame_info:-?}" "$jsonl_size" "$parquet_size"
+
+        # Clean up sav files
+        rm -f "${rom%.gb}.sav"
     done
 done
 
-# Summary
 printf "\n=== Summary ===\n"
 printf "  Pass: %d  Fail: %d  Unknown: %d  Total: %d\n" "$PASS" "$FAIL" "$ERROR" "$((PASS + FAIL + ERROR))"

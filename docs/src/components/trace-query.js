@@ -249,7 +249,7 @@ export class TraceQuery extends LitElement {
   }
 
   render() {
-    const traceFields = (this.fields || []).filter(f => f !== 'cy');
+    const traceFields = this.fields || [];
     const semanticAvailable = SEMANTIC_CONDITIONS.filter(c =>
       (this.fields || []).includes(c.needs)
     );
@@ -338,7 +338,7 @@ export class TraceQuery extends LitElement {
                 @click=${() => this._jumpTo(i)}
               >
                 <span class="result-idx">#${this._matches[i]}</span>
-                <span class="result-cy">cy=${entry.cy ?? '?'}</span>
+                <span class="result-cy">#${this._matches[i]}</span>
                 <span class="result-fields">
                   ${this._summaryFields(entry)}
                 </span>
@@ -382,7 +382,7 @@ export class TraceQuery extends LitElement {
 
   _summaryFields(entry) {
     // Show the searched field first, then all trace fields (excluding cy)
-    const traceFields = (this.fields || []).filter(f => f !== 'cy' && entry[f] !== undefined);
+    const traceFields = (this.fields || []).filter(f => entry[f] !== undefined);
 
     // Put the searched field at the front if there is one
     const searchedField = this._selectedField;

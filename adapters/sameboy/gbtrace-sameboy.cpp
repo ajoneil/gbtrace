@@ -68,14 +68,13 @@ static const std::unordered_map<std::string, RegisterField> REGISTER_FIELDS = {
 struct Profile {
     std::string name;
     std::string trigger;
-    std::vector<std::string> fields; // ordered, including "cy"
+    std::vector<std::string> fields; // ordered
     std::unordered_map<std::string, unsigned short> memory; // name -> address
 };
 
 static Profile parse_profile(const std::string &path) {
     Profile prof;
     prof.trigger = "instruction";
-    prof.fields.push_back("cy");
 
     std::ifstream f(path);
     if (!f.is_open()) {
@@ -148,7 +147,7 @@ static Profile parse_profile(const std::string &path) {
 static FILE *g_output = nullptr;
 static GB_gameboy_t *g_gb = nullptr;
 static Profile g_profile;
-static uint64_t g_total_8mhz_ticks = 0;
+static uint64_t g_total_8mhz_ticks = 0; // needed for frame timing
 
 static unsigned char g_stop_serial_byte = 0;
 static int g_stop_serial_count = 1;
@@ -229,14 +228,13 @@ static inline int read_reg(GB_gameboy_t *gb, RegisterField::Reg reg) {
 // --- Trace callback ---
 
 static void exec_callback(GB_gameboy_t *gb, uint16_t address, uint8_t opcode) {
-    // SameBoy counts in 8MHz ticks. Divide by 2 for T-cycles (4.194MHz).
-    uint64_t ticks_now = g_total_8mhz_ticks + gb->cycles_since_run;
-    uint64_t tcycles = ticks_now / 2;
-
-    std::fprintf(g_output, "{\"cy\":%llu", (unsigned long long)tcycles);
+    bool first = true;
+    std::fprintf(g_output, "{");
 
     for (const auto &em : g_emitters) {
-        std::fprintf(g_output, ",\"%s\":", em.name.c_str());
+        if (!first) std::fprintf(g_output, ",");
+        first = false;
+        std::fprintf(g_output, "\"%s\":", em.name.c_str());
         switch (em.source) {
         case FieldEmitter::REGISTER_8:
             fput_u8(g_output, read_reg(gb, em.reg));
@@ -319,7 +317,7 @@ static void write_header(FILE *out, const Profile &prof,
         std::fprintf(out, "\"%s\"", prof.fields[i].c_str());
     }
 
-    std::fprintf(out, "],\"trigger\":\"%s\",\"cy_unit\":\"tcycle\"}\n", prof.trigger.c_str());
+    std::fprintf(out, "],\"trigger\":\"%s\"}\n", prof.trigger.c_str());
 }
 
 // --- Stop condition ---

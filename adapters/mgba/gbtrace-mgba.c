@@ -76,7 +76,7 @@ struct Profile {
     char name[MAX_NAME];
     char trigger[MAX_NAME];
     char fields[MAX_FIELDS][MAX_NAME];
-    int nfields; // includes "cy" at index 0
+    int nfields;
     struct MemoryField memory[MAX_MEMORY_FIELDS];
     int nmemory;
 };
@@ -98,8 +98,7 @@ static void strip_quotes(char *s) {
 static struct Profile parse_profile(const char *path) {
     struct Profile prof = {0};
     strcpy(prof.trigger, "instruction");
-    strcpy(prof.fields[0], "cy");
-    prof.nfields = 1;
+    prof.nfields = 0;
 
     FILE *f = fopen(path, "r");
     if (!f) { fprintf(stderr, "Error: cannot open profile '%s'\n", path); exit(1); }
@@ -262,17 +261,15 @@ struct TraceModule {
 
 static void emit_entry(struct mCore *core) {
     struct SM83Core *cpu = core->cpu;
-    struct GB *gb = core->board;
 
-    // Cycle count: globalCycles + cpu->cycles gives 8MHz ticks; /2 = T-cycles
-    uint64_t ticks = gb->timing.globalCycles + (uint64_t)cpu->cycles;
-    uint64_t tcycles = ticks / 2;
-
-    fprintf(g_output, "{\"cy\":%llu", (unsigned long long)tcycles);
+    int first = 1;
+    fprintf(g_output, "{");
 
     for (int i = 0; i < g_nemitters; i++) {
         struct FieldEmitter *em = &g_emitters[i];
-        fprintf(g_output, ",\"%s\":", em->name);
+        if (!first) fprintf(g_output, ",");
+        first = 0;
+        fprintf(g_output, "\"%s\":", em->name);
         switch (em->source) {
         case SRC_REG8:
             fput_u8(g_output, read_reg8(cpu, em->name));
@@ -350,7 +347,7 @@ static void write_header(FILE *out, const struct Profile *prof,
         fprintf(out, "\"%s\"", prof->fields[i]);
     }
 
-    fprintf(out, "],\"trigger\":\"%s\",\"cy_unit\":\"tcycle\"}\n", prof->trigger);
+    fprintf(out, "],\"trigger\":\"%s\"}\n", prof->trigger);
 }
 
 // --- Main ---
