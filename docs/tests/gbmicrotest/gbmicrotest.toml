@@ -4,7 +4,7 @@ description = "Full CPU + PPU + timer + interrupt state for gbmicrotest cycle-ac
 trigger = "instruction"
 
 [fields]
-cpu = ["pc", "sp", "a", "f", "b", "c", "d", "e", "h", "l", "op"]
+cpu = ["pc", "sp", "a", "f", "b", "c", "d", "e", "h", "l"]
 ppu = ["lcdc", "stat", "ly", "lyc", "scy", "scx"]
 interrupt = ["if_", "ie", "ime"]
 timer = ["div", "tima", "tma", "tac"]

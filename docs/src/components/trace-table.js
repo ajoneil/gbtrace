@@ -84,8 +84,10 @@ export class TraceTable extends LitElement {
         <div class="inner">
           <div class="header-row">
             <span style="${hdrStyle(IDX_WIDTH)}">#</span>
-            ${vf.map(f => html`<span style="${hdrStyle(COL_WIDTH)}">${f}</span>`)}
-            ${hasRom ? html`<span style="${hdrStyle(ASM_WIDTH, 'text-align:left;')}">asm</span>` : ''}
+            ${vf.map(f => html`
+              <span style="${hdrStyle(COL_WIDTH)}">${f}</span>
+              ${hasRom && f === 'pc' ? html`<span style="${hdrStyle(ASM_WIDTH, 'text-align:left;')}">asm</span>` : ''}
+            `)}
           </div>
           <div class="spacer" style="height:${this._spacerHeight()}px"></div>
           <div class="rows"></div>
@@ -176,9 +178,9 @@ export class TraceTable extends LitElement {
       parts.push(`<span style="${cs(IDX_WIDTH, 'color:var(--text-muted);')}">${idx}</span>`);
       for (const f of vf) {
         parts.push(`<span style="${cs(COL_WIDTH)}">${displayVal(data[f])}</span>`);
-      }
-      if (disasmArr) {
-        parts.push(`<span style="${cs(ASM_WIDTH, 'text-align:left;color:var(--green);')}">${disasmArr[i] || ''}</span>`);
+        if (disasmArr && f === 'pc') {
+          parts.push(`<span style="${cs(ASM_WIDTH, 'text-align:left;color:var(--green);')}">${disasmArr[i] || ''}</span>`);
+        }
       }
       parts.push('</div>');
     }
