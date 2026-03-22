@@ -6,6 +6,7 @@ const TEST_SUITES = [
     name: 'gbmicrotest',
     base: 'tests/gbmicrotest',
     profile: 'tests/gbmicrotest/gbmicrotest.toml',
+    preferredEmu: 'gateboy',
     tests: null, // loaded from manifest
     categories: [
       { name: 'poweron', filter: 'poweron_' },
@@ -31,11 +32,12 @@ const TEST_SUITES = [
     base: 'tests/blargg',
     profile: 'tests/blargg/blargg_cpu.toml',
     manifest: 'tests/blargg/manifest.json',
+    preferredEmu: 'gambatte',
     tests: null,
   },
 ];
 
-const EMULATORS = ['logicboy', 'gambatte', 'sameboy', 'mgba'];
+const EMULATORS = ['gateboy', 'gambatte', 'sameboy', 'mgba'];
 
 function traceUrl(suite, rom, emulator, status = 'pass') {
   const base = rom.replace('.gb', '');
@@ -339,9 +341,11 @@ export class TestPicker extends LitElement {
     const test = tests[index];
     if (!test) return;
 
-    // Auto-load the best available emulator (prefer logicboy)
+    // Auto-load the preferred emulator for this suite, falling back to first available
     const emus = test.emulators || {};
-    const preferred = EMULATORS.find(e => emus[e]);
+    const preferred = (suite.preferredEmu && emus[suite.preferredEmu])
+      ? suite.preferredEmu
+      : EMULATORS.find(e => emus[e]);
     if (preferred) {
       this._load(suite, test, preferred, emus[preferred] || 'pass');
     }
