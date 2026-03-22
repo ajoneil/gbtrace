@@ -408,12 +408,16 @@ int main(int argc, char *argv[]) {
 
     // Run simulation
     //
-    // GateBoy runs at phase granularity (8 phases = 1 T-cycle).
-    // We detect instruction boundaries by watching op_state transition to 0
-    // (start of a new instruction's opcode fetch).
+    // GateBoy runs at phase granularity (8 phases per T-cycle).
+    // Emission mode depends on profile trigger:
+    //   "tcycle"      — emit every T-cycle (every 8 phases)
+    //   "instruction" — emit at instruction boundaries
 
     static constexpr int PHASES_PER_FRAME = 70224 * 8;  // 561792 phases
+    static constexpr int PHASES_PER_TCYCLE = 8;
     int64_t total_phases = static_cast<int64_t>(max_frames) * PHASES_PER_FRAME;
+
+    bool tcycle_mode = (prof.trigger == "tcycle");
 
     uint16_t prev_op_addr = gb.cpu.core.reg.op_addr;
     int prev_op_state = gb.cpu.core.reg.op_state;
@@ -429,15 +433,20 @@ int main(int argc, char *argv[]) {
 
         const CpuState &reg = gb.cpu.core.reg;
 
-        // Detect instruction boundary: either op_state transitions to 0
-        // (multi-cycle instruction completed) or op_addr changed while
-        // op_state stays 0 (back-to-back single-cycle instructions like NOPs).
-        bool new_insn = (reg.op_state == 0 && prev_op_state != 0)
-                     || (reg.op_state == 0 && reg.op_addr != prev_op_addr);
-        if (new_insn) {
+        bool should_emit;
+        if (tcycle_mode) {
+            // Emit every T-cycle (every 8 phases)
+            should_emit = (phase_count % PHASES_PER_TCYCLE) == 0;
+        } else {
+            // Emit at instruction boundaries
+            should_emit = (reg.op_state == 0 && prev_op_state != 0)
+                       || (reg.op_state == 0 && reg.op_addr != prev_op_addr);
+        }
+
+        if (should_emit) {
             emit_entry(output, gb);
 
-            // Check stop-when conditions at every instruction
+            // Check stop-when conditions
             for (const auto &cond : stop_conditions) {
                 uint8_t val = read_reg(gb, cond.addr);
                 if (val == cond.value) {

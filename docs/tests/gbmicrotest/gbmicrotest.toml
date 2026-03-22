@@ -1,7 +1,7 @@
 [profile]
 name = "gbmicrotest"
 description = "Full CPU + PPU + timer + interrupt state for gbmicrotest cycle-accuracy tests."
-trigger = "instruction"
+trigger = "tcycle"
 
 [fields]
 cpu = ["pc", "sp", "a", "f", "b", "c", "d", "e", "h", "l"]
