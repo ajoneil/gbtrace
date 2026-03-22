@@ -109,3 +109,31 @@ done
 
 printf "\n=== Summary ===\n"
 printf "  Pass: %d  Fail: %d  Unknown: %d  Total: %d\n" "$PASS" "$FAIL" "$ERROR" "$((PASS + FAIL + ERROR))"
+
+# Generate manifest
+echo "Generating manifest..."
+python3 -c "
+import json, glob, os, re
+
+rom_dir = '$ROM_DIR'
+roms = sorted(glob.glob(os.path.join(rom_dir, '*.gb')))
+emus = ['logicboy', 'gambatte', 'sameboy', 'mgba']
+
+manifest = []
+for rom in roms:
+    name = os.path.splitext(os.path.basename(rom))[0]
+    rom_rel = 'cpu_instrs/individual/' + os.path.basename(rom)
+    entry = {'name': name, 'rom': rom_rel, 'emulators': {}}
+    for emu in emus:
+        for status in ['pass', 'fail']:
+            fname = f'{name}_{emu}_{status}.gbtrace.parquet'
+            if os.path.exists(os.path.join(rom_dir, fname)):
+                entry['emulators'][emu] = status
+                break
+    manifest.append(entry)
+
+out_path = os.path.join(os.path.dirname(rom_dir), 'manifest.json')
+with open(out_path, 'w') as f:
+    json.dump(manifest, f)
+print(f'  {len(manifest)} tests, {sum(1 for t in manifest for e in t[\"emulators\"])} traces')
+"
