@@ -9,10 +9,10 @@ ROM_DIR="$PROJECT_DIR/docs/tests/gbmicrotest"
 PROFILE="$ROM_DIR/gbmicrotest.toml"
 CLI="$PROJECT_DIR/target/release/gbtrace-cli"
 
-GAMBATTE="$PROJECT_DIR/adapters/gambatte/build/gbtrace-gambatte"
+GAMBATTE="$PROJECT_DIR/adapters/gambatte/gbtrace-gambatte"
 SAMEBOY="$PROJECT_DIR/adapters/sameboy/gbtrace-sameboy"
 MGBA="$PROJECT_DIR/adapters/mgba/gbtrace-mgba"
-LOGICBOY="$PROJECT_DIR/adapters/logicboy/gbtrace-logicboy"
+GATEBOY="$PROJECT_DIR/adapters/gateboy/gbtrace-gateboy"
 
 export LD_LIBRARY_PATH="$PROJECT_DIR/adapters/sameboy/SameBoy/build/lib:${LD_LIBRARY_PATH:-}"
 
@@ -35,7 +35,11 @@ run_one() {
 
     # Strip boot ROM entries if present, then trim to test result
     local stripped="$raw.stripped"
-    if "$CLI" strip-boot "$raw" --output "$stripped" 2>/dev/null; then
+    local boot_rom
+    boot_rom=$("$CLI" info "$raw" 2>/dev/null | grep 'Boot ROM' | awk '{print $3}')
+    if [ "$boot_rom" = "skip" ] || [ "$boot_rom" = "none" ] || [ "$boot_rom" = "built-in" ]; then
+        cp "$raw" "$stripped"
+    elif "$CLI" strip-boot "$raw" --output "$stripped" >/dev/null 2>&1; then
         : # stripped successfully
     else
         cp "$raw" "$stripped"
@@ -44,11 +48,11 @@ run_one() {
     # Trim to the instruction where test_pass is set (pass=01 or fail=FF).
     local total_entries
     total_entries=$("$CLI" info "$stripped" 2>/dev/null | grep Entries | awk '{print $2}')
-    "$CLI" trim "$stripped" --output "$raw.trimmed" --until "test_pass=01" 2>/dev/null
+    "$CLI" trim "$stripped" --output "$raw.trimmed" --until "test_pass=01" >/dev/null 2>&1
     local trimmed_entries
     trimmed_entries=$("$CLI" info "$raw.trimmed" 2>/dev/null | grep Entries | awk '{print $2}')
     if [ "$trimmed_entries" = "$total_entries" ]; then
-        "$CLI" trim "$stripped" --output "$raw.trimmed" --until "test_pass=FF" 2>/dev/null
+        "$CLI" trim "$stripped" --output "$raw.trimmed" --until "test_pass=FF" >/dev/null 2>&1
     fi
 
     # Determine pass/fail from trimmed trace
@@ -69,7 +73,7 @@ run_one() {
 
     # Convert to parquet with pass/fail suffix
     local out="$ROM_DIR/${name}_${emu_name}${suffix}.gbtrace.parquet"
-    "$CLI" convert "$raw.trimmed" --output "$out" 2>/dev/null
+    "$CLI" convert "$raw.trimmed" --output "$out" >/dev/null 2>&1
 
     local entries
     entries=$("$CLI" info "$out" 2>/dev/null | grep Entries | awk '{print $2}')
@@ -81,7 +85,7 @@ run_one() {
 }
 
 # Parse args
-EMUS="gambatte sameboy mgba logicboy"
+EMUS="gambatte sameboy mgba gateboy"
 FILTER=""
 while [ "${1:-}" != "" ]; do
     case "$1" in
@@ -96,7 +100,7 @@ for emu_name in $EMUS; do
         gambatte)  emu_bin="$GAMBATTE" ;;
         sameboy)   emu_bin="$SAMEBOY" ;;
         mgba)      emu_bin="$MGBA" ;;
-        logicboy)  emu_bin="$LOGICBOY" ;;
+        gateboy)  emu_bin="$GATEBOY" ;;
         *) echo "Unknown emulator: $emu_name"; exit 1 ;;
     esac
 
@@ -121,7 +125,7 @@ import json, glob, os, re
 
 rom_dir = '$ROM_DIR'
 tests = sorted(set(os.path.splitext(os.path.basename(f))[0] for f in glob.glob(os.path.join(rom_dir, '*.gb'))))
-emus = ['logicboy', 'gambatte', 'sameboy', 'mgba']
+emus = ['gateboy', 'gambatte', 'sameboy', 'mgba']
 
 manifest = []
 for test in tests:

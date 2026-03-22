@@ -1,8 +1,7 @@
-# gbtrace-logicboy adapter
+# gbtrace-gateboy adapter
 #
-# Uses the LogicBoy simulation from metroboy to produce .gbtrace files.
-# LogicBoy is a fast, logic-level Game Boy simulation (as opposed to the
-# gate-level GateBoy).
+# Uses the GateBoy gate-level simulation from metroboy to produce .gbtrace
+# files.  GateBoy includes a built-in DMG boot ROM.
 #
 # Dependencies are cloned automatically on first build:
 #   make
@@ -19,7 +18,7 @@ CXXFLAGS  = -O2 -std=c++20 -Wall -Wextra -Wno-unused-parameter \
 INCLUDES  = -I$(METROBOY_DIR)/src -I$(METROBOY_DIR)/symlinks \
             -I$(METROBOY_DIR)/symlinks/metrolib
 
-TARGET = gbtrace-logicboy
+TARGET = gbtrace-gateboy
 
 # ---------------------------------------------------------------------------
 # Source lists
@@ -41,7 +40,7 @@ METROLIB_GB_SRCS   = $(METROLIB_DIR)/metrolib/gameboy/MetroBoyCPU.cpp \
 ALL_LIB_SRCS = $(GATEBOYLIB_SRCS) $(METROLIB_CORE_SRCS) $(METROLIB_GB_SRCS)
 ALL_LIB_OBJS = $(patsubst %.cpp,build/%.o,$(ALL_LIB_SRCS))
 
-ADAPTER_OBJ = build/gbtrace-logicboy.o
+ADAPTER_OBJ = build/gbtrace-gateboy.o
 AUDIO_STUB_OBJ = build/audio_stub.o
 
 # ---------------------------------------------------------------------------
@@ -71,7 +70,7 @@ $(TARGET): deps $(ALL_LIB_OBJS) $(ADAPTER_OBJ) $(AUDIO_STUB_OBJ)
 	$(CXX) $(CXXFLAGS) -o $@ $(ALL_LIB_OBJS) $(ADAPTER_OBJ) $(AUDIO_STUB_OBJ) -lpthread
 
 # Adapter source
-build/gbtrace-logicboy.o: gbtrace-logicboy.cpp | deps
+build/gbtrace-gateboy.o: gbtrace-gateboy.cpp | deps
 	@mkdir -p $(dir $@)
 	$(CXX) $(CXXFLAGS) $(INCLUDES) -c -o $@ $<
 

@@ -10,10 +10,10 @@
 GAMBATTE_DIR ?= gambatte-speedrun/gambatte_core
 
 CXX ?= g++
-CXXFLAGS = -O2 -std=c++17 -Wall -Wextra
+CXXFLAGS = -O2 -std=c++17 -Wall -Wextra -DHAVE_CSTDINT
 INCLUDES = -I$(GAMBATTE_DIR)/libgambatte/include
 LDFLAGS = -L$(GAMBATTE_DIR)/libgambatte
-LDLIBS = -lgambatte
+LDLIBS = -lgambatte -lz
 
 TARGET = gbtrace-gambatte
 

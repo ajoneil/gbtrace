@@ -1,18 +1,21 @@
-// gbtrace-logicboy: Adapter that uses LogicBoy (from metroboy) to produce
+// gbtrace-gateboy: Adapter that uses GateBoy (from metroboy) to produce
 // .gbtrace files.
 //
-// LogicBoy is a fast logic-level Game Boy simulation derived from the
-// gate-level GateBoy.  It runs at phase granularity (8 phases per T-cycle)
-// but this adapter emits one trace entry per instruction boundary, matching
-// the output format of the other gbtrace adapters.
+// GateBoy is a gate-level accurate Game Boy simulation.  It runs at phase
+// granularity (8 phases per T-cycle) but this adapter emits one trace entry
+// per instruction boundary, matching the output format of the other gbtrace
+// adapters.
+//
+// The DMG boot ROM is built into GateBoy; the adapter runs it automatically
+// and begins tracing at PC=0x0100.
 //
 // Usage:
-//   gbtrace-logicboy --rom test.gb --profile cpu_basic.toml [--output trace.gbtrace]
+//   gbtrace-gateboy --rom test.gb --profile cpu_basic.toml [--output trace.gbtrace]
 //
 // Build:
 //   See Makefile in this directory.
 
-#include "GateBoyLib/LogicBoy.h"
+#include "GateBoyLib/GateBoy.h"
 #include "metrolib/core/Blobs.h"
 
 #include <cstdio>
@@ -26,65 +29,33 @@
 
 // --- Field configuration ---
 
-// Map of field name -> IO register address for fields read via peek().
-static const std::unordered_map<std::string, unsigned short> IO_FIELD_ADDR = {
-    {"lcdc", 0xFF40}, {"stat", 0xFF41}, {"scy",  0xFF42}, {"scx",  0xFF43},
-    {"ly",   0xFF44}, {"lyc",  0xFF45}, {"wy",   0xFF4A}, {"wx",   0xFF4B},
-    {"bgp",  0xFF47}, {"obp0", 0xFF48}, {"obp1", 0xFF49}, {"dma",  0xFF46},
-    {"div",  0xFF04}, {"tima", 0xFF05}, {"tma",  0xFF06}, {"tac",  0xFF07},
-    {"if_",  0xFF0F}, {"ie",   0xFFFF},
-    {"sb",   0xFF01}, {"sc",   0xFF02},
-};
-
-// Read an IO register directly from LogicBoyState (avoids peek() which
-// doesn't support some addresses like STAT, IF, IE).
-static uint8_t read_io_reg(const LogicBoy& lb, unsigned short addr) {
-    const auto& s = lb.lb_state;
+// Read a value from GateBoy via peek() or direct state access.
+// peek() handles HRAM, VRAM, OAM, and most IO regs.  A few (STAT, IF, IE)
+// require direct access to gb_state.
+static uint8_t read_reg(const GateBoy& gb, unsigned short addr) {
+    // Registers that peek() doesn't support
     switch (addr) {
-        case 0xFF00: return s.reg_joy;
-        case 0xFF01: return s.reg_sb;
-        case 0xFF02: return s.reg_sc;
-        case 0xFF04: return (uint8_t)(s.reg_div >> 8);
-        case 0xFF05: return s.reg_tima;
-        case 0xFF06: return s.reg_tma;
-        case 0xFF07: return s.reg_tac;
-        case 0xFF0F: return s.reg_if;
-        case 0xFF40: return s.reg_lcdc;
-        case 0xFF41: return s.reg_stat;
-        case 0xFF42: return s.reg_scy;
-        case 0xFF43: return s.reg_scx;
-        case 0xFF44: return s.reg_ly;
-        case 0xFF45: return s.reg_lyc;
-        case 0xFF46: return s.reg_dma;
-        case 0xFF47: return s.reg_bgp;
-        case 0xFF48: return s.reg_obp0;
-        case 0xFF49: return s.reg_obp1;
-        case 0xFF4A: return s.reg_wy;
-        case 0xFF4B: return s.reg_wx;
-        case 0xFFFF: return s.reg_ie;
-        default: {
-            GBResult r = lb.peek(addr);
-            return r.is_ok() ? r.unwrap() : 0;
+        case 0xFF41: { // STAT
+            const auto& s = gb.gb_state;
+            uint8_t stat = bit_pack_inv(s.reg_stat);
+            return stat;
         }
+        case 0xFF0F: { // IF
+            const auto& s = gb.gb_state;
+            return (uint8_t)bit_pack(s.reg_if);
+        }
+        case 0xFFFF: { // IE
+            const auto& s = gb.gb_state;
+            return (uint8_t)bit_pack(s.reg_ie);
+        }
+        // SB (0xFF01) and SC (0xFF02): serial is not simulated in GateBoy.
+        case 0xFF01: return 0;
+        case 0xFF02: return 0;
     }
+
+    GBResult r = gb.peek(addr);
+    return r.is_ok() ? r.unwrap() : 0;
 }
-
-// CPU register fields read directly from the CpuState struct.
-struct CpuField { enum Kind { REG8, REG16, IME } kind; int offset; };
-
-static const std::unordered_map<std::string, CpuField> CPU_FIELDS = {
-    {"a",   {CpuField::REG8,  0}},
-    {"f",   {CpuField::REG8,  1}},
-    {"b",   {CpuField::REG8,  2}},
-    {"c",   {CpuField::REG8,  3}},
-    {"d",   {CpuField::REG8,  4}},
-    {"e",   {CpuField::REG8,  5}},
-    {"h",   {CpuField::REG8,  6}},
-    {"l",   {CpuField::REG8,  7}},
-    {"pc",  {CpuField::REG16, 0}},
-    {"sp",  {CpuField::REG16, 1}},
-    {"ime", {CpuField::IME,   0}},
-};
 
 // --- Profile ---
 
@@ -174,7 +145,6 @@ struct FieldEmitter {
 
 static std::vector<FieldEmitter> g_emitters;
 
-// Read an 8-bit CPU register by name from the CpuState.
 static uint8_t read_cpu_reg8(const CpuState &reg, const std::string &name) {
     if (name == "a") return reg.a;
     if (name == "f") return reg.f;
@@ -188,10 +158,19 @@ static uint8_t read_cpu_reg8(const CpuState &reg, const std::string &name) {
 }
 
 static uint16_t read_cpu_reg16(const CpuState &reg, const std::string &name) {
-    if (name == "pc") return reg.op_addr; // use op_addr = PC of current instruction
+    if (name == "pc") return reg.op_addr;
     if (name == "sp") return reg.sp;
     return 0;
 }
+
+static const std::unordered_map<std::string, unsigned short> IO_FIELD_ADDR = {
+    {"lcdc", 0xFF40}, {"stat", 0xFF41}, {"scy",  0xFF42}, {"scx",  0xFF43},
+    {"ly",   0xFF44}, {"lyc",  0xFF45}, {"wy",   0xFF4A}, {"wx",   0xFF4B},
+    {"bgp",  0xFF47}, {"obp0", 0xFF48}, {"obp1", 0xFF49}, {"dma",  0xFF46},
+    {"div",  0xFF04}, {"tima", 0xFF05}, {"tma",  0xFF06}, {"tac",  0xFF07},
+    {"if_",  0xFF0F}, {"ie",   0xFFFF},
+    {"sb",   0xFF01}, {"sc",   0xFF02},
+};
 
 static void build_emitters(const Profile &prof) {
     g_emitters.clear();
@@ -202,7 +181,11 @@ static void build_emitters(const Profile &prof) {
         em.name = field;
         em.io_addr = 0;
 
-        if (field == "op") {
+        if (field == "sb" || field == "sc") {
+            std::fprintf(stderr, "Note: skipping '%s' (serial not simulated in GateBoy)\n",
+                         field.c_str());
+            continue;
+        } else if (field == "op") {
             em.source = FieldEmitter::OPCODE;
         } else if (field == "ime") {
             em.source = FieldEmitter::CPU_IME;
@@ -250,7 +233,7 @@ static void write_header(FILE *out, const Profile &prof,
                           const std::string &boot_rom_info) {
     std::fprintf(out,
         "{\"_header\":true,\"format_version\":\"0.1.0\","
-        "\"emulator\":\"logicboy\",\"emulator_version\":\"metroboy-git\","
+        "\"emulator\":\"gateboy\",\"emulator_version\":\"metroboy-git\","
         "\"rom_sha256\":\"%s\",\"model\":\"DMG\","
         "\"boot_rom\":\"%s\",\"profile\":\"%s\","
         "\"fields\":[",
@@ -289,8 +272,8 @@ static StopCondition parse_stop_when(const std::string &spec) {
 
 // --- Emit one trace entry ---
 
-static void emit_entry(FILE *out, LogicBoy &lb) {
-    const CpuState &reg = lb.cpu.core.reg;
+static void emit_entry(FILE *out, GateBoy &gb) {
+    const CpuState &reg = gb.cpu.core.reg;
 
     bool first = true;
     std::fprintf(out, "{");
@@ -310,7 +293,7 @@ static void emit_entry(FILE *out, LogicBoy &lb) {
             std::fprintf(out, "%s", reg.ime ? "true" : "false");
             break;
         case FieldEmitter::IO_READ: {
-            uint8_t val = read_io_reg(lb, em.io_addr);
+            uint8_t val = read_reg(gb, em.io_addr);
             std::fprintf(out, "%d", val);
             break;
         }
@@ -409,18 +392,13 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
-    // Initialize LogicBoy
-    LogicBoy lb;
-    lb.reset();
-
-    // Load ROM data into cart memory so LogicBoy can read it via the blob.
-    // LogicBoy::reset() sets the CPU to post-boot state (PC=0x0100, etc.)
-    // and the boot ROM is already applied via the default DMG boot ROM in
-    // GateBoyMem::reset().
+    // Initialize GateBoy with fastboot (skips boot ROM, sets post-boot state)
+    GateBoy gb;
+    gb.reset();
 
     // Write header
     std::string rom_hash = sha256_file(rom_path);
-    write_header(output, profile, rom_hash, "skip");
+    write_header(output, profile, rom_hash, "built-in");
 
     // Print stop conditions
     for (const auto &cond : stop_conditions) {
@@ -435,15 +413,14 @@ int main(int argc, char *argv[]) {
 
     // Run simulation
     //
-    // LogicBoy runs at phase granularity (8 phases = 1 T-cycle).
-    // We detect instruction boundaries by watching op_addr change:
-    // when the CPU's op_addr differs from the previous value (and
-    // op_state == 0), a new instruction has started.
+    // GateBoy runs at phase granularity (8 phases = 1 T-cycle).
+    // We detect instruction boundaries by watching op_state transition to 0
+    // (start of a new instruction's opcode fetch).
 
     static constexpr int PHASES_PER_FRAME = 70224 * 8;  // 561792 phases
     int64_t total_phases = static_cast<int64_t>(max_frames) * PHASES_PER_FRAME;
 
-    int prev_op_state = lb.cpu.core.reg.op_state;
+    int prev_op_state = gb.cpu.core.reg.op_state;
     bool stopped_early = false;
     int stop_serial_seen = 0;
     bool prev_sc_high = false;
@@ -451,19 +428,19 @@ int main(int argc, char *argv[]) {
     int64_t phase_count = 0;
 
     while (phase_count < total_phases) {
-        lb.next_phase(cart_blob);
+        gb.next_phase(cart_blob);
         phase_count++;
 
-        const CpuState &reg = lb.cpu.core.reg;
+        const CpuState &reg = gb.cpu.core.reg;
 
         // Detect instruction boundary: op_state transitions to 0
         // (start of a new instruction's opcode fetch).
         if (reg.op_state == 0 && prev_op_state != 0) {
-            emit_entry(output, lb);
+            emit_entry(output, gb);
 
             // Check stop-when conditions at every instruction
             for (const auto &cond : stop_conditions) {
-                uint8_t val = read_io_reg(lb, cond.addr);
+                uint8_t val = read_reg(gb, cond.addr);
                 if (val == cond.value) {
                     stopped_early = true;
                     break;
@@ -473,10 +450,10 @@ int main(int argc, char *argv[]) {
 
             // Check serial stop condition
             if (stop_serial_active) {
-                uint8_t sc_val = read_io_reg(lb, 0xFF02);
+                uint8_t sc_val = read_reg(gb, 0xFF02);
                 bool sc_high = (sc_val & 0x80) != 0;
                 if (sc_high && !prev_sc_high) {
-                    uint8_t sb_val = read_io_reg(lb, 0xFF01);
+                    uint8_t sb_val = read_reg(gb, 0xFF01);
                     if (sb_val == stop_serial_byte) {
                         stop_serial_seen++;
                         if (stop_serial_seen >= stop_serial_count) {
