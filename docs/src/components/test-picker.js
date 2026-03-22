@@ -31,7 +31,7 @@ const TEST_SUITES = [
   {
     name: 'Blargg',
     base: 'tests/blargg',
-    profile: 'tests/blargg/blargg_cpu.toml',
+    profile: 'tests/blargg/blargg.toml',
     manifest: 'tests/blargg/manifest.json',
     preferredEmu: 'gambatte',
     tests: null,
