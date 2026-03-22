@@ -230,6 +230,12 @@ export class TraceQuery extends LitElement {
     _flagModes: { state: true },
   };
 
+  updated(changed) {
+    if (changed.has('store') || changed.has('storeB')) {
+      this._clear();
+    }
+  }
+
   constructor() {
     super();
     this.store = null;
@@ -341,7 +347,6 @@ export class TraceQuery extends LitElement {
                 @click=${() => this._jumpTo(i)}
               >
                 <span class="result-idx">#${this._matches[i]}</span>
-                <span class="result-cy">#${this._matches[i]}</span>
                 <span class="result-fields">
                   ${this._summaryFields(entry)}
                 </span>
