@@ -88,7 +88,7 @@ export class TraceDiffTable extends LitElement {
     nameB: { type: String },
     fields: { type: Array },
     highlightIndices: { type: Object },
-    _hiddenFields: { state: true },
+    hiddenFields: { type: Object },
   };
 
   constructor() {
@@ -99,18 +99,18 @@ export class TraceDiffTable extends LitElement {
     this.nameB = 'B';
     this.fields = [];
     this.highlightIndices = null;
-    this._hiddenFields = new Set();
+    this.hiddenFields = new Set();
     this._renderedStart = -1;
     this._renderedCount = 0;
     this._rafId = null;
   }
 
   get _visibleFields() {
-    return (this.fields || []).filter(f => f !== 'cy' && !this._hiddenFields.has(f));
+    return (this.fields || []).filter(f => f !== 'cy' && !this.hiddenFields?.has(f));
   }
 
   updated(changed) {
-    if (changed.has('storeA') || changed.has('storeB') || changed.has('fields') || changed.has('highlightIndices') || changed.has('_hiddenFields')) {
+    if (changed.has('storeA') || changed.has('storeB') || changed.has('fields') || changed.has('highlightIndices') || changed.has('hiddenFields')) {
       this._renderedStart = -1;
       this.updateComplete.then(() => this._renderRows());
     }
@@ -126,7 +126,7 @@ export class TraceDiffTable extends LitElement {
         <span class="label">columns</span>
         ${this.fields.filter(f => f !== 'cy').map(f => html`
           <span
-            class="col-chip ${this._hiddenFields.has(f) ? '' : 'on'}"
+            class="col-chip ${this.hiddenFields?.has(f) ? '' : 'on'}"
             @click=${() => this._toggleField(f)}
           >${f}</span>
         `)}
@@ -148,9 +148,12 @@ export class TraceDiffTable extends LitElement {
   }
 
   _toggleField(f) {
-    const s = new Set(this._hiddenFields);
+    const s = new Set(this.hiddenFields || []);
     if (s.has(f)) s.delete(f); else s.add(f);
-    this._hiddenFields = s;
+    this.dispatchEvent(new CustomEvent('hidden-fields-changed', {
+      detail: { hiddenFields: s },
+      bubbles: true, composed: true,
+    }));
   }
 
   _entryCount() {

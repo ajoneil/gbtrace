@@ -104,6 +104,7 @@ export class AppShell extends LitElement {
     _chartField: { state: true },
     _hoverIndex: { state: true },
     _diffStats: { state: true },
+    _hiddenFields: { state: true },
   };
 
   constructor() {
@@ -118,6 +119,7 @@ export class AppShell extends LitElement {
     this._header = null;
     this._highlightIndices = null;
     this._chartField = null;
+    this._hiddenFields = new Set();
     this._hoverIndex = null;
     this._diffStats = null;
   }
@@ -133,6 +135,7 @@ export class AppShell extends LitElement {
         @jump-to-index=${this._onJumpToIndex}
         @field-selected=${this._onFieldSelected}
         @hover-index=${this._onHoverIndex}
+        @hidden-fields-changed=${this._onHiddenFieldsChanged}
       >
         <header>
           <h1>gbtrace <span>Game Boy Trace Viewer</span></h1>
@@ -189,6 +192,7 @@ export class AppShell extends LitElement {
           .store=${this._store}
           .fields=${fields}
           .highlightIndices=${this._highlightIndices}
+          .hiddenFields=${this._hiddenFields}
         ></trace-table>
       </div>
     `;
@@ -245,6 +249,7 @@ export class AppShell extends LitElement {
           .nameB=${this._nameB}
           .fields=${fields}
           .highlightIndices=${this._highlightIndices}
+          .hiddenFields=${this._hiddenFields}
         ></trace-diff-table>
       </div>
     `;
@@ -337,6 +342,7 @@ export class AppShell extends LitElement {
     this._chartField = null;
     this._hoverIndex = null;
     this._diffStats = null;
+    this._hiddenFields = new Set();
   }
 
   _onHighlightChanged(e) {
@@ -355,6 +361,10 @@ export class AppShell extends LitElement {
 
   _onHoverIndex(e) {
     this._hoverIndex = e.detail.index;
+  }
+
+  _onHiddenFieldsChanged(e) {
+    this._hiddenFields = e.detail.hiddenFields;
   }
 }
 
