@@ -415,6 +415,7 @@ int main(int argc, char *argv[]) {
     static constexpr int PHASES_PER_FRAME = 70224 * 8;  // 561792 phases
     int64_t total_phases = static_cast<int64_t>(max_frames) * PHASES_PER_FRAME;
 
+    uint16_t prev_op_addr = gb.cpu.core.reg.op_addr;
     int prev_op_state = gb.cpu.core.reg.op_state;
     bool stopped_early = false;
     int stop_serial_seen = 0;
@@ -428,9 +429,12 @@ int main(int argc, char *argv[]) {
 
         const CpuState &reg = gb.cpu.core.reg;
 
-        // Detect instruction boundary: op_state transitions to 0
-        // (start of a new instruction's opcode fetch).
-        if (reg.op_state == 0 && prev_op_state != 0) {
+        // Detect instruction boundary: either op_state transitions to 0
+        // (multi-cycle instruction completed) or op_addr changed while
+        // op_state stays 0 (back-to-back single-cycle instructions like NOPs).
+        bool new_insn = (reg.op_state == 0 && prev_op_state != 0)
+                     || (reg.op_state == 0 && reg.op_addr != prev_op_addr);
+        if (new_insn) {
             emit_entry(output, gb);
 
             // Check stop-when conditions at every instruction
@@ -462,6 +466,7 @@ int main(int argc, char *argv[]) {
         }
 
         prev_op_state = reg.op_state;
+        prev_op_addr = reg.op_addr;
 
         // Track frame boundaries for --frames limit
         if ((phase_count % PHASES_PER_FRAME) == 0) {
