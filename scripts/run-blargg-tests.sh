@@ -75,25 +75,25 @@ for adapter in $ADAPTERS; do
 
         printf "  %-40s  " "$name"
 
-        # Pipe adapter output directly to parquet conversion (streaming, no OOM)
-        set +eo pipefail
+        # Write to temp JSONL, convert to parquet, delete JSONL
+        jsonl="/tmp/gbtrace_blargg_${name}_${adapter}.gbtrace"
+
         "$bin" \
             --rom "$rom" \
             --profile "$PROFILE" \
+            --output "$jsonl" \
             --stop-on-serial "$STOP_SERIAL_BYTE" \
             --stop-serial-count "$STOP_SERIAL_COUNT" \
             --frames "$MAX_FRAMES" \
-            2>/tmp/gbtrace_blargg_stderr | \
-            "$CLI" convert - -o "$tmp_parquet" >/dev/null 2>&1
-        pipe_status=$?
-        set -eo pipefail
-
-        if [[ $pipe_status -ne 0 ]] || [[ ! -f "$tmp_parquet" ]]; then
+            2>/tmp/gbtrace_blargg_stderr || {
             printf "ERROR (adapter crashed)\n"
             ((ERROR++)) || true
-            rm -f "$tmp_parquet" "${rom%.gb}.sav" /tmp/gbtrace_blargg_stderr
+            rm -f "$jsonl" "${rom%.gb}.sav" /tmp/gbtrace_blargg_stderr
             continue
-        fi
+        }
+
+        "$CLI" convert "$jsonl" -o "$tmp_parquet" >/dev/null 2>&1
+        rm -f "$jsonl"
 
         frame_info=$(grep -oP 'frame \K[0-9]+' /tmp/gbtrace_blargg_stderr 2>/dev/null | tail -1)
 
