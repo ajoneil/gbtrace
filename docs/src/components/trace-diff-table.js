@@ -102,7 +102,6 @@ export class TraceDiffTable extends LitElement {
     const s = new Set();
     if (this._pcMatches) {
       if (this._visibleFields.includes('pc')) s.add('pc');
-      if (this._visibleFields.includes('op')) s.add('op');
     }
     return s;
   }
@@ -151,7 +150,6 @@ export class TraceDiffTable extends LitElement {
             <div class="header-row">
               <span style="${this._hdr(IDX_WIDTH)}">#</span>
               ${shared.has('pc') ? html`<span style="${this._hdr(PC_WIDTH)}">pc</span>` : ''}
-              ${shared.has('op') ? html`<span style="${this._hdr(COL_WIDTH)}">op</span>` : ''}
               ${showAsm ? html`<span style="${this._hdr(ASM_WIDTH, 'text-align:left;')}">asm</span>` : ''}
             </div>
             <div class="spacer" style="height:${this._spacerHeight()}px"></div>
@@ -162,8 +160,10 @@ export class TraceDiffTable extends LitElement {
           <div class="panel panel-a" id="panel-a" @scroll=${this._onScrollA}>
             <div class="inner">
               <div class="header-row">
-                ${sf.map(f => html`<span style="${this._hdr(COL_WIDTH)}">${f}</span>`)}
-                ${hasRom && !this._pcMatches ? html`<span style="${this._hdr(ASM_WIDTH, 'text-align:left;')}">asm</span>` : ''}
+                ${sf.map(f => html`
+                  <span style="${this._hdr(COL_WIDTH)}">${f}</span>
+                  ${hasRom && !this._pcMatches && f === 'pc' ? html`<span style="${this._hdr(ASM_WIDTH, 'text-align:left;')}">asm</span>` : ''}
+                `)}
               </div>
               <div class="spacer" style="height:${this._spacerHeight()}px"></div>
               <div class="rows" id="rows-a"></div>
@@ -172,8 +172,10 @@ export class TraceDiffTable extends LitElement {
           <div class="panel panel-b" id="panel-b" @scroll=${this._onScrollB}>
             <div class="inner">
               <div class="header-row">
-                ${sf.map(f => html`<span style="${this._hdr(COL_WIDTH)}">${f}</span>`)}
-                ${hasRom && !this._pcMatches ? html`<span style="${this._hdr(ASM_WIDTH, 'text-align:left;')}">asm</span>` : ''}
+                ${sf.map(f => html`
+                  <span style="${this._hdr(COL_WIDTH)}">${f}</span>
+                  ${hasRom && !this._pcMatches && f === 'pc' ? html`<span style="${this._hdr(ASM_WIDTH, 'text-align:left;')}">asm</span>` : ''}
+                `)}
               </div>
               <div class="spacer" style="height:${this._spacerHeight()}px"></div>
               <div class="rows" id="rows-b"></div>
@@ -344,10 +346,6 @@ export class TraceDiffTable extends LitElement {
         const pcDiff = a.pc !== b.pc;
         partsShared.push(`<span style="${cs(PC_WIDTH, pcDiff ? 'color:var(--red);' : '')}">${displayVal(a.pc)}</span>`);
       }
-      if (shared.has('op')) {
-        const opDiff = a.op !== b.op;
-        partsShared.push(`<span style="${cs(COL_WIDTH, opDiff ? 'color:var(--red);' : '')}">${displayVal(a.op)}</span>`);
-      }
       if (disasmArr) {
         partsShared.push(`<span style="${cs(ASM_WIDTH, 'text-align:left;color:var(--green);')}">${disasmArr[i] || ''}</span>`);
       }
@@ -359,9 +357,9 @@ export class TraceDiffTable extends LitElement {
         const differs = a[f] !== b[f];
         const color = differs ? 'color:var(--red);font-weight:600;' : '';
         partsA.push(`<span style="${cs(COL_WIDTH, color)}">${displayVal(a[f])}</span>`);
-      }
-      if (disasmA) {
-        partsA.push(`<span style="${cs(ASM_WIDTH, 'text-align:left;color:var(--green);')}">${disasmA[i] || ''}</span>`);
+        if (disasmA && f === 'pc') {
+          partsA.push(`<span style="${cs(ASM_WIDTH, 'text-align:left;color:var(--green);')}">${disasmA[i] || ''}</span>`);
+        }
       }
       partsA.push('</div>');
 
@@ -371,9 +369,9 @@ export class TraceDiffTable extends LitElement {
         const differs = a[f] !== b[f];
         const color = differs ? 'color:var(--yellow);font-weight:600;' : '';
         partsB.push(`<span style="${cs(COL_WIDTH, color)}">${displayVal(b[f])}</span>`);
-      }
-      if (disasmB) {
-        partsB.push(`<span style="${cs(ASM_WIDTH, 'text-align:left;color:var(--green);')}">${disasmB[i] || ''}</span>`);
+        if (disasmB && f === 'pc') {
+          partsB.push(`<span style="${cs(ASM_WIDTH, 'text-align:left;color:var(--green);')}">${disasmB[i] || ''}</span>`);
+        }
       }
       partsB.push('</div>');
     }

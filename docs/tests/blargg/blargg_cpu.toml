@@ -4,7 +4,7 @@ description = "CPU registers + serial output for Blargg cpu_instrs individual te
 trigger = "instruction"
 
 [fields]
-cpu = ["pc", "sp", "a", "f", "b", "c", "d", "e", "h", "l", "op"]
+cpu = ["pc", "sp", "a", "f", "b", "c", "d", "e", "h", "l"]
 serial = ["sb", "sc"]
 
 [fields.memory]
