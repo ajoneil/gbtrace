@@ -56,6 +56,14 @@ export class TraceSelector extends LitElement {
       font-weight: 600;
     }
     .trace-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+    .trace-btn .status-dot {
+      display: inline-block;
+      width: 6px; height: 6px;
+      border-radius: 50%;
+      margin-right: 4px;
+    }
+    .trace-btn .status-dot.pass { background: var(--green); }
+    .trace-btn .status-dot.fail { background: var(--red); }
     .add-btn {
       padding: 4px 8px;
       background: var(--bg);
@@ -96,6 +104,7 @@ export class TraceSelector extends LitElement {
     suite: { type: Object },
     testRom: { type: String },
     testName: { type: String },
+    testInfo: { type: Object },
     activeA: { type: String },
     activeB: { type: String },
     _uploads: { state: true },
@@ -108,6 +117,7 @@ export class TraceSelector extends LitElement {
     this.suite = null;
     this.testRom = null;
     this.testName = '';
+    this.testInfo = null;
     this.activeA = null;
     this.activeB = null;
     this._uploads = []; // { name, store }
@@ -115,10 +125,13 @@ export class TraceSelector extends LitElement {
     this._error = null;
   }
 
-  /** All available trace names (library emulators + uploads). */
+  /** All available trace names (library emulators with traces + uploads). */
   get _allTraces() {
-    const lib = this.suite ? EMULATORS.map(e => ({ name: e, type: 'lib' })) : [];
-    const ups = this._uploads.map(u => ({ name: u.name, type: 'upload' }));
+    const emus = this.testInfo?.emulators || {};
+    const lib = this.suite
+      ? EMULATORS.filter(e => emus[e]).map(e => ({ name: e, type: 'lib', status: emus[e] }))
+      : [];
+    const ups = this._uploads.map(u => ({ name: u.name, type: 'upload', status: null }));
     return [...lib, ...ups];
   }
 
@@ -141,7 +154,7 @@ export class TraceSelector extends LitElement {
               ?disabled=${this._loading !== null}
               @click=${() => this._onTraceClick(t.name)}
               title=${t.name}
-            >${t.name}</button>
+            >${t.status ? html`<span class="status-dot ${t.status}"></span>` : ''}${t.name}</button>
           `;
         })}
 
@@ -164,7 +177,7 @@ export class TraceSelector extends LitElement {
                 ?disabled=${this._loading !== null}
                 @click=${() => this._onCompareClick(t.name)}
                 title=${t.name}
-              >${t.name}</button>
+              >${t.status ? html`<span class="status-dot ${t.status}"></span>` : ''}${t.name}</button>
             `;
           })}
         ` : ''}
@@ -221,13 +234,15 @@ export class TraceSelector extends LitElement {
       return;
     }
 
-    // Library emulator
-    await this._loadEmu(name, eventName);
+    // Library emulator — look up status from testInfo
+    const emus = this.testInfo?.emulators || {};
+    const status = emus[name] || 'pass';
+    await this._loadEmu(name, eventName, status);
   }
 
-  async _loadEmu(emu, eventName) {
+  async _loadEmu(emu, eventName, status = 'pass') {
     if (!this.suite || !this.testRom) return;
-    const url = traceUrl(this.suite, this.testRom, emu);
+    const url = traceUrl(this.suite, this.testRom, emu, status);
     this._loading = emu;
     this._error = null;
 

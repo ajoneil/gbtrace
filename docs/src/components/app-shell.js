@@ -122,6 +122,7 @@ export class AppShell extends LitElement {
     _suite: { state: true },
     _testRom: { state: true },
     _testName: { state: true },
+    _testInfo: { state: true },
     _store: { state: true },
     _storeB: { state: true },
     _nameA: { state: true },
@@ -138,6 +139,7 @@ export class AppShell extends LitElement {
     super();
     this._suite = null;
     this._testRom = null;
+    this._testInfo = null;
     this._testName = '';
     this._store = null;
     this._storeB = null;
@@ -200,6 +202,7 @@ export class AppShell extends LitElement {
         .suite=${this._suite}
         .testRom=${this._testRom}
         .testName=${this._testName}
+        .testInfo=${this._testInfo}
         .activeA=${this._nameA}
         .activeB=${this._nameB}
       ></trace-selector>
@@ -214,7 +217,7 @@ export class AppShell extends LitElement {
   }
 
   _renderFieldToggles() {
-    const allFields = this._allFields.filter(f => f !== 'cy');
+    const allFields = this._allFields;
     if (!allFields.length) return '';
     return html`
       <div class="field-toggles">
@@ -335,10 +338,11 @@ export class AppShell extends LitElement {
   // --- Events ---
 
   _onTestPicked(e) {
-    const { store, suite, testRom, emulator } = e.detail;
+    const { store, suite, testRom, emulator, testInfo } = e.detail;
     this._suite = suite;
     this._testRom = testRom;
     this._testName = testRom?.replace('.gb', '').split('/').pop() || '';
+    this._testInfo = testInfo || null;
     this._setStoreA(store, emulator);
   }
 
@@ -346,6 +350,7 @@ export class AppShell extends LitElement {
     const { store, filename } = e.detail;
     this._suite = { base: '', profile: '' };
     this._testRom = null;
+    this._testInfo = null;
     this._testName = filename;
     this._setStoreA(store, filename);
   }
@@ -400,6 +405,7 @@ export class AppShell extends LitElement {
     if (this._storeB) this._storeB.free();
     this._suite = null;
     this._testRom = null;
+    this._testInfo = null;
     this._testName = '';
     this._store = null;
     this._storeB = null;

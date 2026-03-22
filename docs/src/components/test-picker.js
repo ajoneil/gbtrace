@@ -31,26 +31,26 @@ const TEST_SUITES = [
     base: 'tests/blargg',
     profile: 'tests/blargg/blargg_cpu.toml',
     tests: [
-      { name: '01-special', rom: 'cpu_instrs/individual/01-special.gb' },
-      { name: '02-interrupts', rom: 'cpu_instrs/individual/02-interrupts.gb' },
-      { name: '03-op sp,hl', rom: 'cpu_instrs/individual/03-op sp,hl.gb' },
-      { name: '04-op r,imm', rom: 'cpu_instrs/individual/04-op r,imm.gb' },
-      { name: '05-op rp', rom: 'cpu_instrs/individual/05-op rp.gb' },
-      { name: '06-ld r,r', rom: 'cpu_instrs/individual/06-ld r,r.gb' },
-      { name: '07-jr,jp,call,ret,rst', rom: 'cpu_instrs/individual/07-jr,jp,call,ret,rst.gb' },
-      { name: '08-misc instrs', rom: 'cpu_instrs/individual/08-misc instrs.gb' },
-      { name: '09-op r,r', rom: 'cpu_instrs/individual/09-op r,r.gb' },
-      { name: '10-bit ops', rom: 'cpu_instrs/individual/10-bit ops.gb' },
-      { name: '11-op a,(hl)', rom: 'cpu_instrs/individual/11-op a,(hl).gb' },
+      { name: '01-special', rom: 'cpu_instrs/individual/01-special.gb', emulators: { gambatte: 'pass', sameboy: 'pass', mgba: 'pass' } },
+      { name: '02-interrupts', rom: 'cpu_instrs/individual/02-interrupts.gb', emulators: { gambatte: 'pass', sameboy: 'pass', mgba: 'pass' } },
+      { name: '03-op sp,hl', rom: 'cpu_instrs/individual/03-op sp,hl.gb', emulators: { gambatte: 'pass', sameboy: 'pass', mgba: 'pass' } },
+      { name: '04-op r,imm', rom: 'cpu_instrs/individual/04-op r,imm.gb', emulators: { gambatte: 'pass', sameboy: 'pass', mgba: 'pass' } },
+      { name: '05-op rp', rom: 'cpu_instrs/individual/05-op rp.gb', emulators: { gambatte: 'pass', sameboy: 'pass', mgba: 'pass' } },
+      { name: '06-ld r,r', rom: 'cpu_instrs/individual/06-ld r,r.gb', emulators: { gambatte: 'pass', sameboy: 'pass', mgba: 'pass' } },
+      { name: '07-jr,jp,call,ret,rst', rom: 'cpu_instrs/individual/07-jr,jp,call,ret,rst.gb', emulators: { gambatte: 'pass', sameboy: 'pass', mgba: 'pass' } },
+      { name: '08-misc instrs', rom: 'cpu_instrs/individual/08-misc instrs.gb', emulators: { gambatte: 'pass', sameboy: 'pass', mgba: 'pass' } },
+      { name: '09-op r,r', rom: 'cpu_instrs/individual/09-op r,r.gb', emulators: { gambatte: 'pass', sameboy: 'pass', mgba: 'pass' } },
+      { name: '10-bit ops', rom: 'cpu_instrs/individual/10-bit ops.gb', emulators: { gambatte: 'pass', sameboy: 'pass', mgba: 'pass' } },
+      { name: '11-op a,(hl)', rom: 'cpu_instrs/individual/11-op a,(hl).gb', emulators: { gambatte: 'pass', sameboy: 'pass', mgba: 'pass' } },
     ],
   },
 ];
 
-const EMULATORS = ['gambatte', 'sameboy', 'mgba'];
+const EMULATORS = ['logicboy', 'gambatte', 'sameboy', 'mgba'];
 
-function traceUrl(suite, rom, emulator) {
+function traceUrl(suite, rom, emulator, status = 'pass') {
   const base = rom.replace('.gb', '');
-  return `${suite.base}/${base}_${emulator}.gbtrace.parquet`;
+  return `${suite.base}/${base}_${emulator}_${status}.gbtrace.parquet`;
 }
 
 function romUrl(suite, rom) {
@@ -295,21 +295,12 @@ export class TestPicker extends LitElement {
           ${tests.map((t, i) => html`
             <div
               class="test-item ${i === this._selectedTest ? 'selected' : ''}"
-              @click=${() => this._selectedTest = i}
+              @click=${() => this._selectTest(suite, tests, i)}
             >${t.name}</div>
           `)}
         </div>
 
         ${test ? html`
-          <div class="emu-btns">
-            ${EMULATORS.map(emu => html`
-              <button
-                class="emu-btn"
-                ?disabled=${this._loading !== null}
-                @click=${() => this._load(suite, test, emu)}
-              >${emu}</button>
-            `)}
-          </div>
           <div class="meta">
             <a href="${suite.profile}" download>profile</a>
             <a href="${romUrl(suite, test.rom)}" download>ROM</a>
@@ -329,15 +320,15 @@ export class TestPicker extends LitElement {
       return suite.tests.filter(t => t.name.toLowerCase().includes(q));
     }
     if (!this._microTests) return [];
-    let names = this._microTests;
+    let tests = this._microTests;
     if (this._category) {
-      names = names.filter(n => n.startsWith(this._category));
+      tests = tests.filter(t => t.name.startsWith(this._category));
     }
     if (this._search) {
       const q = this._search.toLowerCase();
-      names = names.filter(n => n.toLowerCase().includes(q));
+      tests = tests.filter(t => t.name.toLowerCase().includes(q));
     }
-    return names.map(n => ({ name: n, rom: `${n}.gb` }));
+    return tests;
   }
 
   _selectSuite(i) {
@@ -355,8 +346,21 @@ export class TestPicker extends LitElement {
     this._error = null;
   }
 
-  async _load(suite, test, emulator) {
-    const url = traceUrl(suite, test.rom, emulator);
+  _selectTest(suite, tests, index) {
+    this._selectedTest = index;
+    const test = tests[index];
+    if (!test) return;
+
+    // Auto-load the best available emulator (prefer logicboy)
+    const emus = test.emulators || {};
+    const preferred = EMULATORS.find(e => emus[e]);
+    if (preferred) {
+      this._load(suite, test, preferred, emus[preferred] || 'pass');
+    }
+  }
+
+  async _load(suite, test, emulator, status = 'pass') {
+    const url = traceUrl(suite, test.rom, emulator, status);
     const filename = url.split('/').pop();
     this._loading = filename;
     this._error = null;
@@ -373,7 +377,7 @@ export class TestPicker extends LitElement {
       } catch (_) {}
 
       this.dispatchEvent(new CustomEvent('trace-loaded', {
-        detail: { store, filename, suite, testRom: test.rom, emulator },
+        detail: { store, filename, suite, testRom: test.rom, emulator, testInfo: test },
         bubbles: true, composed: true,
       }));
     } catch (err) {

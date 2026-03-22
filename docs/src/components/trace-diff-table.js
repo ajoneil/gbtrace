@@ -6,7 +6,6 @@ const OVERSCAN = 10;
 const MAX_SPACER = 10_000_000;
 const COL_WIDTH = 48;
 const IDX_WIDTH = 50;
-const CY_WIDTH = 70;
 const PC_WIDTH = 48;
 const ASM_WIDTH = 100;
 
@@ -89,7 +88,7 @@ export class TraceDiffTable extends LitElement {
   }
 
   get _visibleFields() {
-    return (this.fields || []).filter(f => f !== 'cy' && !this.hiddenFields?.has(f));
+    return (this.fields || []).filter(f => !this.hiddenFields?.has(f));
   }
 
   /** Fields shown in the per-side panels (exclude shared fields). */
@@ -151,7 +150,6 @@ export class TraceDiffTable extends LitElement {
           <div class="inner">
             <div class="header-row">
               <span style="${this._hdr(IDX_WIDTH)}">#</span>
-              <span style="${this._hdr(CY_WIDTH)}">cy</span>
               ${shared.has('pc') ? html`<span style="${this._hdr(PC_WIDTH)}">pc</span>` : ''}
               ${shared.has('op') ? html`<span style="${this._hdr(COL_WIDTH)}">op</span>` : ''}
               ${showAsm ? html`<span style="${this._hdr(ASM_WIDTH, 'text-align:left;')}">asm</span>` : ''}
@@ -333,7 +331,7 @@ export class TraceDiffTable extends LitElement {
       // Shared column
       partsShared.push(rowStart);
       partsShared.push(`<span style="${cs(IDX_WIDTH, 'color:var(--text-muted);')}">${idx}</span>`);
-      partsShared.push(`<span style="${cs(CY_WIDTH, 'color:var(--text-muted);')}">${a.cy ?? ''}</span>`);
+      // cy removed from format
       if (shared.has('pc')) {
         const pcDiff = a.pc !== b.pc;
         partsShared.push(`<span style="${cs(PC_WIDTH, pcDiff ? 'color:var(--red);' : '')}">${displayVal(a.pc)}</span>`);

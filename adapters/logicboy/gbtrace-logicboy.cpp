@@ -91,14 +91,13 @@ static const std::unordered_map<std::string, CpuField> CPU_FIELDS = {
 struct Profile {
     std::string name;
     std::string trigger;
-    std::vector<std::string> fields; // ordered, including "cy"
+    std::vector<std::string> fields; // ordered
     std::unordered_map<std::string, unsigned short> memory; // name -> address
 };
 
 static Profile parse_profile(const std::string &path) {
     Profile prof;
     prof.trigger = "instruction";
-    prof.fields.push_back("cy");
 
     std::ifstream f(path);
     if (!f.is_open()) {
@@ -258,12 +257,12 @@ static void write_header(FILE *out, const Profile &prof,
         rom_sha256.c_str(), boot_rom_info.c_str(),
         prof.name.c_str());
 
-    std::fprintf(out, "\"cy\"");
-    for (const auto &em : g_emitters) {
-        std::fprintf(out, ",\"%s\"", em.name.c_str());
+    for (size_t i = 0; i < g_emitters.size(); i++) {
+        if (i > 0) std::fprintf(out, ",");
+        std::fprintf(out, "\"%s\"", g_emitters[i].name.c_str());
     }
 
-    std::fprintf(out, "],\"trigger\":\"%s\",\"cy_unit\":\"tcycle\"}\n",
+    std::fprintf(out, "],\"trigger\":\"%s\"}\n",
                  prof.trigger.c_str());
 }
 
@@ -290,13 +289,16 @@ static StopCondition parse_stop_when(const std::string &spec) {
 
 // --- Emit one trace entry ---
 
-static void emit_entry(FILE *out, LogicBoy &lb, uint64_t tcycle) {
+static void emit_entry(FILE *out, LogicBoy &lb) {
     const CpuState &reg = lb.cpu.core.reg;
 
-    std::fprintf(out, "{\"cy\":%llu", (unsigned long long)tcycle);
+    bool first = true;
+    std::fprintf(out, "{");
 
     for (const auto &em : g_emitters) {
-        std::fprintf(out, ",\"%s\":", em.name.c_str());
+        if (!first) std::fprintf(out, ",");
+        first = false;
+        std::fprintf(out, "\"%s\":", em.name.c_str());
         switch (em.source) {
         case FieldEmitter::CPU_REG8:
             std::fprintf(out, "%d", read_cpu_reg8(reg, em.name));
@@ -447,7 +449,6 @@ int main(int argc, char *argv[]) {
     bool prev_sc_high = false;
     int frames = 0;
     int64_t phase_count = 0;
-    uint64_t cycle_offset = lb.sys.gb_phase_total_old / 8;
 
     while (phase_count < total_phases) {
         lb.next_phase(cart_blob);
@@ -458,8 +459,7 @@ int main(int argc, char *argv[]) {
         // Detect instruction boundary: op_state transitions to 0
         // (start of a new instruction's opcode fetch).
         if (reg.op_state == 0 && prev_op_state != 0) {
-            uint64_t tcycle = (lb.sys.gb_phase_total_old / 8) - cycle_offset;
-            emit_entry(output, lb, tcycle);
+            emit_entry(output, lb);
 
             // Check stop-when conditions at every instruction
             for (const auto &cond : stop_conditions) {

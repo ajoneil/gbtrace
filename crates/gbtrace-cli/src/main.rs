@@ -148,26 +148,14 @@ fn cmd_info(path: &PathBuf) -> i32 {
     println!("Model:     {}", h.model);
     println!("Profile:   {}", h.profile);
     println!("Trigger:   {:?}", h.trigger);
-    println!("Cy unit:   {:?}", h.cy_unit);
     println!("Boot ROM:  {}", format_boot_rom(&h.boot_rom));
     println!("ROM hash:  {}", h.rom_sha256);
     println!("Fields:    {}", h.fields.join(", "));
 
     let mut count: u64 = 0;
-    let mut cy_min: Option<u64> = None;
-    let mut cy_max: Option<u64> = None;
-
     for result in reader {
         match result {
-            Ok(entry) => {
-                count += 1;
-                if let Some(cy) = entry.cy() {
-                    if cy_min.is_none() {
-                        cy_min = Some(cy);
-                    }
-                    cy_max = Some(cy);
-                }
-            }
+            Ok(_) => count += 1,
             Err(e) => {
                 eprintln!("Error reading entry {count}: {e}");
                 return 1;
@@ -176,9 +164,6 @@ fn cmd_info(path: &PathBuf) -> i32 {
     }
 
     println!("Entries:   {count}");
-    if let (Some(min), Some(max)) = (cy_min, cy_max) {
-        println!("Cy range:  {min} .. {max}");
-    }
 
     if let Ok(meta) = std::fs::metadata(path) {
         let size = meta.len();
@@ -517,7 +502,7 @@ fn cmd_query(input: &PathBuf, conditions: &[String], max: usize, context: usize)
 
 fn print_entry_fields(entry: &TraceEntry, fields: &[String]) {
     for f in fields {
-        if f == "cy" { continue; }
+        // all fields displayed
         if let Some(v) = entry.get(f) {
             print!(" {f}={}", display_val(v));
         }

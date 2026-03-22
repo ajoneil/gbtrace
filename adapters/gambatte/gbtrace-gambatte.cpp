@@ -50,14 +50,13 @@ static const std::unordered_map<std::string, CallbackField> CALLBACK_FIELDS = {
 struct Profile {
     std::string name;
     std::string trigger;
-    std::vector<std::string> fields; // ordered, including "cy"
+    std::vector<std::string> fields; // ordered
     std::unordered_map<std::string, unsigned short> memory; // name -> address
 };
 
 static Profile parse_profile(const std::string &path) {
     Profile prof;
     prof.trigger = "instruction";
-    prof.fields.push_back("cy");
 
     std::ifstream f(path);
     if (!f.is_open()) {
@@ -150,8 +149,6 @@ static std::vector<FieldEmitter> g_emitters;
 static void build_emitters(const Profile &prof) {
     g_emitters.clear();
     for (const auto &field : prof.fields) {
-        if (field == "cy") continue; // handled separately
-
         FieldEmitter em;
         em.name = field;
 
@@ -180,10 +177,6 @@ static void build_emitters(const Profile &prof) {
 
 // --- Formatting helpers ---
 
-static inline unsigned long long samples_to_tcycles(unsigned long long samples) {
-    return samples * 4;
-}
-
 static inline void fput_u8(FILE *out, int val) {
     std::fprintf(out, "%d", val & 0xFF);
 }
@@ -197,14 +190,13 @@ static inline void fput_u16(FILE *out, int val) {
 static void trace_callback(void *data) {
     int *r = static_cast<int *>(data);
 
-    long long cycle_offset = static_cast<long long>(r[0]);
-    unsigned long long total_samples = g_gb->timeNow() + cycle_offset;
-    unsigned long long tcycles = samples_to_tcycles(total_samples);
-
-    std::fprintf(g_output, "{\"cy\":%llu", tcycles);
+    bool first = true;
+    std::fprintf(g_output, "{");
 
     for (const auto &em : g_emitters) {
-        std::fprintf(g_output, ",\"%s\":", em.name.c_str());
+        if (!first) std::fprintf(g_output, ",");
+        first = false;
+        std::fprintf(g_output, "\"%s\":", em.name.c_str());
         switch (em.source) {
         case FieldEmitter::CALLBACK_8:
             fput_u8(g_output, r[em.cb_index]);
@@ -279,13 +271,12 @@ static void write_header(FILE *out, const Profile &prof,
         rom_sha256.c_str(), model.c_str(), boot_rom_info.c_str(),
         prof.name.c_str());
 
-    // Write "cy" first, then only fields that have emitters (skips unsupported fields)
-    std::fprintf(out, "\"cy\"");
-    for (const auto &em : g_emitters) {
-        std::fprintf(out, ",\"%s\"", em.name.c_str());
+    for (size_t i = 0; i < g_emitters.size(); i++) {
+        if (i > 0) std::fprintf(out, ",");
+        std::fprintf(out, "\"%s\"", g_emitters[i].name.c_str());
     }
 
-    std::fprintf(out, "],\"trigger\":\"%s\",\"cy_unit\":\"tcycle\"}\n", prof.trigger.c_str());
+    std::fprintf(out, "],\"trigger\":\"%s\"}\n", prof.trigger.c_str());
 }
 
 // --- Stop condition ---
