@@ -162,7 +162,7 @@ static struct Profile parse_profile(const char *path) {
 
 // --- Emitter configuration ---
 
-enum EmitterSource { SRC_REG8, SRC_REG16, SRC_IO, SRC_OPCODE, SRC_IME };
+enum EmitterSource { SRC_REG8, SRC_REG16, SRC_IO, SRC_IME };
 
 struct FieldEmitter {
     char name[MAX_NAME];
@@ -182,9 +182,7 @@ static void build_emitters(const struct Profile *prof) {
         struct FieldEmitter *em = &g_emitters[g_nemitters];
         strncpy(em->name, field, MAX_NAME - 1);
 
-        if (strcmp(field, "op") == 0) {
-            em->source = SRC_OPCODE;
-        } else if (strcmp(field, "ime") == 0) {
+        if (strcmp(field, "ime") == 0) {
             em->source = SRC_IME;
         } else if (is_in_list(field, REG8_FIELDS)) {
             em->source = SRC_REG8;
@@ -279,9 +277,6 @@ static void emit_entry(struct mCore *core) {
             break;
         case SRC_IO:
             fput_u8(g_output, core->rawRead8(core, em->io_addr, -1));
-            break;
-        case SRC_OPCODE:
-            fput_u8(g_output, core->rawRead8(core, cpu->pc, -1));
             break;
         case SRC_IME:
             fprintf(g_output, cpu->irqPending ? "true" : "false");

@@ -158,7 +158,7 @@ static bool g_stop_serial_triggered = false;
 // Pre-computed list of what to emit per entry.
 struct FieldEmitter {
     std::string name;
-    enum Source { REGISTER_8, REGISTER_16, IO_READ, OPCODE, IME } source;
+    enum Source { REGISTER_8, REGISTER_16, IO_READ, IME } source;
     RegisterField::Reg reg; // for REGISTER_8/16
     unsigned short io_addr; // for IO_READ
 };
@@ -172,9 +172,7 @@ static void build_emitters(const Profile &prof) {
         FieldEmitter em;
         em.name = field;
 
-        if (field == "op") {
-            em.source = FieldEmitter::OPCODE;
-        } else if (field == "ime") {
+        if (field == "ime") {
             em.source = FieldEmitter::IME;
         } else if (auto it = REGISTER_FIELDS.find(field); it != REGISTER_FIELDS.end()) {
             em.source = it->second.is_16bit ? FieldEmitter::REGISTER_16 : FieldEmitter::REGISTER_8;
@@ -249,9 +247,6 @@ static void exec_callback(GB_gameboy_t *gb, uint16_t address, uint8_t opcode) {
             break;
         case FieldEmitter::IO_READ:
             fput_u8(g_output, GB_safe_read_memory(gb, em.io_addr));
-            break;
-        case FieldEmitter::OPCODE:
-            fput_u8(g_output, opcode);
             break;
         case FieldEmitter::IME:
             std::fprintf(g_output, gb->ime ? "true" : "false");
