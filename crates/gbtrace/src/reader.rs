@@ -45,11 +45,20 @@ impl TraceReader {
     }
 
     /// Create a reader from any buffered reader (e.g. stdin).
+    /// Skips any non-JSON lines before the header (e.g. emulator debug output).
     pub fn from_reader<R: BufRead + 'static>(mut reader: R) -> Result<Self> {
         let mut header_line = String::new();
-        reader.read_line(&mut header_line)?;
-        if header_line.is_empty() {
-            return Err(Error::MissingHeader);
+        loop {
+            header_line.clear();
+            let n = reader.read_line(&mut header_line)?;
+            if n == 0 {
+                return Err(Error::MissingHeader);
+            }
+            let trimmed = header_line.trim();
+            if trimmed.starts_with('{') {
+                break;
+            }
+            // Skip non-JSON lines (emulator debug output)
         }
         let header: TraceHeader = serde_json::from_str(&header_line)?;
         header.validate()?;
