@@ -342,7 +342,7 @@ static void write_header(FILE *out, const struct Profile *prof,
         fprintf(out, "\"%s\"", prof->fields[i]);
     }
 
-    fprintf(out, "],\"trigger\":\"%s\"}\n", prof->trigger);
+    fprintf(out, "],\"trigger\":\"instruction\"}\n");
 }
 
 // --- Main ---

@@ -312,7 +312,7 @@ static void write_header(FILE *out, const Profile &prof,
         std::fprintf(out, "\"%s\"", prof.fields[i].c_str());
     }
 
-    std::fprintf(out, "],\"trigger\":\"%s\"}\n", prof.trigger.c_str());
+    std::fprintf(out, "],\"trigger\":\"instruction\"}\n");
 }
 
 // --- Stop condition ---
