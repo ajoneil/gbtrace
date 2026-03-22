@@ -379,14 +379,11 @@ export class AppShell extends LitElement {
         }
 
         if (targetPC != null) {
-          console.log('[align] targetPC:', targetPC, 'pcA:', pcA, 'pcB:', pcB);
           if (pcA !== targetPC) {
-            console.log('[align] aligning A to', targetPC);
             const aligned = this._store.alignToPC(targetPC);
             this._store.free();
             this._store = aligned;
             this._header = aligned.header();
-            console.log('[align] A now starts at:', this._store.entry(0)?.pc);
           }
           if (pcB !== targetPC) {
             const aligned = store.alignToPC(targetPC);
