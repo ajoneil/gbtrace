@@ -1,10 +1,13 @@
 receipts/
 target/
 adapters/gambatte/gambatte-speedrun/
-adapters/gambatte/build/
+adapters/gambatte/gbtrace-gambatte
+adapters/gateboy/metroboy/
+adapters/gateboy/metrolib/
+adapters/gateboy/build/
+adapters/gateboy/gbtrace-gateboy
 adapters/sameboy/SameBoy/
 adapters/sameboy/gbtrace-sameboy
-adapters/sameboy/boot_roms/
 adapters/mgba/mgba/
 adapters/mgba/gbtrace-mgba
 adapters/mgba/gbtrace-mgba-dbg

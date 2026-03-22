@@ -5,7 +5,7 @@
 # Usage:
 #   ./scripts/run-blargg-tests.sh [adapter...]
 #
-# If no adapters specified, runs all: gambatte sameboy mgba logicboy
+# If no adapters specified, runs all: gambatte sameboy mgba gateboy
 
 set -euo pipefail
 
@@ -21,17 +21,17 @@ STOP_SERIAL_BYTE="0A"
 STOP_SERIAL_COUNT=4
 MAX_FRAMES=3000
 
-ADAPTERS=("${@:-gambatte sameboy mgba logicboy}")
+ADAPTERS=("${@:-gambatte sameboy mgba}")
 if [[ $# -eq 0 ]]; then
-    ADAPTERS=(gambatte sameboy mgba logicboy)
+    ADAPTERS=(gambatte sameboy mgba)
 fi
 
 # Adapter binary paths
 declare -A ADAPTER_BIN
-ADAPTER_BIN[gambatte]="$PROJECT_DIR/adapters/gambatte/build/gbtrace-gambatte"
+ADAPTER_BIN[gambatte]="$PROJECT_DIR/adapters/gambatte/gbtrace-gambatte"
 ADAPTER_BIN[sameboy]="$PROJECT_DIR/adapters/sameboy/gbtrace-sameboy"
 ADAPTER_BIN[mgba]="$PROJECT_DIR/adapters/mgba/gbtrace-mgba"
-ADAPTER_BIN[logicboy]="$PROJECT_DIR/adapters/logicboy/gbtrace-logicboy"
+ADAPTER_BIN[gateboy]="$PROJECT_DIR/adapters/gateboy/gbtrace-gateboy"
 
 export LD_LIBRARY_PATH="$PROJECT_DIR/adapters/sameboy/SameBoy/build/lib:${LD_LIBRARY_PATH:-}"
 
@@ -76,11 +76,13 @@ for adapter in "${ADAPTERS[@]}"; do
             --output "$jsonl" \
             --stop-on-serial "$STOP_SERIAL_BYTE" \
             --stop-serial-count "$STOP_SERIAL_COUNT" \
+            --stop-when A001=DE \
             --frames "$MAX_FRAMES" \
             2>&1) || true
 
         frame_info=$(echo "$stderr_out" | grep -oP 'frame \K[0-9]+' | tail -1)
 
+        # Determine pass/fail: try serial output first, fall back to memory status
         serial=$(extract_serial "$jsonl" 2>/dev/null || echo "")
 
         if echo "$serial" | grep -qi "passed"; then
@@ -90,8 +92,21 @@ for adapter in "${ADAPTERS[@]}"; do
             status="FAIL"; suffix="_fail"
             ((FAIL++)) || true
         else
-            status="????"; suffix="_fail"
-            ((ERROR++)) || true
+            # No serial — check test_status field (0xA000): 0=pass, other=fail
+            mem_status=$("$CLI" query "$jsonl" -w "test_sig1=DE" --max 1 2>&1 || true)
+            if echo "$mem_status" | grep -qP '^\d+ match'; then
+                # Signature found — check test_status value
+                if echo "$mem_status" | grep -qP 'test_status=0\b'; then
+                    status="PASS"; suffix="_pass"
+                    ((PASS++)) || true
+                else
+                    status="FAIL"; suffix="_fail"
+                    ((FAIL++)) || true
+                fi
+            else
+                status="????"; suffix="_fail"
+                ((ERROR++)) || true
+            fi
         fi
 
         # Convert to parquet with pass/fail suffix
@@ -117,7 +132,7 @@ import json, glob, os, re
 
 rom_dir = '$ROM_DIR'
 roms = sorted(glob.glob(os.path.join(rom_dir, '*.gb')))
-emus = ['logicboy', 'gambatte', 'sameboy', 'mgba']
+emus = ['gateboy', 'gambatte', 'sameboy', 'mgba']
 
 manifest = []
 for rom in roms:
