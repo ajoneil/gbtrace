@@ -6,6 +6,13 @@
  * for numeric fields and 1 byte per bool field.
  */
 export class TraceStore {
+    static __wrap(ptr) {
+        ptr = ptr >>> 0;
+        const obj = Object.create(TraceStore.prototype);
+        obj.__wbg_ptr = ptr;
+        TraceStoreFinalization.register(obj, obj.__wbg_ptr, obj);
+        return obj;
+    }
     __destroy_into_raw() {
         const ptr = this.__wbg_ptr;
         this.__wbg_ptr = 0;
@@ -15,6 +22,33 @@ export class TraceStore {
     free() {
         const ptr = this.__destroy_into_raw();
         wasm.__wbg_tracestore_free(ptr, 0);
+    }
+    /**
+     * Create a new TraceStore with leading entries trimmed so the first
+     * entry's PC matches the given value. Used to align traces that start
+     * at different points (e.g. 0x0100 vs 0x0101).
+     * @param {number} target_pc
+     * @returns {TraceStore}
+     */
+    alignToPC(target_pc) {
+        const ret = wasm.tracestore_alignToPC(this.__wbg_ptr, target_pc);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return TraceStore.__wrap(ret[0]);
+    }
+    /**
+     * Create a new TraceStore with T-cycle entries collapsed to instruction
+     * boundaries. Groups consecutive entries with the same PC and keeps the
+     * last entry of each group (the state after the instruction completed).
+     * @returns {TraceStore}
+     */
+    collapseToInstructions() {
+        const ret = wasm.tracestore_collapseToInstructions(this.__wbg_ptr);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return TraceStore.__wrap(ret[0]);
     }
     /**
      * Compare ALL fields between this store and another, returning indices where any field differs.

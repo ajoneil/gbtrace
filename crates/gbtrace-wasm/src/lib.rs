@@ -307,14 +307,20 @@ impl TraceStore {
     /// at different points (e.g. 0x0100 vs 0x0101).
     #[wasm_bindgen(js_name = alignToPC)]
     pub fn align_to_pc(&self, target_pc: u16) -> Result<TraceStore, JsError> {
-        let pc_col = self.store.field_col("pc")
-            .ok_or_else(|| JsError::new("no pc field"))?;
+        let pc_col = match self.store.field_col("pc") {
+            Some(c) => c,
+            None => return Err(JsError::new("no pc field")),
+        };
         let count = self.store.entry_count();
+        if count == 0 {
+            return Err(JsError::new("empty trace"));
+        }
 
         // Find first entry where PC matches target
         let mut start = None;
         for i in 0..count {
-            if self.store.column(pc_col).get_numeric(i) as u16 == target_pc {
+            let pc = self.store.column(pc_col).get_numeric(i);
+            if pc as u16 == target_pc {
                 start = Some(i);
                 break;
             }
@@ -322,15 +328,20 @@ impl TraceStore {
 
         let start = match start {
             Some(s) => s,
-            None => return Err(JsError::new(&format!("PC 0x{:04x} not found in trace", target_pc))),
+            None => return Err(JsError::new(&format!(
+                "PC 0x{:04x} not found in {} entries (first PC: 0x{:04x})",
+                target_pc, count, self.store.column(pc_col).get_numeric(0)
+            ))),
         };
 
+        // Build new store by copying entries from start..count
+        // Use the same header but copy field by field
         let header = self.store.header().clone();
         let new_count = count - start;
         let mut new_store = gbtrace::column_store::ColumnStore::with_capacity(header.clone(), new_count);
 
         for i in start..count {
-            for (col, _) in header.fields.iter().enumerate() {
+            for col in 0..header.fields.len() {
                 new_store.push_u64(col, self.store.column(col).get_numeric(i));
             }
             new_store.finish_row();
