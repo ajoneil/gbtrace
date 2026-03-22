@@ -21,19 +21,22 @@ STOP_SERIAL_BYTE="0A"
 STOP_SERIAL_COUNT=4
 MAX_FRAMES=3000
 
-ADAPTERS=("${@:-gambatte sameboy mgba}")
-if [[ $# -eq 0 ]]; then
-    ADAPTERS=(gambatte sameboy mgba)
+ADAPTERS=""
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --emu) ADAPTERS="$2"; shift 2 ;;
+        *) ADAPTERS="${ADAPTERS:+$ADAPTERS }$1"; shift ;;
+    esac
+done
+if [[ -z "$ADAPTERS" ]]; then
+    ADAPTERS="gambatte sameboy mgba"
 fi
 
-# Adapter binary paths
-declare -A ADAPTER_BIN
-ADAPTER_BIN[gambatte]="$PROJECT_DIR/adapters/gambatte/gbtrace-gambatte"
-ADAPTER_BIN[sameboy]="$PROJECT_DIR/adapters/sameboy/gbtrace-sameboy"
-ADAPTER_BIN[mgba]="$PROJECT_DIR/adapters/mgba/gbtrace-mgba"
-ADAPTER_BIN[gateboy]="$PROJECT_DIR/adapters/gateboy/gbtrace-gateboy"
-
 export LD_LIBRARY_PATH="$PROJECT_DIR/adapters/sameboy/SameBoy/build/lib:${LD_LIBRARY_PATH:-}"
+
+adapter_bin() {
+    echo "$PROJECT_DIR/adapters/$1/gbtrace-$1"
+}
 
 # Build CLI if needed
 if [[ ! -x "$CLI" ]]; then
@@ -42,7 +45,7 @@ if [[ ! -x "$CLI" ]]; then
 fi
 
 # Build requested adapters
-for adapter in "${ADAPTERS[@]}"; do
+for adapter in $ADAPTERS; do
     adapter_dir="$PROJECT_DIR/adapters/$adapter"
     if [[ -f "$adapter_dir/Makefile" ]]; then
         echo "Building $adapter adapter..."
@@ -66,8 +69,8 @@ extract_serial() {
     }' "$trace_file"
 }
 
-for adapter in "${ADAPTERS[@]}"; do
-    bin="${ADAPTER_BIN[$adapter]}"
+for adapter in $ADAPTERS; do
+    bin="$(adapter_bin "$adapter")"
     if [[ ! -x "$bin" ]]; then
         echo "SKIP $adapter (binary not found: $bin)"
         continue
@@ -82,14 +85,19 @@ for adapter in "${ADAPTERS[@]}"; do
 
         printf "  %-40s  " "$name"
 
-        stderr_out=$(env "$bin" \
+        stderr_out=$("$bin" \
             --rom "$rom" \
             --profile "$PROFILE" \
             --output "$jsonl" \
             --stop-on-serial "$STOP_SERIAL_BYTE" \
             --stop-serial-count "$STOP_SERIAL_COUNT" \
             --frames "$MAX_FRAMES" \
-            2>&1) || true
+            2>&1) || {
+            printf "ERROR (adapter crashed)\n"
+            ((ERROR++)) || true
+            rm -f "$jsonl" "${rom%.gb}.sav"
+            continue
+        }
 
         frame_info=$(echo "$stderr_out" | grep -oP 'frame \K[0-9]+' | tail -1)
 
