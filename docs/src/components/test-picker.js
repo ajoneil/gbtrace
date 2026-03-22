@@ -6,6 +6,7 @@ const TEST_SUITES = [
     name: 'gbmicrotest',
     base: 'tests/gbmicrotest',
     profile: 'tests/gbmicrotest/gbmicrotest.toml',
+    manifest: 'tests/gbmicrotest/manifest.json',
     preferredEmu: 'gateboy',
     tests: null, // loaded from manifest
     categories: [
