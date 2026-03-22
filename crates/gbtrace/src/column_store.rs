@@ -236,6 +236,66 @@ impl ColumnStore {
         store
     }
 
+    // --- Transform ---
+
+    /// Collapse T-cycle entries to instruction boundaries.
+    /// Groups consecutive entries with the same PC and keeps the first entry
+    /// of each new PC group (matching instruction-level adapter behaviour).
+    pub fn collapse_to_instructions(&self) -> Result<Self> {
+        let pc_col = self.field_col("pc")
+            .ok_or_else(|| Error::Diff("no pc field for collapse".into()))?;
+        let count = self.entry_count();
+        if count == 0 {
+            return Ok(Self::new(self.header.clone()));
+        }
+
+        let mut new_store = Self::with_capacity(self.header.clone(), count / 4);
+        let mut prev_pc = self.columns[pc_col].get_numeric(0);
+        let ncols = self.header.fields.len();
+
+        // Emit first entry
+        for col in 0..ncols {
+            new_store.push_u64(col, self.columns[col].get_numeric(0));
+        }
+        new_store.finish_row();
+
+        for i in 1..count {
+            let cur_pc = self.columns[pc_col].get_numeric(i);
+            if cur_pc != prev_pc {
+                for col in 0..ncols {
+                    new_store.push_u64(col, self.columns[col].get_numeric(i));
+                }
+                new_store.finish_row();
+            }
+            prev_pc = cur_pc;
+        }
+
+        Ok(new_store)
+    }
+
+    /// Skip entries until the first entry with the given PC value.
+    pub fn skip_to_pc(&self, target_pc: u16) -> Result<Self> {
+        let pc_col = self.field_col("pc")
+            .ok_or_else(|| Error::Diff("no pc field".into()))?;
+        let count = self.entry_count();
+
+        let start = (0..count)
+            .find(|&i| self.columns[pc_col].get_numeric(i) as u16 == target_pc)
+            .ok_or_else(|| Error::Diff(format!("PC 0x{:04x} not found", target_pc)))?;
+
+        let ncols = self.header.fields.len();
+        let mut new_store = Self::with_capacity(self.header.clone(), count - start);
+
+        for i in start..count {
+            for col in 0..ncols {
+                new_store.push_u64(col, self.columns[col].get_numeric(i));
+            }
+            new_store.finish_row();
+        }
+
+        Ok(new_store)
+    }
+
     // --- Query ---
 
     /// Evaluate a condition against all rows and return matching indices.

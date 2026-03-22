@@ -27,6 +27,7 @@ export class TraceStore {
      * Create a new TraceStore with leading entries trimmed so the first
      * entry's PC matches the given value. Used to align traces that start
      * at different points (e.g. 0x0100 vs 0x0101).
+     * Skip entries until the first entry with the given PC value.
      * @param {number} target_pc
      * @returns {TraceStore}
      */
@@ -41,6 +42,7 @@ export class TraceStore {
      * Create a new TraceStore with T-cycle entries collapsed to instruction
      * boundaries. Groups consecutive entries with the same PC and keeps the
      * last entry of each group (the state after the instruction completed).
+     * Collapse T-cycle entries to instruction boundaries.
      * @returns {TraceStore}
      */
     collapseToInstructions() {
