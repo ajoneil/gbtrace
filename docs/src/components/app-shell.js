@@ -125,8 +125,8 @@ export class AppShell extends LitElement {
   render() {
     return html`
       <div class="layout"
-        @trace-loaded=${this._onTestPicked}
-        @trace-selected=${this._onTraceSelected}
+        @trace-selected=${this._onTraceSwitch}
+        @trace-compare=${this._onTraceCompare}
         @trace-deselect-b=${this._exitCompare}
         @change-rom=${this._reset}
         @highlight-changed=${this._onHighlightChanged}
@@ -149,7 +149,7 @@ export class AppShell extends LitElement {
   _renderLanding() {
     return html`
       <file-loader @trace-loaded=${this._onFileLoaded}></file-loader>
-      <test-picker></test-picker>
+      <test-picker @trace-loaded=${this._onTestPicked}></test-picker>
     `;
   }
 
@@ -271,16 +271,16 @@ export class AppShell extends LitElement {
     this._setStoreA(store, filename);
   }
 
-  /** Trace selected from the selector bar */
-  _onTraceSelected(e) {
+  /** Trace selected from the selector bar — always replaces A */
+  _onTraceSwitch(e) {
     const { store, name } = e.detail;
-    if (!this._store) {
-      // First trace — set as A
-      this._setStoreA(store, name);
-    } else {
-      // Second trace — compare mode
-      this._setStoreB(store, name);
-    }
+    this._setStoreA(store, name);
+  }
+
+  /** Trace loaded for comparison from the selector bar */
+  _onTraceCompare(e) {
+    const { store, name } = e.detail;
+    this._setStoreB(store, name);
   }
 
   _setStoreA(store, name) {

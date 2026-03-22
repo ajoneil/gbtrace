@@ -2,15 +2,6 @@ import { LitElement, html, css } from 'lit';
 import { createTraceStore } from '../lib/wasm-bridge.js';
 import { EMULATORS, traceUrl, romUrl } from './test-picker.js';
 
-/**
- * Trace selector bar — shown when a test ROM is selected.
- * Lets the user load/switch traces from library emulators or upload files.
- * Supports single view and compare mode.
- *
- * Events emitted:
- *   trace-selected: { store, name }  — load as primary (or secondary for compare)
- *   change-rom: {}  — user wants to pick a different ROM
- */
 export class TraceSelector extends LitElement {
   static styles = css`
     :host { display: block; }
@@ -35,6 +26,10 @@ export class TraceSelector extends LitElement {
       color: var(--border);
       margin: 0 2px;
     }
+    .label {
+      font-size: 0.7rem;
+      color: var(--text-muted);
+    }
     .emu-btn {
       padding: 4px 10px;
       background: var(--bg);
@@ -50,13 +45,13 @@ export class TraceSelector extends LitElement {
       border-color: var(--accent);
       color: var(--accent);
     }
-    .emu-btn.active-a {
+    .emu-btn.active {
       background: rgba(88,166,255,0.1);
       border-color: #58a6ff;
       color: #58a6ff;
       font-weight: 600;
     }
-    .emu-btn.active-b {
+    .emu-btn.compare {
       background: rgba(210,153,34,0.1);
       border-color: #d29922;
       color: #d29922;
@@ -102,10 +97,6 @@ export class TraceSelector extends LitElement {
     }
     .status.loading { color: var(--accent); }
     .status.error { color: var(--red); }
-    .hint {
-      font-size: 0.7rem;
-      color: var(--text-muted);
-    }
   `;
 
   static properties = {
@@ -130,7 +121,9 @@ export class TraceSelector extends LitElement {
   }
 
   render() {
-    const hasActive = !!this.activeA;
+    const others = this.suite
+      ? EMULATORS.filter(e => e !== this.activeA)
+      : [];
 
     return html`
       <div class="bar">
@@ -140,7 +133,7 @@ export class TraceSelector extends LitElement {
         ${this.suite ? EMULATORS.map(emu => {
           const isA = this.activeA === emu;
           const isB = this.activeB === emu;
-          const cls = isA ? 'emu-btn active-a' : isB ? 'emu-btn active-b' : 'emu-btn';
+          const cls = isA ? 'emu-btn active' : isB ? 'emu-btn compare' : 'emu-btn';
           return html`
             <button
               class="${cls}"
@@ -150,14 +143,27 @@ export class TraceSelector extends LitElement {
           `;
         }) : ''}
 
-        <button
-          class="upload-btn"
-          ?disabled=${this._loading !== null}
-          @click=${this._clickUpload}
-        >upload</button>
-        <input type="file" accept=".gbtrace,.gz,.parquet" @change=${this._onFileChange}>
+        ${this.activeA && others.length ? html`
+          <span class="sep">|</span>
+          <span class="label">compare</span>
+          ${others.map(emu => {
+            const isB = this.activeB === emu;
+            return html`
+              <button
+                class="emu-btn ${isB ? 'compare' : ''}"
+                ?disabled=${this._loading !== null}
+                @click=${() => this._onCompareClick(emu)}
+              >${emu}</button>
+            `;
+          })}
+          <button
+            class="upload-btn"
+            ?disabled=${this._loading !== null}
+            @click=${this._clickUpload}
+          >file</button>
+        ` : ''}
 
-        ${!hasActive ? html`<span class="hint">click an emulator to load</span>` : ''}
+        <input type="file" accept=".gbtrace,.gz,.parquet" @change=${this._onFileChange}>
 
         ${this._loading ? html`<span class="status loading">loading ${this._loading}...</span>` : ''}
         ${this._error ? html`<span class="status error">${this._error}</span>` : ''}
@@ -167,25 +173,30 @@ export class TraceSelector extends LitElement {
     `;
   }
 
-  async _onEmuClick(emu) {
-    // If already active as A and no B, deselect
-    if (this.activeA === emu && !this.activeB) {
-      // Could deselect, but more useful to just ignore
+  _onEmuClick(emu) {
+    // Clicking the compare trace switches it to single view
+    if (this.activeB === emu) {
+      this._loadEmu(emu, 'trace-selected');
       return;
     }
-    // If already active as B, deselect B (exit compare)
+    // Clicking any emulator (including current A) loads as single view
+    if (this.activeA === emu) return; // already active
+    this._loadEmu(emu, 'trace-selected');
+  }
+
+  _onCompareClick(emu) {
+    // Clicking active B deselects it
     if (this.activeB === emu) {
       this.dispatchEvent(new CustomEvent('trace-deselect-b', {
         bubbles: true, composed: true,
       }));
       return;
     }
-    // If clicking a different emu while A is loaded, load as B (compare)
-    // If no A loaded, load as A
-    await this._loadEmu(emu);
+    // Load as comparison
+    this._loadEmu(emu, 'trace-compare');
   }
 
-  async _loadEmu(emu) {
+  async _loadEmu(emu, eventName) {
     if (!this.suite || !this.testRom) return;
     const url = traceUrl(this.suite, this.testRom, emu);
     this._loading = emu;
@@ -196,13 +207,12 @@ export class TraceSelector extends LitElement {
       if (!resp.ok) throw new Error(`${resp.status} ${resp.statusText}`);
       const store = await createTraceStore(new Uint8Array(await resp.arrayBuffer()));
 
-      // Load ROM for disassembly
       try {
         const rResp = await fetch(romUrl(this.suite, this.testRom));
         if (rResp.ok) store.loadRom(new Uint8Array(await rResp.arrayBuffer()));
       } catch (_) {}
 
-      this.dispatchEvent(new CustomEvent('trace-selected', {
+      this.dispatchEvent(new CustomEvent(eventName, {
         detail: { store, name: emu },
         bubbles: true, composed: true,
       }));
@@ -225,7 +235,7 @@ export class TraceSelector extends LitElement {
 
     try {
       const store = await createTraceStore(new Uint8Array(await file.arrayBuffer()));
-      this.dispatchEvent(new CustomEvent('trace-selected', {
+      this.dispatchEvent(new CustomEvent('trace-compare', {
         detail: { store, name: file.name },
         bubbles: true, composed: true,
       }));
