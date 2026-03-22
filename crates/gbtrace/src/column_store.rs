@@ -296,6 +296,57 @@ impl ColumnStore {
         Ok(new_store)
     }
 
+    /// Prepare two stores for comparison: collapse T-cycle traces to
+    /// instruction level if triggers differ, then align by first common PC.
+    /// Returns the two stores ready for direct index-by-index comparison.
+    pub fn prepare_for_diff(a: Self, b: Self) -> Result<(Self, Self)> {
+        let trig_a = &a.header.trigger;
+        let trig_b = &b.header.trigger;
+        let a_tcycle = matches!(trig_a, crate::header::Trigger::Tcycle);
+        let b_tcycle = matches!(trig_b, crate::header::Trigger::Tcycle);
+
+        // Collapse whichever trace is T-cycle if the other isn't
+        let mut a = if a_tcycle && !b_tcycle {
+            a.collapse_to_instructions()?
+        } else { a };
+        let mut b = if b_tcycle && !a_tcycle {
+            b.collapse_to_instructions()?
+        } else { b };
+
+        // Align by first common PC
+        let pc_col_a = a.field_col("pc");
+        let pc_col_b = b.field_col("pc");
+        if let (Some(ca), Some(cb)) = (pc_col_a, pc_col_b) {
+            if a.entry_count() > 0 && b.entry_count() > 0 {
+                let pc_a = a.columns[ca].get_numeric(0) as u16;
+                let pc_b = b.columns[cb].get_numeric(0) as u16;
+                if pc_a != pc_b {
+                    // Find B's start PC in A
+                    let target = (0..a.entry_count().min(100))
+                        .find(|&i| a.columns[ca].get_numeric(i) as u16 == pc_b)
+                        .map(|_| pc_b)
+                        // Or A's start PC in B
+                        .or_else(|| {
+                            (0..b.entry_count().min(100))
+                                .find(|&i| b.columns[cb].get_numeric(i) as u16 == pc_a)
+                                .map(|_| pc_a)
+                        });
+
+                    if let Some(target_pc) = target {
+                        if pc_a != target_pc {
+                            a = a.skip_to_pc(target_pc)?;
+                        }
+                        if pc_b != target_pc {
+                            b = b.skip_to_pc(target_pc)?;
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok((a, b))
+    }
+
     // --- Query ---
 
     /// Evaluate a condition against all rows and return matching indices.
