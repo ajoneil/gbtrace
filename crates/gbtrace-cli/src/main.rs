@@ -84,6 +84,11 @@ enum Command {
         /// Ignore boot ROM entries (skip to first pc=0x0100)
         #[arg(long)]
         skip_boot: bool,
+        /// Sync both traces at a condition before comparing.
+        /// Format: field=value (exact) or field&mask (bitmask non-zero).
+        /// Example: --sync "lcdc&0x80" syncs at PPU-on.
+        #[arg(long)]
+        sync: Option<String>,
         /// Alignment strategy: auto (default), cycle, or sequence
         #[arg(long, default_value = "auto")]
         align: String,
@@ -119,11 +124,12 @@ fn main() {
             fields,
             exclude,
             skip_boot,
+            sync,
             align,
             summary,
             json,
             classify,
-        } => cmd_diff(&trace_a, &trace_b, max, context, fields, exclude, skip_boot, &align, summary, json, classify),
+        } => cmd_diff(&trace_a, &trace_b, max, context, fields, exclude, skip_boot, sync.as_deref(), &align, summary, json, classify),
     };
     process::exit(code);
 }
@@ -678,6 +684,7 @@ fn load_trace_for_diff(
     path: &PathBuf,
     collapse_tcycle: bool,
     align_pc: Option<u16>,
+    sync: Option<&str>,
 ) -> Result<(gbtrace::TraceHeader, Vec<gbtrace::TraceEntry>), String> {
     use gbtrace::column_store::load_column_store;
 
@@ -701,6 +708,11 @@ fn load_trace_for_diff(
         }
     }
 
+    if let Some(cond) = sync {
+        store = store.skip_until(cond)
+            .map_err(|e| format!("Sync error for {}: {e}", path.display()))?;
+    }
+
     let header = store.header().clone();
     let entries: Vec<gbtrace::TraceEntry> = (0..store.entry_count())
         .map(|i| store.to_entry(i))
@@ -716,6 +728,7 @@ fn cmd_diff(
     fields_filter: Option<String>,
     exclude_filter: Option<String>,
     skip_boot: bool,
+    sync: Option<&str>,
     align: &str,
     summary: bool,
     json: bool,
@@ -779,7 +792,7 @@ fn cmd_diff(
     };
 
     // Load traces with auto-collapse and alignment
-    let (header_a, entries_a) = match load_trace_for_diff(path_a, needs_collapse, align_pc) {
+    let (header_a, entries_a) = match load_trace_for_diff(path_a, needs_collapse, align_pc, sync) {
         Ok(v) => v,
         Err(e) => { eprintln!("{e}"); return 1; }
     };
@@ -788,7 +801,7 @@ fn cmd_diff(
     if trace_b_paths.len() > 1 {
         let mut traces = vec![(header_a, entries_a)];
         for path in trace_b_paths {
-            match load_trace_for_diff(path, needs_collapse, align_pc) {
+            match load_trace_for_diff(path, needs_collapse, align_pc, sync) {
                 Ok((h, e)) => traces.push((h, e)),
                 Err(e) => { eprintln!("{e}"); return 1; }
             }
@@ -811,7 +824,7 @@ fn cmd_diff(
     }
 
     // Single pair comparison
-    let (header_b, entries_b) = match load_trace_for_diff(&trace_b_paths[0], needs_collapse, align_pc) {
+    let (header_b, entries_b) = match load_trace_for_diff(&trace_b_paths[0], needs_collapse, align_pc, sync) {
         Ok(v) => v,
         Err(e) => { eprintln!("{e}"); return 1; }
     };

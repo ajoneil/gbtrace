@@ -29,30 +29,67 @@
 
 // --- Field configuration ---
 
-// Read a value from GateBoy via peek() or direct state access.
-// peek() handles HRAM, VRAM, OAM, and most IO regs.  A few (STAT, IF, IE)
-// require direct access to gb_state.
+// Read a value from GateBoy state.
+//
+// For IO registers, we read the raw gate-level DFF state via bit_pack()
+// (NOT bit_pack_inv — gb_state.peek() uses bit_pack_inv which gives
+// inverted values for registers stored in inverting DFFs).
+// For RAM regions (VRAM, OAM, HRAM, etc.), we use GateBoy::peek() which
+// reads directly from memory arrays.
 static uint8_t read_reg(const GateBoy& gb, unsigned short addr) {
-    // Registers that peek() doesn't support
+    const auto& s = gb.gb_state;
+
     switch (addr) {
-        case 0xFF41: { // STAT
-            const auto& s = gb.gb_state;
-            uint8_t stat = bit_pack_inv(s.reg_stat);
-            return stat;
+        case 0xFF40: return (uint8_t)bit_pack(s.reg_lcdc);
+        case 0xFF41: {
+            // STAT must be reconstructed from multiple state sources:
+            //   bit 7: always 1 (unused, reads high)
+            //   bits 6-3: interrupt enable DFFs (stored inverted in reg_stat)
+            //   bit 2: LYC coincidence flag (from RUPO latch, inverted)
+            //   bits 1-0: PPU mode (from rendering latch, vblank, scan state)
+            uint8_t ly = (uint8_t)bit_pack(s.reg_ly);
+            bool vblank = ly >= 144;
+            bool rendering = !s.XYMU_RENDERING_LATCHn.state;
+            bool scanning = s.ACYL_SCANNINGp_odd.state;
+
+            uint8_t mode;
+            if (vblank) {
+                mode = 1;  // vblank
+            } else if (rendering) {
+                mode = 3;  // pixel transfer
+            } else if (scanning) {
+                mode = 2;  // OAM scan
+            } else {
+                mode = 0;  // hblank
+            }
+
+            uint8_t lyc_match = s.int_ctrl.RUPO_LYC_MATCHn.state ? 0 : 1;
+            uint8_t enables = bit_pack(s.reg_stat) & 0x0F;
+
+            return 0x80 | (enables << 3) | (lyc_match << 2) | mode;
         }
-        case 0xFF0F: { // IF
-            const auto& s = gb.gb_state;
-            return (uint8_t)bit_pack(s.reg_if);
-        }
-        case 0xFFFF: { // IE
-            const auto& s = gb.gb_state;
-            return (uint8_t)bit_pack(s.reg_ie);
-        }
+        case 0xFF42: return (uint8_t)bit_pack(s.reg_scy);
+        case 0xFF43: return (uint8_t)bit_pack(s.reg_scx);
+        case 0xFF44: return (uint8_t)bit_pack(s.reg_ly);
+        case 0xFF45: return (uint8_t)bit_pack(s.reg_lyc);
+        case 0xFF46: return (uint8_t)bit_pack(s.reg_dma);
+        case 0xFF47: return (uint8_t)bit_pack(s.reg_bgp);
+        case 0xFF48: return (uint8_t)bit_pack(s.reg_obp0);
+        case 0xFF49: return (uint8_t)bit_pack(s.reg_obp1);
+        case 0xFF4A: return (uint8_t)bit_pack(s.reg_wy);
+        case 0xFF4B: return (uint8_t)bit_pack(s.reg_wx);
+        case 0xFF04: return (uint8_t)(bit_pack(s.reg_div) >> 6);
+        case 0xFF05: return (uint8_t)bit_pack(s.reg_tima);
+        case 0xFF06: return (uint8_t)bit_pack(s.reg_tma);
+        case 0xFF07: return (uint8_t)bit_pack(s.reg_tac);
+        case 0xFF0F: return (uint8_t)bit_pack(s.reg_if);
+        case 0xFFFF: return (uint8_t)bit_pack(s.reg_ie);
         // SB (0xFF01) and SC (0xFF02): serial is not simulated in GateBoy.
         case 0xFF01: return 0;
         case 0xFF02: return 0;
     }
 
+    // RAM regions: peek() reads from memory arrays directly.
     GBResult r = gb.peek(addr);
     return r.is_ok() ? r.unwrap() : 0;
 }
@@ -314,7 +351,8 @@ static void print_usage(const char *argv0) {
         "  --frames <n>            Stop after N frames (default: 3000)\n"
         "  --stop-when <A=V>       Stop when memory ADDR equals VAL (hex)\n"
         "  --stop-on-serial <B>    Stop when byte B (hex) is sent via serial\n"
-        "  --stop-serial-count <N> Stop on Nth occurrence (default: 1)\n",
+        "  --stop-serial-count <N> Stop on Nth occurrence (default: 1)\n"
+        "  --no-fastboot           Run the built-in boot ROM instead of fastbooting\n",
         argv0);
 }
 
@@ -327,6 +365,7 @@ int main(int argc, char *argv[]) {
     unsigned char stop_serial_byte = 0;
     int stop_serial_count = 1;
     bool stop_serial_active = false;
+    bool fastboot = true;
 
     for (int i = 1; i < argc; i++) {
         std::string arg = argv[i];
@@ -346,6 +385,8 @@ int main(int argc, char *argv[]) {
             stop_serial_active = true;
         } else if (arg == "--stop-serial-count" && i + 1 < argc) {
             stop_serial_count = std::atoi(argv[++i]);
+        } else if (arg == "--no-fastboot") {
+            fastboot = false;
         } else if (arg == "--help" || arg == "-h") {
             print_usage(argv[0]);
             return 0;
@@ -387,13 +428,50 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
-    // Initialize GateBoy with fastboot (skips boot ROM, sets post-boot state)
+    // Initialize GateBoy
     GateBoy gb;
-    gb.reset();
+    std::string boot_rom_info;
+
+    if (fastboot) {
+        gb.reset();
+        boot_rom_info = "skip";
+    } else {
+        // Run the built-in boot ROM to completion (PC reaches 0x0100).
+        // The DMG boot ROM scrolls the Nintendo logo which takes several
+        // frames (~1M+ T-cycles). Budget generously.
+        gb.poweron(false);
+
+        static constexpr int PHASES_PER_TCYCLE_BOOT = 2;
+        static constexpr int64_t MAX_BOOT_PHASES = 20000000;  // ~10M T-cycles
+
+        std::fprintf(stderr, "Running boot ROM...\n");
+        bool boot_complete = false;
+        for (int64_t i = 0; i < MAX_BOOT_PHASES; i++) {
+            gb.next_phase(cart_blob);
+            if ((i % PHASES_PER_TCYCLE_BOOT) == (PHASES_PER_TCYCLE_BOOT - 1)) {
+                uint16_t pc = gb.cpu.core.reg.op_addr;
+                if (pc == 0x0100) {
+                    std::fprintf(stderr, "Boot ROM complete at phase %lld (%lld T-cycles)\n",
+                                 (long long)(i + 1), (long long)((i + 1) / 2));
+                    boot_complete = true;
+                    break;
+                }
+            }
+        }
+
+        if (!boot_complete) {
+            std::fprintf(stderr, "Error: boot ROM did not reach PC=0x0100 within %lld phases.\n"
+                                 "Does the ROM have a valid Nintendo logo?\n",
+                         (long long)MAX_BOOT_PHASES);
+            return 1;
+        }
+
+        boot_rom_info = "built-in";
+    }
 
     // Write header
     std::string rom_hash = sha256_file(rom_path);
-    write_header(output, profile, rom_hash, "built-in");
+    write_header(output, profile, rom_hash, boot_rom_info.c_str());
 
     // Print stop conditions
     for (const auto &cond : stop_conditions) {
