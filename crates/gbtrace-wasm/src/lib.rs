@@ -312,18 +312,18 @@ impl TraceStore {
         let count = self.store.entry_count();
 
         // Find first entry where PC matches target
-        let mut start = 0;
+        let mut start = None;
         for i in 0..count {
             if self.store.column(pc_col).get_numeric(i) as u16 == target_pc {
-                start = i;
+                start = Some(i);
                 break;
             }
         }
 
-        if start == 0 && count > 0 && self.store.column(pc_col).get_numeric(0) as u16 == target_pc {
-            // Already aligned, return clone
-            start = 0;
-        }
+        let start = match start {
+            Some(s) => s,
+            None => return Err(JsError::new(&format!("PC 0x{:04x} not found in trace", target_pc))),
+        };
 
         let header = self.store.header().clone();
         let new_count = count - start;
@@ -331,8 +331,7 @@ impl TraceStore {
 
         for i in start..count {
             for (col, _) in header.fields.iter().enumerate() {
-                let val = self.store.column(col).get_numeric(i);
-                new_store.push_u64(col, val);
+                new_store.push_u64(col, self.store.column(col).get_numeric(i));
             }
             new_store.finish_row();
         }
