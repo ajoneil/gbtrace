@@ -87,7 +87,7 @@ for adapter in $ADAPTERS; do
                 --frames "$MAX_FRAMES" \
                 2>"$stderr_file" \
             | "$CLI" convert - -o "$tmp_parquet" >/dev/null 2>&1
-        )
+        ) || true
 
         if [[ ! -s "$tmp_parquet" ]]; then
             err_msg=$(head -1 "$stderr_file" 2>/dev/null || echo "unknown")
