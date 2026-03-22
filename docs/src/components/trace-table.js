@@ -2,6 +2,7 @@ import { LitElement, html, css } from 'lit';
 import { displayVal } from '../lib/format.js';
 
 const ROW_HEIGHT = 24;
+const HEADER_HEIGHT = 28;
 const OVERSCAN = 10;
 const MAX_SPACER = 10_000_000;
 const COL_WIDTH = 56;
@@ -98,7 +99,7 @@ export class TraceTable extends LitElement {
 
   _spacerHeight() {
     if (!this.store) return 0;
-    return Math.min(this.store.entryCount() * ROW_HEIGHT, MAX_SPACER);
+    return Math.min(this.store.entryCount() * ROW_HEIGHT + HEADER_HEIGHT, MAX_SPACER);
   }
 
   _isRemapped() {
@@ -106,7 +107,8 @@ export class TraceTable extends LitElement {
   }
 
   _scrollToEntry(scrollTop, scrollEl) {
-    if (!this._isRemapped()) return Math.floor(scrollTop / ROW_HEIGHT);
+    const adjusted = Math.max(0, scrollTop - HEADER_HEIGHT);
+    if (!this._isRemapped()) return Math.floor(adjusted / ROW_HEIGHT);
     const maxScroll = scrollEl.scrollHeight - scrollEl.clientHeight;
     if (maxScroll <= 0) return 0;
     const maxStart = this.store.entryCount() - Math.ceil(scrollEl.clientHeight / ROW_HEIGHT);
@@ -114,7 +116,7 @@ export class TraceTable extends LitElement {
   }
 
   _entryToScroll(index, scrollEl) {
-    if (!this._isRemapped()) return index * ROW_HEIGHT;
+    if (!this._isRemapped()) return index * ROW_HEIGHT + HEADER_HEIGHT;
     const maxScroll = scrollEl.scrollHeight - scrollEl.clientHeight;
     if (maxScroll <= 0) return 0;
     const maxStart = this.store.entryCount() - Math.ceil(scrollEl.clientHeight / ROW_HEIGHT);
@@ -147,7 +149,7 @@ export class TraceTable extends LitElement {
     this._renderedStart = startIdx;
     this._renderedCount = count;
 
-    if (count <= 0) { rowsEl.innerHTML = ''; rowsEl.style.top = '0px'; return; }
+    if (count <= 0) { rowsEl.innerHTML = ''; rowsEl.style.top = `${HEADER_HEIGHT}px`; return; }
 
     let entries;
     try { entries = this.store.entriesRange(startIdx, count); }
@@ -156,9 +158,9 @@ export class TraceTable extends LitElement {
     if (this._isRemapped()) {
       const maxScroll = scrollEl.scrollHeight - scrollEl.clientHeight;
       const maxStart = this.store.entryCount() - Math.ceil(containerHeight / ROW_HEIGHT);
-      rowsEl.style.top = `${Math.round((maxStart > 0 ? startIdx / maxStart : 0) * maxScroll)}px`;
+      rowsEl.style.top = `${Math.round((maxStart > 0 ? startIdx / maxStart : 0) * maxScroll) + HEADER_HEIGHT}px`;
     } else {
-      rowsEl.style.top = `${startIdx * ROW_HEIGHT}px`;
+      rowsEl.style.top = `${startIdx * ROW_HEIGHT + HEADER_HEIGHT}px`;
     }
 
     const hasRom = this.store.hasRom?.() ?? false;
