@@ -103,7 +103,10 @@ export class TraceSelector extends LitElement {
       flex-wrap: wrap;
       gap: 3px;
       align-items: center;
-      padding: 6px 12px 0;
+      width: 100%;
+      padding-top: 6px;
+      border-top: 1px solid var(--border);
+      margin-top: 6px;
     }
     .ft-label {
       font-size: 0.7rem;
@@ -231,24 +234,25 @@ export class TraceSelector extends LitElement {
         ${this._error ? html`<span class="status error">${this._error}</span>` : ''}
 
         <button class="change-btn" @click=${this._changeRom}>change ROM</button>
+
+        ${this.allFields.length ? html`
+          <div class="fields-row">
+            <span class="ft-label">columns</span>
+            ${this.allFields.map(f => html`
+              <span
+                class="ft-chip ${this.hiddenFields?.has(f) ? '' : 'on'}"
+                @click=${() => this._toggleField(f)}
+              >${f}</span>
+            `)}
+            ${this.suite?.profile || this.testRom ? html`
+              <span class="downloads">
+                ${this.suite?.profile ? html`<a href="${this.suite.profile}" download>profile</a>` : ''}
+                ${this.testRom ? html`<a href="${romUrl(this.suite, this.testRom)}" download>ROM</a>` : ''}
+              </span>
+            ` : ''}
+          </div>
+        ` : ''}
       </div>
-      ${this.allFields.length ? html`
-        <div class="fields-row">
-          <span class="ft-label">columns</span>
-          ${this.allFields.map(f => html`
-            <span
-              class="ft-chip ${this.hiddenFields?.has(f) ? '' : 'on'}"
-              @click=${() => this._toggleField(f)}
-            >${f}</span>
-          `)}
-          ${this.suite?.profile || this.testRom ? html`
-            <span class="downloads">
-              ${this.suite?.profile ? html`<a href="${this.suite.profile}" download>profile</a>` : ''}
-              ${this.testRom ? html`<a href="${romUrl(this.suite, this.testRom)}" download>ROM</a>` : ''}
-            </span>
-          ` : ''}
-        </div>
-      ` : ''}
     `;
   }
 
