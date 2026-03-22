@@ -147,7 +147,7 @@ for rom in roms:
                 break
     manifest.append(entry)
 
-out_path = os.path.join(os.path.dirname(rom_dir), 'manifest.json')
+out_path = os.path.join(rom_dir, '..', '..', 'manifest.json')
 with open(out_path, 'w') as f:
     json.dump(manifest, f)
 print(f'  {len(manifest)} tests, {sum(1 for t in manifest for e in t[\"emulators\"])} traces')
