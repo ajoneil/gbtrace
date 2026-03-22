@@ -447,6 +447,7 @@ int main(int argc, char *argv[]) {
     bool prev_sc_high = false;
     int frames = 0;
     int64_t phase_count = 0;
+    uint64_t cycle_offset = lb.sys.gb_phase_total_old / 8;
 
     while (phase_count < total_phases) {
         lb.next_phase(cart_blob);
@@ -457,8 +458,18 @@ int main(int argc, char *argv[]) {
         // Detect instruction boundary: op_state transitions to 0
         // (start of a new instruction's opcode fetch).
         if (reg.op_state == 0 && prev_op_state != 0) {
-            uint64_t tcycle = lb.sys.gb_phase_total_old / 8;
+            uint64_t tcycle = (lb.sys.gb_phase_total_old / 8) - cycle_offset;
             emit_entry(output, lb, tcycle);
+
+            // Check stop-when conditions at every instruction
+            for (const auto &cond : stop_conditions) {
+                uint8_t val = read_io_reg(lb, cond.addr);
+                if (val == cond.value) {
+                    stopped_early = true;
+                    break;
+                }
+            }
+            if (stopped_early) break;
 
             // Check serial stop condition
             if (stop_serial_active) {
@@ -480,17 +491,9 @@ int main(int argc, char *argv[]) {
 
         prev_op_state = reg.op_state;
 
-        // Check frame boundary for stop-when conditions
+        // Track frame boundaries for --frames limit
         if ((phase_count % PHASES_PER_FRAME) == 0) {
             frames++;
-            for (const auto &cond : stop_conditions) {
-                uint8_t val = read_io_reg(lb, cond.addr);
-                if (val == cond.value) {
-                    stopped_early = true;
-                    break;
-                }
-            }
-            if (stopped_early) break;
         }
     }
 
