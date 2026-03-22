@@ -142,8 +142,13 @@ export class TraceSelector extends LitElement {
             >${emu}</button>
           `;
         }) : ''}
+        <button
+          class="upload-btn"
+          ?disabled=${this._loading !== null}
+          @click=${() => this._clickUpload(false)}
+        >upload</button>
 
-        ${this.activeA && others.length ? html`
+        ${this.activeA ? html`
           <span class="sep">|</span>
           <span class="label">compare</span>
           ${others.map(emu => {
@@ -159,11 +164,12 @@ export class TraceSelector extends LitElement {
           <button
             class="upload-btn"
             ?disabled=${this._loading !== null}
-            @click=${this._clickUpload}
-          >file</button>
+            @click=${() => this._clickUpload(true)}
+          >upload</button>
         ` : ''}
 
-        <input type="file" accept=".gbtrace,.gz,.parquet" @change=${this._onFileChange}>
+        <input type="file" id="upload-main" accept=".gbtrace,.gz,.parquet" @change=${(e) => this._onFileChange(e, false)}>
+        <input type="file" id="upload-compare" accept=".gbtrace,.gz,.parquet" @change=${(e) => this._onFileChange(e, true)}>
 
         ${this._loading ? html`<span class="status loading">loading ${this._loading}...</span>` : ''}
         ${this._error ? html`<span class="status error">${this._error}</span>` : ''}
@@ -223,11 +229,12 @@ export class TraceSelector extends LitElement {
     }
   }
 
-  _clickUpload() {
-    this.renderRoot.querySelector('input[type="file"]').click();
+  _clickUpload(asCompare) {
+    const id = asCompare ? '#upload-compare' : '#upload-main';
+    this.renderRoot.querySelector(id).click();
   }
 
-  async _onFileChange(e) {
+  async _onFileChange(e, asCompare) {
     const file = e.target.files?.[0];
     if (!file) return;
     this._loading = file.name;
@@ -235,7 +242,8 @@ export class TraceSelector extends LitElement {
 
     try {
       const store = await createTraceStore(new Uint8Array(await file.arrayBuffer()));
-      this.dispatchEvent(new CustomEvent('trace-compare', {
+      const eventName = asCompare ? 'trace-compare' : 'trace-selected';
+      this.dispatchEvent(new CustomEvent(eventName, {
         detail: { store, name: file.name },
         bubbles: true, composed: true,
       }));
@@ -243,6 +251,7 @@ export class TraceSelector extends LitElement {
       this._error = `${err.message || err}`;
     } finally {
       this._loading = null;
+      e.target.value = '';
     }
   }
 
