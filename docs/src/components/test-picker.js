@@ -30,19 +30,8 @@ const TEST_SUITES = [
     name: 'Blargg CPU',
     base: 'tests/blargg',
     profile: 'tests/blargg/blargg_cpu.toml',
-    tests: [
-      { name: '01-special', rom: 'cpu_instrs/individual/01-special.gb', emulators: { gambatte: 'pass', sameboy: 'pass', mgba: 'pass' } },
-      { name: '02-interrupts', rom: 'cpu_instrs/individual/02-interrupts.gb', emulators: { gambatte: 'pass', sameboy: 'pass', mgba: 'pass' } },
-      { name: '03-op sp,hl', rom: 'cpu_instrs/individual/03-op sp,hl.gb', emulators: { gambatte: 'pass', sameboy: 'pass', mgba: 'pass' } },
-      { name: '04-op r,imm', rom: 'cpu_instrs/individual/04-op r,imm.gb', emulators: { gambatte: 'pass', sameboy: 'pass', mgba: 'pass' } },
-      { name: '05-op rp', rom: 'cpu_instrs/individual/05-op rp.gb', emulators: { gambatte: 'pass', sameboy: 'pass', mgba: 'pass' } },
-      { name: '06-ld r,r', rom: 'cpu_instrs/individual/06-ld r,r.gb', emulators: { gambatte: 'pass', sameboy: 'pass', mgba: 'pass' } },
-      { name: '07-jr,jp,call,ret,rst', rom: 'cpu_instrs/individual/07-jr,jp,call,ret,rst.gb', emulators: { gambatte: 'pass', sameboy: 'pass', mgba: 'pass' } },
-      { name: '08-misc instrs', rom: 'cpu_instrs/individual/08-misc instrs.gb', emulators: { gambatte: 'pass', sameboy: 'pass', mgba: 'pass' } },
-      { name: '09-op r,r', rom: 'cpu_instrs/individual/09-op r,r.gb', emulators: { gambatte: 'pass', sameboy: 'pass', mgba: 'pass' } },
-      { name: '10-bit ops', rom: 'cpu_instrs/individual/10-bit ops.gb', emulators: { gambatte: 'pass', sameboy: 'pass', mgba: 'pass' } },
-      { name: '11-op a,(hl)', rom: 'cpu_instrs/individual/11-op a,(hl).gb', emulators: { gambatte: 'pass', sameboy: 'pass', mgba: 'pass' } },
-    ],
+    manifest: 'tests/blargg/manifest.json',
+    tests: null,
   },
 ];
 
@@ -220,7 +209,6 @@ export class TestPicker extends LitElement {
   static properties = {
     _selectedSuite: { state: true },
     _selectedTest: { state: true },
-    _microTests: { state: true },
     _category: { state: true },
     _search: { state: true },
     _loading: { state: true },
@@ -231,19 +219,24 @@ export class TestPicker extends LitElement {
     super();
     this._selectedSuite = 0; // gbmicrotest first
     this._selectedTest = 0;
-    this._microTests = null;
     this._category = '';
     this._search = '';
     this._loading = null;
     this._error = null;
-    this._loadMicroManifest();
+    this._loadManifests();
   }
 
-  async _loadMicroManifest() {
-    try {
-      const resp = await fetch('tests/gbmicrotest/manifest.json');
-      if (resp.ok) this._microTests = await resp.json();
-    } catch (_) {}
+  async _loadManifests() {
+    for (const suite of TEST_SUITES) {
+      if (!suite.manifest) continue;
+      try {
+        const resp = await fetch(suite.manifest);
+        if (resp.ok) {
+          suite.tests = await resp.json();
+          this.requestUpdate();
+        }
+      } catch (_) {}
+    }
   }
 
   render() {
@@ -314,13 +307,8 @@ export class TestPicker extends LitElement {
   }
 
   _getTests(suite) {
-    if (suite.tests) {
-      if (!this._search) return suite.tests;
-      const q = this._search.toLowerCase();
-      return suite.tests.filter(t => t.name.toLowerCase().includes(q));
-    }
-    if (!this._microTests) return [];
-    let tests = this._microTests;
+    if (!suite.tests) return [];
+    let tests = suite.tests;
     if (this._category) {
       tests = tests.filter(t => t.name.startsWith(this._category));
     }
