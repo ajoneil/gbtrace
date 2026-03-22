@@ -149,7 +149,7 @@ export class AppShell extends LitElement {
       >
         <header>
           <h1 @click=${this._reset}>gbtrace <span>Game Boy Trace Viewer</span></h1>
-          <span class="wip-badge">under construction</span>
+          <span class="wip-badge">🚧 under construction 🏗️</span>
         </header>
 
         ${this._suite
