@@ -257,6 +257,25 @@ impl TraceDiffer {
         let mut rows_a = self.load_rows(entries_a, &all_fields, &header_a.cy_unit, normalize);
         let mut rows_b = self.load_rows(entries_b, &all_fields, &header_b.cy_unit, normalize);
 
+        // Align by first common PC value (handles traces starting at different PCs)
+        if use_sequence && !rows_a.is_empty() && !rows_b.is_empty() {
+            let pc_a = rows_a[0].1.get("pc").cloned();
+            let pc_b = rows_b[0].1.get("pc").cloned();
+            if pc_a != pc_b {
+                if let (Some(ref target), _) = (&pc_b, &pc_a) {
+                    if let Some(pos) = rows_a.iter().position(|r| r.1.get("pc") == Some(target)) {
+                        rows_a = rows_a.split_off(pos);
+                    }
+                }
+                let pc_a = rows_a.first().and_then(|r| r.1.get("pc").cloned());
+                if let Some(ref target) = pc_a {
+                    if let Some(pos) = rows_b.iter().position(|r| r.1.get("pc") == Some(target)) {
+                        rows_b = rows_b.split_off(pos);
+                    }
+                }
+            }
+        }
+
         let entries_a_count = rows_a.len();
         let entries_b_count = rows_b.len();
 

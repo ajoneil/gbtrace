@@ -300,6 +300,44 @@ impl TraceStore {
         Ok(TraceStore { store: new_store, rom: self.rom.clone() })
     }
 
+    /// Create a new TraceStore with leading entries trimmed so the first
+    /// entry's PC matches the given value. Used to align traces that start
+    /// at different points (e.g. 0x0100 vs 0x0101).
+    #[wasm_bindgen(js_name = alignToPC)]
+    pub fn align_to_pc(&self, target_pc: u16) -> Result<TraceStore, JsError> {
+        let pc_col = self.store.field_col("pc")
+            .ok_or_else(|| JsError::new("no pc field"))?;
+        let count = self.store.entry_count();
+
+        // Find first entry where PC matches target
+        let mut start = 0;
+        for i in 0..count {
+            if self.store.column(pc_col).get_numeric(i) as u16 == target_pc {
+                start = i;
+                break;
+            }
+        }
+
+        if start == 0 && count > 0 && self.store.column(pc_col).get_numeric(0) as u16 == target_pc {
+            // Already aligned, return clone
+            start = 0;
+        }
+
+        let header = self.store.header().clone();
+        let new_count = count - start;
+        let mut new_store = gbtrace::column_store::ColumnStore::with_capacity(header.clone(), new_count);
+
+        for i in start..count {
+            for (col, _) in header.fields.iter().enumerate() {
+                let val = self.store.column(col).get_numeric(i);
+                new_store.push_u64(col, val);
+            }
+            new_store.finish_row();
+        }
+
+        Ok(TraceStore { store: new_store, rom: self.rom.clone() })
+    }
+
     /// Load ROM bytes for disassembly.
     #[wasm_bindgen(js_name = loadRom)]
     pub fn load_rom(&mut self, data: &[u8]) {

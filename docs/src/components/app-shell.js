@@ -366,6 +366,29 @@ export class AppShell extends LitElement {
       }
     }
 
+    // Align traces by first common PC value
+    try {
+      const pcA = this._store.entry(0)?.pc;
+      const pcB = store.entry(0)?.pc;
+      if (pcA != null && pcB != null && pcA !== pcB) {
+        // Find the later start PC and align the other trace to it
+        const targetPC = Math.max(pcA, pcB);
+        if (pcA < targetPC) {
+          const aligned = this._store.alignToPC(targetPC);
+          this._store.free();
+          this._store = aligned;
+          this._header = aligned.header();
+        }
+        if (pcB < targetPC) {
+          const aligned = store.alignToPC(targetPC);
+          store.free();
+          store = aligned;
+        }
+      }
+    } catch (err) {
+      console.error('Failed to align traces by PC:', err);
+    }
+
     this._storeB = store;
     this._nameB = name;
     this._highlightIndices = null;
