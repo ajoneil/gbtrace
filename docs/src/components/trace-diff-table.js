@@ -163,6 +163,7 @@ export class TraceDiffTable extends LitElement {
             <div class="inner">
               <div class="header-row">
                 ${sf.map(f => html`<span style="${this._hdr(COL_WIDTH)}">${f}</span>`)}
+                ${hasRom && !this._pcMatches ? html`<span style="${this._hdr(ASM_WIDTH, 'text-align:left;')}">asm</span>` : ''}
               </div>
               <div class="spacer" style="height:${this._spacerHeight()}px"></div>
               <div class="rows" id="rows-a"></div>
@@ -172,6 +173,7 @@ export class TraceDiffTable extends LitElement {
             <div class="inner">
               <div class="header-row">
                 ${sf.map(f => html`<span style="${this._hdr(COL_WIDTH)}">${f}</span>`)}
+                ${hasRom && !this._pcMatches ? html`<span style="${this._hdr(ASM_WIDTH, 'text-align:left;')}">asm</span>` : ''}
               </div>
               <div class="spacer" style="height:${this._spacerHeight()}px"></div>
               <div class="rows" id="rows-b"></div>
@@ -296,11 +298,17 @@ export class TraceDiffTable extends LitElement {
     rowsShared.style.top = `${top}px`;
 
     const hasRom = (this.storeA.hasRom?.() || this.storeB.hasRom?.()) ?? false;
-    const showAsm = hasRom && this._pcMatches;
-    let disasmArr = null;
-    if (showAsm) {
+    const showSharedAsm = hasRom && this._pcMatches;
+    const showSideAsm = hasRom && !this._pcMatches;
+    let disasmArr = null;  // shared disasm (when PCs match)
+    let disasmA = null;    // per-side disasm (when PCs diverge)
+    let disasmB = null;
+    if (showSharedAsm) {
       const ds = this.storeA.hasRom?.() ? this.storeA : this.storeB;
       try { disasmArr = ds.disassembleRange(startIdx, count); } catch (_) {}
+    } else if (showSideAsm) {
+      if (this.storeA.hasRom?.()) try { disasmA = this.storeA.disassembleRange(startIdx, count); } catch (_) {}
+      if (this.storeB.hasRom?.()) try { disasmB = this.storeB.disassembleRange(startIdx, count); } catch (_) {}
     }
 
     const cs = this._cs.bind(this);
@@ -352,6 +360,9 @@ export class TraceDiffTable extends LitElement {
         const color = differs ? 'color:var(--red);font-weight:600;' : '';
         partsA.push(`<span style="${cs(COL_WIDTH, color)}">${displayVal(a[f])}</span>`);
       }
+      if (disasmA) {
+        partsA.push(`<span style="${cs(ASM_WIDTH, 'text-align:left;color:var(--green);')}">${disasmA[i] || ''}</span>`);
+      }
       partsA.push('</div>');
 
       // Panel B
@@ -360,6 +371,9 @@ export class TraceDiffTable extends LitElement {
         const differs = a[f] !== b[f];
         const color = differs ? 'color:var(--yellow);font-weight:600;' : '';
         partsB.push(`<span style="${cs(COL_WIDTH, color)}">${displayVal(b[f])}</span>`);
+      }
+      if (disasmB) {
+        partsB.push(`<span style="${cs(ASM_WIDTH, 'text-align:left;color:var(--green);')}">${disasmB[i] || ''}</span>`);
       }
       partsB.push('</div>');
     }
