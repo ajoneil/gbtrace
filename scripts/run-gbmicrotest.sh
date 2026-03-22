@@ -57,9 +57,9 @@ run_one() {
     # Convert to parquet
     "$CLI" convert "$raw.trimmed" --output "$out" 2>/dev/null
 
-    # Check result
+    # Check result — look for "N match(es)" with N > 0, not "No matches"
     local result
-    result=$("$CLI" query "$out" -w "test_pass=01" --max 1 2>&1 | grep -c "match" || true)
+    result=$("$CLI" query "$out" -w "test_pass=01" --max 1 2>&1 | grep -cP '^\d+ match' || true)
     local entries
     entries=$("$CLI" info "$out" 2>&1 | grep Entries | awk '{print $2}')
 
@@ -67,8 +67,15 @@ run_one() {
         printf "  %-40s %-10s PASS  %6s entries\n" "$name" "$emu_name" "$entries"
         pass=$((pass + 1))
     else
-        printf "  %-40s %-10s FAIL  %6s entries\n" "$name" "$emu_name" "$entries"
-        fail=$((fail + 1))
+        local fail_result
+        fail_result=$("$CLI" query "$out" -w "test_pass=FF" --max 1 2>&1 | grep -cP '^\d+ match' || true)
+        if [ "$fail_result" -gt 0 ]; then
+            printf "  %-40s %-10s FAIL  %6s entries\n" "$name" "$emu_name" "$entries"
+            fail=$((fail + 1))
+        else
+            printf "  %-40s %-10s ????  %6s entries\n" "$name" "$emu_name" "$entries"
+            error=$((error + 1))
+        fi
     fi
 
     rm -f "$raw" "$raw.trimmed" "$stripped"
