@@ -12,36 +12,6 @@ export class TraceTable extends LitElement {
       flex-direction: column;
       min-height: 0;
     }
-    .col-toggles {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 3px;
-      margin-bottom: 6px;
-      align-items: center;
-    }
-    .col-toggles .label {
-      font-size: 0.7rem;
-      color: var(--text-muted);
-      margin-right: 2px;
-    }
-    .col-chip {
-      padding: 1px 7px;
-      background: var(--bg);
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      color: var(--text-muted);
-      cursor: pointer;
-      font-size: 0.7rem;
-      font-family: var(--mono);
-      user-select: none;
-      transition: all 0.1s;
-    }
-    .col-chip:hover { border-color: var(--accent); color: var(--accent); }
-    .col-chip.on {
-      background: var(--accent-subtle);
-      border-color: var(--accent);
-      color: var(--accent);
-    }
     .container {
       border: 1px solid var(--border);
       border-radius: 8px;
@@ -114,15 +84,6 @@ export class TraceTable extends LitElement {
     const hasRom = this.store.hasRom?.() ?? false;
 
     return html`
-      <div class="col-toggles">
-        <span class="label">columns</span>
-        ${this.fields.filter(f => f !== 'cy').map(f => html`
-          <span
-            class="col-chip ${this.hiddenFields?.has(f) ? '' : 'on'}"
-            @click=${() => this._toggleField(f)}
-          >${f}</span>
-        `)}
-      </div>
       <div class="container" @scroll=${this._onScroll}>
         <div class="inner">
           <div class="header-row">
@@ -135,15 +96,6 @@ export class TraceTable extends LitElement {
         </div>
       </div>
     `;
-  }
-
-  _toggleField(f) {
-    const s = new Set(this.hiddenFields || []);
-    if (s.has(f)) s.delete(f); else s.add(f);
-    this.dispatchEvent(new CustomEvent('hidden-fields-changed', {
-      detail: { hiddenFields: s },
-      bubbles: true, composed: true,
-    }));
   }
 
   _spacerHeight() {
