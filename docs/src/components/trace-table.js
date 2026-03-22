@@ -177,7 +177,7 @@ export class TraceTable extends LitElement {
       parts.push(`<div style="display:flex;height:${ROW_HEIGHT}px;align-items:center;border-bottom:1px solid var(--bg);${bg}" data-idx="${idx}">`);
       parts.push(`<span style="${cs(IDX_WIDTH, 'color:var(--text-muted);')}">${idx}</span>`);
       for (const f of vf) {
-        parts.push(`<span style="${cs(COL_WIDTH)}">${displayVal(data[f])}</span>`);
+        parts.push(`<span style="${cs(COL_WIDTH)}">${displayVal(data[f], f)}</span>`);
         if (disasmArr && f === 'pc') {
           parts.push(`<span style="${cs(ASM_WIDTH, 'text-align:left;color:var(--green);')}">${disasmArr[i] || ''}</span>`);
         }
