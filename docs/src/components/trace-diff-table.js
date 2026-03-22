@@ -69,6 +69,7 @@ export class TraceDiffTable extends LitElement {
     fields: { type: Array },
     highlightIndices: { type: Object },
     hiddenFields: { type: Object },
+    _pcMatches: { state: true },
   };
 
   constructor() {
@@ -107,9 +108,11 @@ export class TraceDiffTable extends LitElement {
   }
 
   updated(changed) {
-    if (changed.has('storeA') || changed.has('storeB') || changed.has('fields') || changed.has('highlightIndices') || changed.has('hiddenFields')) {
+    if (changed.has('storeA') || changed.has('storeB') || changed.has('fields') || changed.has('hiddenFields')) {
       this._renderedStart = -1;
       this._checkPcMatch();
+    }
+    if (changed.has('storeA') || changed.has('storeB') || changed.has('fields') || changed.has('highlightIndices') || changed.has('hiddenFields') || changed.has('_pcMatches')) {
       this.updateComplete.then(() => {
         this._renderRows();
       });
