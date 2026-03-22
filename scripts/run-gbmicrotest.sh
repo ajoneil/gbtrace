@@ -95,11 +95,9 @@ while [ "${1:-}" != "" ]; do
     esac
 done
 
-# Build CLI if needed
-if [[ ! -x "$CLI" ]]; then
-    echo "Building gbtrace-cli..."
-    cargo build --release -p gbtrace-cli --manifest-path "$PROJECT_DIR/Cargo.toml"
-fi
+# Always rebuild CLI to ensure latest features
+echo "Building gbtrace-cli..."
+cargo build --release -p gbtrace-cli --manifest-path "$PROJECT_DIR/Cargo.toml" 2>&1 | tail -1
 
 # Build requested adapters
 for emu_name in $EMUS; do
