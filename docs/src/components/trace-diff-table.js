@@ -1,5 +1,5 @@
 import { LitElement, html, css } from 'lit';
-import { displayVal } from '../lib/format.js';
+import { displayVal, displayFlagsDiff } from '../lib/format.js';
 
 const ROW_HEIGHT = 24;
 const OVERSCAN = 10;
@@ -375,7 +375,11 @@ export class TraceDiffTable extends LitElement {
       for (const c of sideCols) {
         if (c.type === 'field') {
           const differs = a[c.name] !== b[c.name];
-          partsA.push(`<span style="${cs(c.width, differs ? 'color:var(--red);font-weight:600;' : '')}">${displayVal(a[c.name], c.name)}</span>`);
+          if (c.name === 'f' && differs) {
+            partsA.push(`<span style="${cs(c.width)}">${displayFlagsDiff(a.f, b.f, 'var(--red)')}</span>`);
+          } else {
+            partsA.push(`<span style="${cs(c.width, differs ? 'color:var(--red);font-weight:600;' : '')}">${displayVal(a[c.name], c.name)}</span>`);
+          }
         } else if (c.type === 'asm') {
           partsA.push(`<span style="${cs(c.width, 'text-align:left;color:var(--green);')}">${disasmA?.[i] || ''}</span>`);
         }
@@ -387,7 +391,11 @@ export class TraceDiffTable extends LitElement {
       for (const c of sideCols) {
         if (c.type === 'field') {
           const differs = a[c.name] !== b[c.name];
-          partsB.push(`<span style="${cs(c.width, differs ? 'color:var(--yellow);font-weight:600;' : '')}">${displayVal(b[c.name], c.name)}</span>`);
+          if (c.name === 'f' && differs) {
+            partsB.push(`<span style="${cs(c.width)}">${displayFlagsDiff(b.f, a.f, 'var(--yellow)')}</span>`);
+          } else {
+            partsB.push(`<span style="${cs(c.width, differs ? 'color:var(--yellow);font-weight:600;' : '')}">${displayVal(b[c.name], c.name)}</span>`);
+          }
         } else if (c.type === 'asm') {
           partsB.push(`<span style="${cs(c.width, 'text-align:left;color:var(--green);')}">${disasmB?.[i] || disasmA?.[i] || ''}</span>`);
         }

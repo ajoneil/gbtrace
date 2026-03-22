@@ -11,6 +11,30 @@ function formatFlags(v) {
   return `${hex} ${z}${n}${h}${c}`;
 }
 
+/** Format flags with per-flag diff highlighting (returns HTML string).
+ *  diffColor is applied to flags that differ from otherVal. */
+export function displayFlagsDiff(v, otherVal, diffColor) {
+  if (typeof v !== 'number') return displayVal(v, 'f');
+  const hex = v.toString(16).padStart(2, '0');
+  const xor = (typeof otherVal === 'number') ? (v ^ otherVal) : 0;
+  const flags = [
+    { bit: 0x80, ch: 'Z' },
+    { bit: 0x40, ch: 'N' },
+    { bit: 0x20, ch: 'H' },
+    { bit: 0x10, ch: 'C' },
+  ];
+  const parts = flags.map(({ bit, ch }) => {
+    const set = (v & bit) !== 0;
+    const differs = (xor & bit) !== 0;
+    const letter = set ? ch : '·';
+    if (differs) return `<span style="color:${diffColor};font-weight:600">${letter}</span>`;
+    return letter;
+  });
+  const hexDiffers = v !== otherVal;
+  const hexHtml = hexDiffers ? `<span style="color:${diffColor}">${hex}</span>` : hex;
+  return `${hexHtml} ${parts.join('')}`;
+}
+
 /** Format a value as zero-padded lowercase hex for display.
  *  If fieldName is provided, uses field-aware width (e.g. pc always 4 digits). */
 export function displayVal(v, fieldName) {
