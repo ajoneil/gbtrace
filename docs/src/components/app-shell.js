@@ -89,16 +89,13 @@ export class AppShell extends LitElement {
   `;
 
   static properties = {
-    // ROM context
     _suite: { state: true },
     _testRom: { state: true },
     _testName: { state: true },
-    // Trace stores
     _store: { state: true },
     _storeB: { state: true },
     _nameA: { state: true },
     _nameB: { state: true },
-    // Viewer state
     _header: { state: true },
     _highlightIndices: { state: true },
     _chartField: { state: true },
@@ -124,9 +121,20 @@ export class AppShell extends LitElement {
     this._diffStats = null;
   }
 
+  /** All fields from the trace header. */
+  get _allFields() {
+    return this._header?.fields || [];
+  }
+
+  /** Fields the user has selected (all minus hidden). Used for queries, stats, diff. */
+  get _visibleFields() {
+    return this._allFields.filter(f => !this._hiddenFields.has(f));
+  }
+
   render() {
     return html`
       <div class="layout"
+        @trace-loaded=${this._onTestPicked}
         @trace-selected=${this._onTraceSwitch}
         @trace-compare=${this._onTraceCompare}
         @trace-deselect-b=${this._exitCompare}
@@ -152,7 +160,7 @@ export class AppShell extends LitElement {
   _renderLanding() {
     return html`
       <file-loader @trace-loaded=${this._onFileLoaded}></file-loader>
-      <test-picker @trace-loaded=${this._onTestPicked}></test-picker>
+      <test-picker></test-picker>
     `;
   }
 
@@ -174,10 +182,10 @@ export class AppShell extends LitElement {
   }
 
   _renderSingle() {
-    const fields = this._header?.fields || [];
+    const vf = this._visibleFields;
     return html`
       <div class="sections">
-        <trace-query .store=${this._store} .fields=${fields}></trace-query>
+        <trace-query .store=${this._store} .fields=${vf}></trace-query>
 
         ${this._chartField ? html`
           <trace-chart
@@ -190,7 +198,7 @@ export class AppShell extends LitElement {
 
         <trace-table
           .store=${this._store}
-          .fields=${fields}
+          .fields=${this._allFields}
           .highlightIndices=${this._highlightIndices}
           .hiddenFields=${this._hiddenFields}
         ></trace-table>
@@ -199,22 +207,43 @@ export class AppShell extends LitElement {
   }
 
   _renderCompare() {
-    const fields = this._header?.fields || [];
+    const vf = this._visibleFields;
     const countA = this._store.entryCount();
     const countB = this._storeB.entryCount();
     const minCount = Math.min(countA, countB);
 
+    // Filter diff stats to only visible fields
+    const stats = this._diffStats;
+    const filteredStats = stats ? {
+      ...stats,
+      fields: stats.fields.filter(([name]) => !this._hiddenFields.has(name)),
+    } : null;
+    // Recompute match pct from filtered fields
+    let matchPct = 100;
+    if (filteredStats && filteredStats.total > 0) {
+      // Count rows where ANY visible field differs
+      let differing = filteredStats.differing;
+      // If we've hidden some fields, the overall stats may over-count.
+      // For accuracy, just show the field-level stats and skip overall %.
+      // But as an approximation, use the max field diff count.
+      if (this._hiddenFields.size > 0 && filteredStats.fields.length > 0) {
+        const maxDiff = Math.max(...filteredStats.fields.map(([, c]) => c));
+        differing = maxDiff;
+      }
+      matchPct = Math.round((1 - differing / filteredStats.total) * 1000) / 10;
+    }
+
     return html`
       <div class="sections">
-        ${this._diffStats ? html`
+        ${filteredStats ? html`
           <div class="compare-stats">
-            <span class="match-pct ${this._diffStats.match_pct === 100 ? 'good' : this._diffStats.match_pct > 90 ? 'partial' : 'bad'}">
-              ${this._diffStats.match_pct}% match
+            <span class="match-pct ${matchPct === 100 ? 'good' : matchPct > 90 ? 'partial' : 'bad'}">
+              ${matchPct}% match
             </span>
-            ${this._diffStats.fields.length > 0 ? html`
+            ${filteredStats.fields.length > 0 ? html`
               <span class="diff-fields">
-                diffs in ${this._diffStats.fields.map(([name, count]) => {
-                  const pct = ((count / this._diffStats.total) * 100).toFixed(1);
+                diffs in ${filteredStats.fields.map(([name, count]) => {
+                  const pct = ((count / filteredStats.total) * 100).toFixed(1);
                   return html`<span class="diff-field">${name}<span style="color:var(--text-muted)">(${pct}%)</span></span>`;
                 })}
               </span>
@@ -226,7 +255,7 @@ export class AppShell extends LitElement {
         <trace-query
           .store=${this._store}
           .storeB=${this._storeB}
-          .fields=${fields}
+          .fields=${vf}
           .compareMode=${true}
         ></trace-query>
 
@@ -247,7 +276,7 @@ export class AppShell extends LitElement {
           .storeB=${this._storeB}
           .nameA=${this._nameA}
           .nameB=${this._nameB}
-          .fields=${fields}
+          .fields=${this._allFields}
           .highlightIndices=${this._highlightIndices}
           .hiddenFields=${this._hiddenFields}
         ></trace-diff-table>
@@ -257,7 +286,6 @@ export class AppShell extends LitElement {
 
   // --- Events ---
 
-  /** User picked a test from the test picker — enters ROM context */
   _onTestPicked(e) {
     const { store, suite, testRom, emulator } = e.detail;
     this._suite = suite;
@@ -266,23 +294,19 @@ export class AppShell extends LitElement {
     this._setStoreA(store, emulator);
   }
 
-  /** User dropped/browsed a file — no ROM context */
   _onFileLoaded(e) {
     const { store, filename } = e.detail;
-    // No suite context — just show the trace
     this._suite = { base: '', profile: '' };
     this._testRom = null;
     this._testName = filename;
     this._setStoreA(store, filename);
   }
 
-  /** Trace selected from the selector bar — always replaces A */
   _onTraceSwitch(e) {
     const { store, name } = e.detail;
     this._setStoreA(store, name);
   }
 
-  /** Trace loaded for comparison from the selector bar */
   _onTraceCompare(e) {
     const { store, name } = e.detail;
     this._setStoreB(store, name);
@@ -300,6 +324,7 @@ export class AppShell extends LitElement {
     this._chartField = null;
     this._hoverIndex = null;
     this._diffStats = null;
+    // Don't reset _hiddenFields — persist across trace switches
   }
 
   _setStoreB(store, name) {
@@ -309,12 +334,7 @@ export class AppShell extends LitElement {
     this._highlightIndices = null;
     this._chartField = null;
     this._hoverIndex = null;
-    try {
-      this._diffStats = this._store.diffStats(store);
-    } catch (err) {
-      console.error('Failed to compute diff stats:', err);
-      this._diffStats = null;
-    }
+    this._recomputeDiffStats();
   }
 
   _exitCompare() {
@@ -343,6 +363,19 @@ export class AppShell extends LitElement {
     this._hoverIndex = null;
     this._diffStats = null;
     this._hiddenFields = new Set();
+  }
+
+  _recomputeDiffStats() {
+    if (!this._store || !this._storeB) {
+      this._diffStats = null;
+      return;
+    }
+    try {
+      this._diffStats = this._store.diffStats(this._storeB);
+    } catch (err) {
+      console.error('Failed to compute diff stats:', err);
+      this._diffStats = null;
+    }
   }
 
   _onHighlightChanged(e) {
