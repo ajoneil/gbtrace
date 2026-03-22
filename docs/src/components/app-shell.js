@@ -12,6 +12,7 @@ export class AppShell extends LitElement {
   static styles = css`
     :host {
       display: block;
+      min-height: 100vh;
     }
     .layout {
       margin: 0 auto;
