@@ -1,4 +1,5 @@
 use gbtrace::column_store::{ColumnData, ColumnStore};
+use gbtrace::disasm;
 use wasm_bindgen::prelude::*;
 
 use std::collections::BTreeMap;
@@ -25,6 +26,7 @@ fn to_js(value: &impl serde::Serialize) -> Result<JsValue, JsError> {
 #[wasm_bindgen]
 pub struct TraceStore {
     store: ColumnStore,
+    rom: Option<Vec<u8>>,
 }
 
 #[wasm_bindgen]
@@ -34,7 +36,7 @@ impl TraceStore {
     pub fn from_bytes(data: &[u8]) -> Result<TraceStore, JsError> {
         let store = gbtrace::column_store::load_column_store_from_bytes(data)
             .map_err(|e| JsError::new(&format!("{e}")))?;
-        Ok(TraceStore { store })
+        Ok(TraceStore { store, rom: None })
     }
 
     /// Return the trace header as a JS object.
@@ -262,6 +264,51 @@ impl TraceStore {
         let arr = js_sys::Uint32Array::new_with_length(indices.len() as u32);
         arr.copy_from(&indices);
         Ok(arr)
+    }
+
+    /// Load ROM bytes for disassembly.
+    #[wasm_bindgen(js_name = loadRom)]
+    pub fn load_rom(&mut self, data: &[u8]) {
+        self.rom = Some(data.to_vec());
+    }
+
+    /// Check if ROM is loaded.
+    #[wasm_bindgen(js_name = hasRom)]
+    pub fn has_rom(&self) -> bool {
+        self.rom.is_some()
+    }
+
+    /// Disassemble the instruction at the given PC.
+    /// Returns the mnemonic string, or empty string if no ROM loaded.
+    pub fn disassemble(&self, pc: u16) -> String {
+        match &self.rom {
+            Some(rom) => disasm::disassemble(rom, pc).0,
+            None => String::new(),
+        }
+    }
+
+    /// Disassemble instructions for a range of trace entries.
+    /// Returns an array of mnemonic strings. Much faster than calling
+    /// disassemble() per entry from JS.
+    #[wasm_bindgen(js_name = disassembleRange)]
+    pub fn disassemble_range(&self, start: usize, count: usize) -> Result<JsValue, JsError> {
+        let rom = match &self.rom {
+            Some(r) => r,
+            None => return Ok(to_js(&Vec::<String>::new())?),
+        };
+        let pc_col = self.store.field_col("pc");
+        if pc_col.is_none() {
+            return Ok(to_js(&Vec::<String>::new())?);
+        }
+        let pc_col = pc_col.unwrap();
+        let end = (start + count).min(self.store.entry_count());
+        let mnemonics: Vec<String> = (start..end)
+            .map(|i| {
+                let pc = self.store.column(pc_col).get_numeric(i) as u16;
+                disasm::disassemble(rom, pc).0
+            })
+            .collect();
+        Ok(to_js(&mnemonics)?)
     }
 }
 

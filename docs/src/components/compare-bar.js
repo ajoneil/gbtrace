@@ -144,6 +144,17 @@ export class CompareBar extends LitElement {
       if (!resp.ok) throw new Error(`${resp.status} ${resp.statusText}`);
       const buffer = await resp.arrayBuffer();
       const store = await createTraceStore(new Uint8Array(buffer));
+
+      // Load ROM for disassembly if available
+      if (this.testRom) {
+        try {
+          const romResp = await fetch(`tests/blargg/${this.testRom}`);
+          if (romResp.ok) {
+            store.loadRom(new Uint8Array(await romResp.arrayBuffer()));
+          }
+        } catch (_) { /* optional */ }
+      }
+
       this.dispatchEvent(new CustomEvent('compare-loaded', {
         detail: { store, name: emu },
         bubbles: true, composed: true,

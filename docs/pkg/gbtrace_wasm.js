@@ -60,6 +60,39 @@ export class TraceStore {
         return takeFromExternrefTable0(ret[0]);
     }
     /**
+     * Disassemble the instruction at the given PC.
+     * Returns the mnemonic string, or empty string if no ROM loaded.
+     * @param {number} pc
+     * @returns {string}
+     */
+    disassemble(pc) {
+        let deferred1_0;
+        let deferred1_1;
+        try {
+            const ret = wasm.tracestore_disassemble(this.__wbg_ptr, pc);
+            deferred1_0 = ret[0];
+            deferred1_1 = ret[1];
+            return getStringFromWasm0(ret[0], ret[1]);
+        } finally {
+            wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
+        }
+    }
+    /**
+     * Disassemble instructions for a range of trace entries.
+     * Returns an array of mnemonic strings. Much faster than calling
+     * disassemble() per entry from JS.
+     * @param {number} start
+     * @param {number} count
+     * @returns {any}
+     */
+    disassembleRange(start, count) {
+        const ret = wasm.tracestore_disassembleRange(this.__wbg_ptr, start, count);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return takeFromExternrefTable0(ret[0]);
+    }
+    /**
      * Get a range of entries as a JS array. Used for virtual scrolling.
      * @param {number} start
      * @param {number} count
@@ -147,6 +180,14 @@ export class TraceStore {
         return this;
     }
     /**
+     * Check if ROM is loaded.
+     * @returns {boolean}
+     */
+    hasRom() {
+        const ret = wasm.tracestore_hasRom(this.__wbg_ptr);
+        return ret !== 0;
+    }
+    /**
      * Return the trace header as a JS object.
      * @returns {any}
      */
@@ -156,6 +197,15 @@ export class TraceStore {
             throw takeFromExternrefTable0(ret[1]);
         }
         return takeFromExternrefTable0(ret[0]);
+    }
+    /**
+     * Load ROM bytes for disassembly.
+     * @param {Uint8Array} data
+     */
+    loadRom(data) {
+        const ptr0 = passArray8ToWasm0(data, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        wasm.tracestore_loadRom(this.__wbg_ptr, ptr0, len0);
     }
     /**
      * Parse a condition string and find all matching entry indices.
