@@ -76,19 +76,24 @@ for adapter in $ADAPTERS; do
         printf "  %-40s  " "$name"
 
         # Pipe adapter output directly to parquet conversion (streaming, no OOM)
-        stderr_out=$("$bin" \
+        set +eo pipefail
+        "$bin" \
             --rom "$rom" \
             --profile "$PROFILE" \
             --stop-on-serial "$STOP_SERIAL_BYTE" \
             --stop-serial-count "$STOP_SERIAL_COUNT" \
             --frames "$MAX_FRAMES" \
             2>/tmp/gbtrace_blargg_stderr | \
-            "$CLI" convert - -o "$tmp_parquet" 2>&1) || {
+            "$CLI" convert - -o "$tmp_parquet" >/dev/null 2>&1
+        pipe_status=$?
+        set -eo pipefail
+
+        if [[ $pipe_status -ne 0 ]] || [[ ! -f "$tmp_parquet" ]]; then
             printf "ERROR (adapter crashed)\n"
             ((ERROR++)) || true
             rm -f "$tmp_parquet" "${rom%.gb}.sav" /tmp/gbtrace_blargg_stderr
             continue
-        }
+        fi
 
         frame_info=$(grep -oP 'frame \K[0-9]+' /tmp/gbtrace_blargg_stderr 2>/dev/null | tail -1)
 
@@ -117,7 +122,7 @@ for adapter in $ADAPTERS; do
         printf "%-4s  frame %-5s  %s entries  %s\n" "$status" "${frame_info:-?}" "${entries:-?}" "$parquet_size"
 
         # Clean up sav files
-        rm -f "${rom%.gb}.sav"
+        rm -f "${rom%.gb}.sav" /tmp/gbtrace_blargg_stderr
     done < <(find "$BLARGG_DIR" -name "*.gb" | sort)
 done
 
