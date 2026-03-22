@@ -12,15 +12,48 @@ export class TraceDiffTable extends LitElement {
       flex-direction: column;
       min-height: 0;
     }
+    .col-toggles {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 3px;
+      margin-bottom: 6px;
+      align-items: center;
+    }
+    .col-toggles .label {
+      font-size: 0.7rem;
+      color: var(--text-muted);
+      margin-right: 2px;
+    }
+    .col-chip {
+      padding: 1px 7px;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      color: var(--text-muted);
+      cursor: pointer;
+      font-size: 0.7rem;
+      font-family: var(--mono);
+      user-select: none;
+      transition: all 0.1s;
+    }
+    .col-chip:hover { border-color: var(--accent); color: var(--accent); }
+    .col-chip.on {
+      background: var(--accent-subtle);
+      border-color: var(--accent);
+      color: var(--accent);
+    }
     .container {
       border: 1px solid var(--border);
       border-radius: 8px;
-      overflow: hidden;
+      overflow: auto;
       background: var(--bg-surface);
-      display: flex;
-      flex-direction: column;
       flex: 1;
-      min-height: 0;
+      min-height: 200px;
+      position: relative;
+    }
+    .inner {
+      min-width: fit-content;
+      position: relative;
     }
     .header-row {
       display: flex;
@@ -28,27 +61,24 @@ export class TraceDiffTable extends LitElement {
       border-bottom: 1px solid var(--border);
       font-size: 0.7rem;
       color: var(--text-muted);
+      position: sticky;
+      top: 0;
+      z-index: 2;
     }
     .header-row span {
       padding: 4px 4px;
       min-width: 36px;
       text-align: right;
       font-family: var(--mono);
+      white-space: nowrap;
     }
     .header-row .idx-col { min-width: 50px; }
+    .header-row .asm-col { min-width: 100px; text-align: left; }
     .header-row .sep { width: 2px; min-width: 2px; background: var(--border); padding: 0; }
-    .scroll-area {
-      flex: 1;
-      min-height: 200px;
-      overflow-y: auto;
-      position: relative;
-    }
+    .header-row .side-a { color: #58a6ff; }
+    .header-row .side-b { color: #d29922; }
     .spacer { width: 1px; }
-    .rows {
-      position: absolute;
-      left: 0;
-      right: 0;
-    }
+    .rows { position: absolute; left: 0; right: 0; }
   `;
 
   static properties = {
@@ -58,6 +88,7 @@ export class TraceDiffTable extends LitElement {
     nameB: { type: String },
     fields: { type: Array },
     highlightIndices: { type: Object },
+    _hiddenFields: { state: true },
   };
 
   constructor() {
@@ -68,31 +99,47 @@ export class TraceDiffTable extends LitElement {
     this.nameB = 'B';
     this.fields = [];
     this.highlightIndices = null;
+    this._hiddenFields = new Set();
     this._renderedStart = -1;
     this._renderedCount = 0;
     this._rafId = null;
   }
 
+  get _visibleFields() {
+    return (this.fields || []).filter(f => f !== 'cy' && !this._hiddenFields.has(f));
+  }
+
   updated(changed) {
-    if (changed.has('storeA') || changed.has('storeB') || changed.has('fields') || changed.has('highlightIndices')) {
+    if (changed.has('storeA') || changed.has('storeB') || changed.has('fields') || changed.has('highlightIndices') || changed.has('_hiddenFields')) {
+      this._renderedStart = -1;
       this.updateComplete.then(() => this._renderRows());
     }
   }
 
   render() {
     if (!this.storeA || !this.storeB || !this.fields?.length) return '';
-    const displayFields = this.fields.filter(f => f !== 'cy');
+    const vf = this._visibleFields;
+    const hasRom = (this.storeA.hasRom?.() || this.storeB.hasRom?.()) ?? false;
 
     return html`
-      <div class="container">
-        <div class="header-row">
-          <span class="idx-col">#</span>
-          ${this._hasRom() ? html`<span style="min-width:100px;text-align:left">asm</span>` : ''}
-          ${displayFields.map(f => html`<span title="${this.nameA}: ${f}">${f}</span>`)}
-          <span class="sep"></span>
-          ${displayFields.map(f => html`<span title="${this.nameB}: ${f}">${f}</span>`)}
-        </div>
-        <div class="scroll-area" @scroll=${this._onScroll}>
+      <div class="col-toggles">
+        <span class="label">columns</span>
+        ${this.fields.filter(f => f !== 'cy').map(f => html`
+          <span
+            class="col-chip ${this._hiddenFields.has(f) ? '' : 'on'}"
+            @click=${() => this._toggleField(f)}
+          >${f}</span>
+        `)}
+      </div>
+      <div class="container" @scroll=${this._onScroll}>
+        <div class="inner">
+          <div class="header-row">
+            <span class="idx-col">#</span>
+            ${hasRom ? html`<span class="asm-col">asm</span>` : ''}
+            ${vf.map(f => html`<span class="side-a" title="${this.nameA}: ${f}">${f}</span>`)}
+            <span class="sep"></span>
+            ${vf.map(f => html`<span class="side-b" title="${this.nameB}: ${f}">${f}</span>`)}
+          </div>
           <div class="spacer" style="height:${this._spacerHeight()}px"></div>
           <div class="rows"></div>
         </div>
@@ -100,8 +147,10 @@ export class TraceDiffTable extends LitElement {
     `;
   }
 
-  _hasRom() {
-    return (this.storeA?.hasRom?.() ?? false) || (this.storeB?.hasRom?.() ?? false);
+  _toggleField(f) {
+    const s = new Set(this._hiddenFields);
+    if (s.has(f)) s.delete(f); else s.add(f);
+    this._hiddenFields = s;
   }
 
   _entryCount() {
@@ -109,8 +158,7 @@ export class TraceDiffTable extends LitElement {
   }
 
   _spacerHeight() {
-    const natural = this._entryCount() * ROW_HEIGHT;
-    return Math.min(natural, MAX_SPACER);
+    return Math.min(this._entryCount() * ROW_HEIGHT, MAX_SPACER);
   }
 
   _isRemapped() {
@@ -121,9 +169,8 @@ export class TraceDiffTable extends LitElement {
     if (!this._isRemapped()) return Math.floor(scrollTop / ROW_HEIGHT);
     const maxScroll = scrollEl.scrollHeight - scrollEl.clientHeight;
     if (maxScroll <= 0) return 0;
-    const frac = scrollTop / maxScroll;
     const maxStart = this._entryCount() - Math.ceil(scrollEl.clientHeight / ROW_HEIGHT);
-    return Math.round(frac * Math.max(0, maxStart));
+    return Math.round((scrollTop / maxScroll) * Math.max(0, maxStart));
   }
 
   _entryToScroll(index, scrollEl) {
@@ -144,10 +191,11 @@ export class TraceDiffTable extends LitElement {
   }
 
   _renderRows() {
-    const scrollEl = this.renderRoot?.querySelector('.scroll-area');
+    const scrollEl = this.renderRoot?.querySelector('.container');
     const rowsEl = this.renderRoot?.querySelector('.rows');
     if (!scrollEl || !rowsEl || !this.storeA || !this.storeB || !this.fields?.length) return;
 
+    const vf = this._visibleFields;
     const total = this._entryCount();
     const firstVisible = this._scrollToEntry(scrollEl.scrollTop, scrollEl);
     const containerHeight = scrollEl.clientHeight || 500;
@@ -160,43 +208,30 @@ export class TraceDiffTable extends LitElement {
     this._renderedStart = startIdx;
     this._renderedCount = count;
 
-    if (count <= 0) {
-      rowsEl.innerHTML = '';
-      rowsEl.style.top = '0px';
-      return;
-    }
+    if (count <= 0) { rowsEl.innerHTML = ''; rowsEl.style.top = '0px'; return; }
 
     let entriesA, entriesB;
     try {
       entriesA = this.storeA.entriesRange(startIdx, count);
       entriesB = this.storeB.entriesRange(startIdx, count);
-    } catch (err) {
-      console.error('Failed to fetch entries:', err);
-      return;
-    }
+    } catch (err) { console.error(err); return; }
 
     if (this._isRemapped()) {
       const maxScroll = scrollEl.scrollHeight - scrollEl.clientHeight;
       const maxStart = total - Math.ceil(containerHeight / ROW_HEIGHT);
-      const frac = maxStart > 0 ? startIdx / maxStart : 0;
-      rowsEl.style.top = `${Math.round(frac * maxScroll)}px`;
+      rowsEl.style.top = `${Math.round((maxStart > 0 ? startIdx / maxStart : 0) * maxScroll)}px`;
     } else {
       rowsEl.style.top = `${startIdx * ROW_HEIGHT}px`;
     }
 
-    const displayFields = this.fields.filter(f => f !== 'cy');
-    const hl = this.highlightIndices;
-    const hasRom = this._hasRom();
-
-    // Batch-fetch disassembly from whichever store has the ROM
+    const hasRom = (this.storeA.hasRom?.() || this.storeB.hasRom?.()) ?? false;
     let disasmArr = null;
     if (hasRom) {
-      const disasmStore = this.storeA.hasRom?.() ? this.storeA : this.storeB;
-      try {
-        disasmArr = disasmStore.disassembleRange(startIdx, count);
-      } catch (_) { /* no disasm */ }
+      const ds = this.storeA.hasRom?.() ? this.storeA : this.storeB;
+      try { disasmArr = ds.disassembleRange(startIdx, count); } catch (_) {}
     }
 
+    const hl = this.highlightIndices;
     const parts = [];
 
     for (let i = 0; i < entriesA.length; i++) {
@@ -205,34 +240,33 @@ export class TraceDiffTable extends LitElement {
       const b = entriesB[i];
 
       let anyDiff = false;
-      for (const f of displayFields) {
+      for (const f of vf) {
         if (a[f] !== b[f]) { anyDiff = true; break; }
       }
 
-      const rowCls = hl?.has(idx) ? 'highlight' : '';
-      const rowBg = anyDiff ? 'background:rgba(248,81,73,0.06);' : '';
+      const hlBg = hl?.has(idx) ? 'background:var(--accent-subtle);' : '';
+      const diffBg = anyDiff ? 'background:rgba(248,81,73,0.06);' : '';
+      const bg = hlBg || diffBg;
 
-      parts.push(`<div data-idx="${idx}" style="display:flex;height:${ROW_HEIGHT}px;align-items:center;font-family:var(--mono);font-size:0.7rem;border-bottom:1px solid var(--bg);${rowBg}" class="${rowCls}">`);
+      parts.push(`<div data-idx="${idx}" style="display:flex;height:${ROW_HEIGHT}px;align-items:center;font-family:var(--mono);font-size:0.7rem;border-bottom:1px solid var(--bg);${bg}">`);
       parts.push(`<span style="padding:0 4px;min-width:50px;text-align:right;color:var(--text-muted)">${idx}</span>`);
 
       if (disasmArr) {
         parts.push(`<span style="padding:0 4px;min-width:100px;text-align:left;color:var(--green);white-space:nowrap">${disasmArr[i] || ''}</span>`);
       }
 
-      for (const f of displayFields) {
-        const va = displayVal(a[f]);
+      for (const f of vf) {
         const differs = a[f] !== b[f];
         const color = differs ? 'color:var(--red)' : '';
-        parts.push(`<span style="padding:0 4px;min-width:36px;text-align:right;white-space:nowrap;${color}">${va}</span>`);
+        parts.push(`<span style="padding:0 4px;min-width:36px;text-align:right;white-space:nowrap;${color}">${displayVal(a[f])}</span>`);
       }
 
       parts.push(`<span style="width:2px;min-width:2px;background:var(--border);align-self:stretch"></span>`);
 
-      for (const f of displayFields) {
-        const vb = displayVal(b[f]);
+      for (const f of vf) {
         const differs = a[f] !== b[f];
         const color = differs ? 'color:var(--yellow)' : '';
-        parts.push(`<span style="padding:0 4px;min-width:36px;text-align:right;white-space:nowrap;${color}">${vb}</span>`);
+        parts.push(`<span style="padding:0 4px;min-width:36px;text-align:right;white-space:nowrap;${color}">${displayVal(b[f])}</span>`);
       }
 
       parts.push('</div>');
@@ -248,13 +282,12 @@ export class TraceDiffTable extends LitElement {
 
   _emitHover(index) {
     this.dispatchEvent(new CustomEvent('hover-index', {
-      detail: { index },
-      bubbles: true, composed: true,
+      detail: { index }, bubbles: true, composed: true,
     }));
   }
 
   scrollToIndex(index) {
-    const scrollEl = this.renderRoot?.querySelector('.scroll-area');
+    const scrollEl = this.renderRoot?.querySelector('.container');
     if (!scrollEl) return;
     this._renderedStart = -1;
     scrollEl.scrollTop = this._entryToScroll(index, scrollEl);
