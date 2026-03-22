@@ -86,6 +86,7 @@ for adapter in $ADAPTERS; do
                 --stop-serial-count "$STOP_SERIAL_COUNT" \
                 --frames "$MAX_FRAMES" \
                 2>"$stderr_file" \
+                < /dev/null \
             | "$CLI" convert - -o "$tmp_parquet" >/dev/null 2>&1
         ) || true
 
