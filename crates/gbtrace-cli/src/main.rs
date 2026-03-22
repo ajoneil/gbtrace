@@ -653,6 +653,42 @@ fn load_trace_entries(path: &PathBuf) -> Result<(gbtrace::TraceHeader, Vec<gbtra
     Ok((header, entries))
 }
 
+/// Load trace, collapsing T-cycle traces to instruction level if needed.
+/// Also aligns to target_pc if provided.
+fn load_trace_for_diff(
+    path: &PathBuf,
+    collapse_tcycle: bool,
+    align_pc: Option<u16>,
+) -> Result<(gbtrace::TraceHeader, Vec<gbtrace::TraceEntry>), String> {
+    use gbtrace::column_store::load_column_store;
+
+    let mut store = load_column_store(path)
+        .map_err(|e| format!("Error opening {}: {e}", path.display()))?;
+
+    if collapse_tcycle && store.header().trigger == gbtrace::header::Trigger::Custom {
+        // trigger "tcycle" is stored as Custom in the enum — check the raw string
+    }
+
+    // Check trigger from header
+    let is_tcycle = matches!(store.header().trigger, gbtrace::header::Trigger::Tcycle);
+    if collapse_tcycle && is_tcycle {
+        store = store.collapse_to_instructions()
+            .map_err(|e| format!("Collapse error: {e}"))?;
+    }
+
+    if let Some(pc) = align_pc {
+        if let Ok(aligned) = store.skip_to_pc(pc) {
+            store = aligned;
+        }
+    }
+
+    let header = store.header().clone();
+    let entries: Vec<gbtrace::TraceEntry> = (0..store.entry_count())
+        .map(|i| store.to_entry(i))
+        .collect();
+    Ok((header, entries))
+}
+
 fn cmd_diff(
     path_a: &PathBuf,
     trace_b_paths: &[PathBuf],
@@ -685,8 +721,46 @@ fn cmd_diff(
 
     let differ = TraceDiffer::new(config);
 
-    // Load reference trace
-    let (header_a, entries_a) = match load_trace_entries(path_a) {
+    // Peek at all headers to detect trigger mismatches and find common start PC
+    let headers: Vec<_> = {
+        let mut h = vec![];
+        for path in std::iter::once(path_a).chain(trace_b_paths.iter()) {
+            match AnyTraceReader::open(path) {
+                Ok(r) => h.push(r.header().clone()),
+                Err(e) => { eprintln!("Error: {e}"); return 1; }
+            }
+        }
+        h
+    };
+
+    let any_tcycle = headers.iter().any(|h| matches!(h.trigger, gbtrace::header::Trigger::Tcycle));
+    let any_instruction = headers.iter().any(|h| !matches!(h.trigger, gbtrace::header::Trigger::Tcycle));
+    let needs_collapse = any_tcycle && any_instruction;
+
+    // Find common start PC by peeking first entries
+    let align_pc = if needs_collapse || skip_boot {
+        // Find the max starting PC across all traces (after potential collapse)
+        let mut start_pcs = vec![];
+        for path in std::iter::once(path_a).chain(trace_b_paths.iter()) {
+            if let Ok(r) = AnyTraceReader::open(path) {
+                if let Some(Ok(entry)) = r.into_iter().next() {
+                    if let Some(pc) = entry.get_u16("pc") {
+                        start_pcs.push(pc);
+                    }
+                }
+            }
+        }
+        if start_pcs.len() > 1 && start_pcs.iter().any(|&p| p != start_pcs[0]) {
+            Some(*start_pcs.iter().max().unwrap())
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+
+    // Load traces with auto-collapse and alignment
+    let (header_a, entries_a) = match load_trace_for_diff(path_a, needs_collapse, align_pc) {
         Ok(v) => v,
         Err(e) => { eprintln!("{e}"); return 1; }
     };
@@ -695,7 +769,7 @@ fn cmd_diff(
     if trace_b_paths.len() > 1 {
         let mut traces = vec![(header_a, entries_a)];
         for path in trace_b_paths {
-            match load_trace_entries(path) {
+            match load_trace_for_diff(path, needs_collapse, align_pc) {
                 Ok((h, e)) => traces.push((h, e)),
                 Err(e) => { eprintln!("{e}"); return 1; }
             }
@@ -718,7 +792,7 @@ fn cmd_diff(
     }
 
     // Single pair comparison
-    let (header_b, entries_b) = match load_trace_entries(&trace_b_paths[0]) {
+    let (header_b, entries_b) = match load_trace_for_diff(&trace_b_paths[0], needs_collapse, align_pc) {
         Ok(v) => v,
         Err(e) => { eprintln!("{e}"); return 1; }
     };
