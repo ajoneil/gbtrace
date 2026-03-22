@@ -413,8 +413,8 @@ int main(int argc, char *argv[]) {
     //   "tcycle"      — emit every T-cycle (every 8 phases)
     //   "instruction" — emit at instruction boundaries
 
-    static constexpr int PHASES_PER_FRAME = 70224 * 8;  // 561792 phases
-    static constexpr int PHASES_PER_TCYCLE = 8;
+    static constexpr int PHASES_PER_FRAME = 70224 * 2;  // 140448 phases (2 phases per T-cycle)
+    static constexpr int PHASES_PER_TCYCLE = 2;  // 8 phases per M-cycle, 2 phases per T-cycle
     int64_t total_phases = static_cast<int64_t>(max_frames) * PHASES_PER_FRAME;
 
     bool tcycle_mode = (profile.trigger == "tcycle");
