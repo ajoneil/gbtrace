@@ -124,6 +124,7 @@ export class AppShell extends LitElement {
     _filename: { state: true },
     _nameA: { state: true },
     _nameB: { state: true },
+    _suite: { state: true },
     _testRom: { state: true },
     _emulator: { state: true },
     _highlightIndices: { state: true },
@@ -140,6 +141,7 @@ export class AppShell extends LitElement {
     this._filename = null;
     this._nameA = '';
     this._nameB = '';
+    this._suite = null;
     this._testRom = null;
     this._emulator = null;
     this._highlightIndices = null;
@@ -186,6 +188,7 @@ export class AppShell extends LitElement {
         ></trace-header>
 
         <compare-bar
+          .suite=${this._suite}
           .testRom=${this._testRom}
           .emulator=${this._emulator}
         ></compare-bar>
@@ -277,13 +280,14 @@ export class AppShell extends LitElement {
   }
 
   _onTraceLoaded(e) {
-    const { store, filename, testRom, emulator } = e.detail;
+    const { store, filename, suite, testRom, emulator } = e.detail;
     this._store = store;
     this._storeB = null;
     this._header = store.header();
     this._filename = filename;
     this._nameA = emulator || filename;
     this._nameB = '';
+    this._suite = suite || null;
     this._testRom = testRom || null;
     this._emulator = emulator || null;
     this._highlightIndices = null;
@@ -343,6 +347,7 @@ export class AppShell extends LitElement {
     this._filename = null;
     this._nameA = '';
     this._nameB = '';
+    this._suite = null;
     this._testRom = null;
     this._emulator = null;
     this._highlightIndices = null;

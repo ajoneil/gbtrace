@@ -4,6 +4,7 @@ import { createTraceStore } from '../lib/wasm-bridge.js';
 const TEST_SUITES = [
   {
     name: 'Blargg CPU Instructions',
+    base: 'tests/blargg',
     profile: 'tests/blargg/blargg_cpu.toml',
     tests: [
       { name: '01-special', rom: 'cpu_instrs/individual/01-special.gb' },
@@ -19,17 +20,40 @@ const TEST_SUITES = [
       { name: '11-op a,(hl)', rom: 'cpu_instrs/individual/11-op a,(hl).gb' },
     ],
   },
+  {
+    name: 'gbmicrotest',
+    base: 'tests/gbmicrotest',
+    profile: 'tests/gbmicrotest/gbmicrotest.toml',
+    tests: null, // loaded dynamically from manifest
+    categories: [
+      { name: 'poweron', filter: 'poweron_' },
+      { name: 'timer', filter: 'timer_' },
+      { name: 'ppu', filter: 'ppu_' },
+      { name: 'oam', filter: 'oam_' },
+      { name: 'dma', filter: 'dma_' },
+      { name: 'lcd', filter: 'lcdon_' },
+      { name: 'vram', filter: 'vram_' },
+      { name: 'sprite', filter: 'sprite' },
+      { name: 'window', filter: 'win' },
+      { name: 'interrupt', filter: 'int_' },
+      { name: 'line', filter: 'line_' },
+    ],
+  },
 ];
 
 const EMULATORS = ['gambatte', 'sameboy', 'mgba'];
 
-function traceUrl(rom, emulator) {
+function traceUrl(suite, rom, emulator) {
   const base = rom.replace('.gb', '');
-  return `tests/blargg/${base}_${emulator}.gbtrace.parquet`;
+  return `${suite.base}/${base}_${emulator}.gbtrace.parquet`;
+}
+
+function romUrl(suite, rom) {
+  return `${suite.base}/${rom}`;
 }
 
 // Export for use by the compare bar
-export { TEST_SUITES, EMULATORS, traceUrl };
+export { TEST_SUITES, EMULATORS, traceUrl, romUrl };
 
 export class TestPicker extends LitElement {
   static styles = css`
@@ -122,50 +146,110 @@ export class TestPicker extends LitElement {
   `;
 
   static properties = {
+    _selectedSuite: { state: true },
     _selectedTest: { state: true },
+    _microTests: { state: true },
+    _microCategory: { state: true },
     _loading: { state: true },
     _error: { state: true },
   };
 
   constructor() {
     super();
+    this._selectedSuite = 0;
     this._selectedTest = 0;
+    this._microTests = null;
+    this._microCategory = '';
     this._loading = null;
     this._error = null;
+    this._loadMicroManifest();
+  }
+
+  async _loadMicroManifest() {
+    try {
+      const resp = await fetch('tests/gbmicrotest/manifest.json');
+      if (resp.ok) {
+        this._microTests = await resp.json();
+      }
+    } catch (_) { /* optional */ }
   }
 
   render() {
-    const suite = TEST_SUITES[0];
-    const test = suite.tests[this._selectedTest];
+    const suite = TEST_SUITES[this._selectedSuite];
+    const tests = this._getTests(suite);
+    const test = tests?.[this._selectedTest];
 
     return html`
       <div class="picker">
         <h3>Or load a test trace</h3>
-        <div class="suite-name">${suite.name}</div>
         <div class="row">
-          <select @change=${this._onTestChange}>
-            ${suite.tests.map((t, i) => html`
-              <option value=${i} ?selected=${i === this._selectedTest}>${t.name}</option>
+          <select @change=${this._onSuiteChange}>
+            ${TEST_SUITES.map((s, i) => html`
+              <option value=${i} ?selected=${i === this._selectedSuite}>${s.name}</option>
             `)}
           </select>
         </div>
-        <div class="emu-btns">
-          ${EMULATORS.map(emu => html`
-            <button
-              class="emu-btn"
-              ?disabled=${this._loading !== null}
-              @click=${() => this._load(test, emu)}
-            >${emu}</button>
-          `)}
-        </div>
-        <div class="meta">
-          <a href="${suite.profile}" download>profile (.toml)</a>
-          <a href="tests/blargg/${test.rom}" download>ROM (.gb)</a>
-        </div>
+        ${suite.categories ? html`
+          <div class="row" style="margin-top:4px">
+            <select @change=${this._onCategoryChange}>
+              <option value="">all (${this._microTests?.length || 0})</option>
+              ${suite.categories.map(c => html`
+                <option value=${c.filter}>${c.name}</option>
+              `)}
+            </select>
+          </div>
+        ` : ''}
+        ${tests?.length ? html`
+          <div class="row" style="margin-top:4px">
+            <select @change=${this._onTestChange}>
+              ${tests.map((t, i) => html`
+                <option value=${i} ?selected=${i === this._selectedTest}>${t.name}</option>
+              `)}
+            </select>
+          </div>
+        ` : ''}
+        ${test ? html`
+          <div class="emu-btns">
+            ${EMULATORS.map(emu => html`
+              <button
+                class="emu-btn"
+                ?disabled=${this._loading !== null}
+                @click=${() => this._load(suite, test, emu)}
+              >${emu}</button>
+            `)}
+          </div>
+          <div class="meta">
+            <a href="${suite.profile}" download>profile (.toml)</a>
+            <a href="${romUrl(suite, test.rom)}" download>ROM (.gb)</a>
+          </div>
+        ` : ''}
         ${this._loading ? html`<p class="status loading">Loading ${this._loading}...</p>` : ''}
         ${this._error ? html`<p class="status error">${this._error}</p>` : ''}
       </div>
     `;
+  }
+
+  _getTests(suite) {
+    if (suite.tests) return suite.tests;
+    if (!this._microTests) return [];
+    let names = this._microTests;
+    if (this._microCategory) {
+      names = names.filter(n => n.startsWith(this._microCategory));
+    }
+    return names.map(n => ({ name: n, rom: `${n}.gb` }));
+  }
+
+  _onSuiteChange(e) {
+    this._selectedSuite = parseInt(e.target.value, 10);
+    this._selectedTest = 0;
+    this._microCategory = '';
+    this._error = null;
+  }
+
+  _onCategoryChange(e) {
+    this._microCategory = e.target.value;
+    this._selectedTest = 0;
+    this._error = null;
   }
 
   _onTestChange(e) {
@@ -173,8 +257,8 @@ export class TestPicker extends LitElement {
     this._error = null;
   }
 
-  async _load(test, emulator) {
-    const url = traceUrl(test.rom, emulator);
+  async _load(suite, test, emulator) {
+    const url = traceUrl(suite, test.rom, emulator);
     const filename = url.split('/').pop();
     this._loading = filename;
     this._error = null;
@@ -188,7 +272,8 @@ export class TestPicker extends LitElement {
 
       // Load the ROM for disassembly
       try {
-        const romResp = await fetch(`tests/blargg/${test.rom}`);
+        const ru = romUrl(suite, test.rom);
+        const romResp = await fetch(ru);
         if (romResp.ok) {
           const romBuf = await romResp.arrayBuffer();
           store.loadRom(new Uint8Array(romBuf));
@@ -198,6 +283,7 @@ export class TestPicker extends LitElement {
       this.dispatchEvent(new CustomEvent('trace-loaded', {
         detail: {
           store, filename,
+          suite,
           testRom: test.rom,
           emulator,
         },

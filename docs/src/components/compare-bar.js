@@ -1,6 +1,6 @@
 import { LitElement, html, css } from 'lit';
 import { createTraceStore } from '../lib/wasm-bridge.js';
-import { EMULATORS, traceUrl } from './test-picker.js';
+import { EMULATORS, traceUrl, romUrl } from './test-picker.js';
 
 export class CompareBar extends LitElement {
   static styles = css`
@@ -67,6 +67,7 @@ export class CompareBar extends LitElement {
   `;
 
   static properties = {
+    suite: { type: Object },
     testRom: { type: String },
     emulator: { type: String },
     _loading: { state: true },
@@ -75,6 +76,7 @@ export class CompareBar extends LitElement {
 
   constructor() {
     super();
+    this.suite = null;
     this.testRom = null;
     this.emulator = null;
     this._loading = null;
@@ -134,8 +136,8 @@ export class CompareBar extends LitElement {
   }
 
   async _loadEmulator(emu) {
-    if (!this.testRom) return;
-    const url = traceUrl(this.testRom, emu);
+    if (!this.testRom || !this.suite) return;
+    const url = traceUrl(this.suite, this.testRom, emu);
     this._loading = emu;
     this._error = null;
 
@@ -145,10 +147,9 @@ export class CompareBar extends LitElement {
       const buffer = await resp.arrayBuffer();
       const store = await createTraceStore(new Uint8Array(buffer));
 
-      // Load ROM for disassembly if available
-      if (this.testRom) {
+      if (this.testRom && this.suite) {
         try {
-          const romResp = await fetch(`tests/blargg/${this.testRom}`);
+          const romResp = await fetch(romUrl(this.suite, this.testRom));
           if (romResp.ok) {
             store.loadRom(new Uint8Array(await romResp.arrayBuffer()));
           }
