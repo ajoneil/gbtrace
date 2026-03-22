@@ -1,11 +1,22 @@
 /** Known 16-bit fields — always display as 4 hex digits. */
 const FIELDS_16BIT = new Set(['pc', 'sp']);
 
+/** Format the F (flags) register: hex value + flag letters. */
+function formatFlags(v) {
+  const hex = v.toString(16).padStart(2, '0');
+  const z = (v & 0x80) ? 'Z' : '·';
+  const n = (v & 0x40) ? 'N' : '·';
+  const h = (v & 0x20) ? 'H' : '·';
+  const c = (v & 0x10) ? 'C' : '·';
+  return `${hex} ${z}${n}${h}${c}`;
+}
+
 /** Format a value as zero-padded lowercase hex for display.
  *  If fieldName is provided, uses field-aware width (e.g. pc always 4 digits). */
 export function displayVal(v, fieldName) {
   if (v === undefined || v === null) return '';
   if (typeof v === 'number') {
+    if (fieldName === 'f') return formatFlags(v);
     if (fieldName && FIELDS_16BIT.has(fieldName)) {
       return v.toString(16).padStart(4, '0');
     }
