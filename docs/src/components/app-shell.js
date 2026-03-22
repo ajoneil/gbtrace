@@ -24,19 +24,28 @@ export class AppShell extends LitElement {
     header {
       display: flex;
       align-items: center;
-      justify-content: space-between;
-      margin-bottom: 24px;
-      padding-bottom: 16px;
+      gap: 12px;
+      margin-bottom: 12px;
+      padding-bottom: 8px;
       border-bottom: 1px solid var(--border);
     }
     header h1 {
-      font-size: 1.3rem;
+      font-size: 1rem;
       font-weight: 600;
+      cursor: pointer;
     }
     header h1 span {
       color: var(--text-muted);
       font-weight: 400;
-      font-size: 0.9rem;
+      font-size: 0.8rem;
+    }
+    .wip-badge {
+      font-size: 0.65rem;
+      color: var(--yellow);
+      border: 1px solid var(--yellow);
+      border-radius: 4px;
+      padding: 1px 6px;
+      white-space: nowrap;
     }
     test-picker {
       display: flex;
@@ -139,7 +148,8 @@ export class AppShell extends LitElement {
         @hidden-fields-changed=${this._onHiddenFieldsChanged}
       >
         <header>
-          <h1 style="cursor:pointer" @click=${this._reset}>gbtrace <span>Game Boy Trace Viewer</span></h1>
+          <h1 @click=${this._reset}>gbtrace <span>Game Boy Trace Viewer</span></h1>
+          <span class="wip-badge">under construction</span>
         </header>
 
         ${this._suite
