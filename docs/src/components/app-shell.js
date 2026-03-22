@@ -355,23 +355,42 @@ export class AppShell extends LitElement {
       }
     }
 
-    // Align traces by first common PC value
+    // Align traces by first common PC value.
+    // Find the first PC in trace B that also exists in the first few entries
+    // of trace A (or vice versa), then align both to that PC.
     try {
       const pcA = this._store.entry(0)?.pc;
       const pcB = store.entry(0)?.pc;
       if (pcA != null && pcB != null && pcA !== pcB) {
-        // Find the later start PC and align the other trace to it
-        const targetPC = Math.max(pcA, pcB);
-        if (pcA < targetPC) {
-          const aligned = this._store.alignToPC(targetPC);
-          this._store.free();
-          this._store = aligned;
-          this._header = aligned.header();
+        // Try aligning A to B's starting PC, or B to A's starting PC
+        // Whichever start PC appears first in the other trace wins
+        let targetPC = null;
+        const countA = Math.min(this._store.entryCount(), 100);
+        const countB = Math.min(store.entryCount(), 100);
+
+        // Check if B's start PC exists in A's first entries
+        for (let i = 0; i < countA; i++) {
+          if (this._store.entry(i)?.pc === pcB) { targetPC = pcB; break; }
         }
-        if (pcB < targetPC) {
-          const aligned = store.alignToPC(targetPC);
-          store.free();
-          store = aligned;
+        // If not, check if A's start PC exists in B's first entries
+        if (targetPC == null) {
+          for (let i = 0; i < countB; i++) {
+            if (store.entry(i)?.pc === pcA) { targetPC = pcA; break; }
+          }
+        }
+
+        if (targetPC != null) {
+          if (pcA !== targetPC) {
+            const aligned = this._store.alignToPC(targetPC);
+            this._store.free();
+            this._store = aligned;
+            this._header = aligned.header();
+          }
+          if (pcB !== targetPC) {
+            const aligned = store.alignToPC(targetPC);
+            store.free();
+            store = aligned;
+          }
         }
       }
     } catch (err) {
