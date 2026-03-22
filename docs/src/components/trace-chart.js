@@ -1,7 +1,8 @@
 import { LitElement, html, css } from 'lit';
 import { displayVal } from '../lib/format.js';
 
-const CHART_HEIGHT = 160;
+const CHART_HEIGHT = 174;
+const DIFF_LANE_HEIGHT = 6;
 const PADDING = { top: 20, right: 12, bottom: 24, left: 50 };
 
 export class TraceChart extends LitElement {
@@ -181,8 +182,10 @@ export class TraceChart extends LitElement {
 
     const w = cssWidth;
     const h = CHART_HEIGHT;
+    const hasDiffLane = !!this.storeB;
+    const bottomPad = PADDING.bottom + (hasDiffLane ? DIFF_LANE_HEIGHT + 6 : 0);
     const plotW = w - PADDING.left - PADDING.right;
-    const plotH = h - PADDING.top - PADDING.bottom;
+    const plotH = h - PADDING.top - bottomPad;
     ctx.clearRect(0, 0, w, h);
 
     const start = this._viewStart;
@@ -241,62 +244,70 @@ export class TraceChart extends LitElement {
 
     if (summaryB) {
       // --- Dual trace mode ---
-      // Draw diff background: red tint where values differ
-      for (let i = 0; i < buckets; i++) {
-        const midA = (summaryA[i * 2] + summaryA[i * 2 + 1]) / 2;
-        const midB = (summaryB[i * 2] + summaryB[i * 2 + 1]) / 2;
-        if (midA !== midB) {
-          const x = toX(i);
-          const bw = toX(i + 1) - x || 1;
-          ctx.fillStyle = 'rgba(248,81,73,0.1)';
-          ctx.fillRect(x, PADDING.top, bw, plotH);
-        }
-      }
-
       // Trace A: blue
       this._drawTrace(ctx, summaryA, buckets, toX, toY, 'rgba(88,166,255,0.15)', '#58a6ff');
       // Trace B: yellow
       this._drawTrace(ctx, summaryB, buckets, toX, toY, 'rgba(210,153,34,0.15)', '#d29922');
+
+      // Diff lane: red bar below the plot for each bucket where values differ
+      const laneY = PADDING.top + plotH + 4;
+      for (let i = 0; i < buckets; i++) {
+        const mnA = summaryA[i * 2], mxA = summaryA[i * 2 + 1];
+        const mnB = summaryB[i * 2], mxB = summaryB[i * 2 + 1];
+        if (mnA !== mnB || mxA !== mxB) {
+          const x = toX(i);
+          const bw = Math.max(toX(i + 1) - x, 1);
+          ctx.fillStyle = '#f85149';
+          ctx.fillRect(x, laneY, bw, DIFF_LANE_HEIGHT);
+        }
+      }
     } else {
       // --- Single trace mode ---
       this._drawTrace(ctx, summaryA, buckets, toX, toY, 'rgba(88,166,255,0.2)', '#58a6ff');
     }
 
-    // Cursor line
+    // Cursor line — draw with contrast backing so it's visible on busy graphs
     if (this.cursorIndex != null && this.cursorIndex >= start && this.cursorIndex < end) {
       const frac = (this.cursorIndex - start) / (end - start);
       const cx = PADDING.left + frac * plotW;
-      ctx.strokeStyle = '#f0883e';
-      ctx.lineWidth = 1;
-      ctx.setLineDash([4, 3]);
+
+      // Dark backing for contrast
+      ctx.strokeStyle = 'rgba(13,17,23,0.7)';
+      ctx.lineWidth = 5;
       ctx.beginPath();
       ctx.moveTo(cx, PADDING.top);
       ctx.lineTo(cx, PADDING.top + plotH);
       ctx.stroke();
-      ctx.setLineDash([]);
 
-      const valA = this.store.entry(this.cursorIndex);
-      if (valA) {
-        const yv = valA[this.field];
-        if (yv != null && typeof yv === 'number') {
-          ctx.fillStyle = '#58a6ff';
-          ctx.beginPath();
-          ctx.arc(cx, toY(yv), 3, 0, Math.PI * 2);
-          ctx.fill();
-        }
-      }
-      if (this.storeB) {
-        const valB = this.storeB.entry(this.cursorIndex);
-        if (valB) {
-          const yv = valB[this.field];
-          if (yv != null && typeof yv === 'number') {
-            ctx.fillStyle = '#d29922';
-            ctx.beginPath();
-            ctx.arc(cx, toY(yv), 3, 0, Math.PI * 2);
-            ctx.fill();
-          }
-        }
-      }
+      // Bright orange line on top
+      ctx.strokeStyle = '#f0883e';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(cx, PADDING.top);
+      ctx.lineTo(cx, PADDING.top + plotH);
+      ctx.stroke();
+
+      // Value dots with outline
+      const drawDot = (store, color) => {
+        const val = store.entry(this.cursorIndex);
+        if (!val) return;
+        const yv = val[this.field];
+        if (yv == null || typeof yv !== 'number') return;
+        const cy = toY(yv);
+        // Dark outline
+        ctx.fillStyle = 'rgba(13,17,23,0.8)';
+        ctx.beginPath();
+        ctx.arc(cx, cy, 5, 0, Math.PI * 2);
+        ctx.fill();
+        // Colored dot
+        ctx.fillStyle = color;
+        ctx.beginPath();
+        ctx.arc(cx, cy, 3, 0, Math.PI * 2);
+        ctx.fill();
+      };
+
+      drawDot(this.store, '#58a6ff');
+      if (this.storeB) drawDot(this.storeB, '#d29922');
     }
 
     // Y axis
@@ -324,7 +335,7 @@ export class TraceChart extends LitElement {
     for (let i = 0; i <= xTicks; i++) {
       const idx = start + Math.round((i / xTicks) * (end - start));
       const x = PADDING.left + (i / xTicks) * plotW;
-      ctx.fillText(idx.toLocaleString(), x, h - PADDING.bottom + 6);
+      ctx.fillText(idx.toLocaleString(), x, h - bottomPad + (hasDiffLane ? DIFF_LANE_HEIGHT + 10 : 6));
     }
 
     // Legend for dual mode
