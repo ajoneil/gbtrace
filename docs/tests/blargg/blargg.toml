@@ -1,0 +1,11 @@
+[profile]
+name = "blargg"
+description = "CPU + PPU + interrupt + timer state for Blargg test suite."
+trigger = "instruction"
+
+[fields]
+cpu = ["pc", "sp", "a", "f", "b", "c", "d", "e", "h", "l"]
+ppu = ["lcdc", "stat", "ly"]
+interrupt = ["if_", "ie", "ime"]
+timer = ["div", "tima", "tma", "tac"]
+serial = ["sb", "sc"]

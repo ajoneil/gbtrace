@@ -13,7 +13,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 BLARGG_DIR="$PROJECT_DIR/docs/tests/blargg"
-PROFILE="$BLARGG_DIR/blargg_cpu.toml"
+PROFILE="$BLARGG_DIR/blargg.toml"
 CLI="$PROJECT_DIR/target/release/gbtrace-cli"
 
 # Serial stop: 4th newline = after "Passed\n" or "Failed\n"
