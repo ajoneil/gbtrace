@@ -2,6 +2,7 @@ import { LitElement, html, css } from 'lit';
 import { displayVal, displayFlagsDiff } from '../lib/format.js';
 
 const ROW_HEIGHT = 24;
+const HEADER_HEIGHT = 28;
 const OVERSCAN = 10;
 const MAX_SPACER = 10_000_000;
 const COL_WIDTH = 48;
@@ -251,7 +252,7 @@ export class TraceDiffTable extends LitElement {
   }
 
   _spacerHeight() {
-    return Math.min(this._entryCount() * ROW_HEIGHT, MAX_SPACER);
+    return Math.min(this._entryCount() * ROW_HEIGHT + HEADER_HEIGHT, MAX_SPACER);
   }
 
   _isRemapped() {
@@ -259,7 +260,8 @@ export class TraceDiffTable extends LitElement {
   }
 
   _scrollToEntry(scrollTop, scrollEl) {
-    if (!this._isRemapped()) return Math.floor(scrollTop / ROW_HEIGHT);
+    const adjusted = Math.max(0, scrollTop - HEADER_HEIGHT);
+    if (!this._isRemapped()) return Math.floor(adjusted / ROW_HEIGHT);
     const maxScroll = scrollEl.scrollHeight - scrollEl.clientHeight;
     if (maxScroll <= 0) return 0;
     const maxStart = this._entryCount() - Math.ceil(scrollEl.clientHeight / ROW_HEIGHT);
@@ -267,7 +269,7 @@ export class TraceDiffTable extends LitElement {
   }
 
   _entryToScroll(index, scrollEl) {
-    if (!this._isRemapped()) return index * ROW_HEIGHT;
+    if (!this._isRemapped()) return index * ROW_HEIGHT + HEADER_HEIGHT;
     const maxScroll = scrollEl.scrollHeight - scrollEl.clientHeight;
     if (maxScroll <= 0) return 0;
     const maxStart = this._entryCount() - Math.ceil(scrollEl.clientHeight / ROW_HEIGHT);
@@ -296,7 +298,7 @@ export class TraceDiffTable extends LitElement {
 
     if (count <= 0) {
       rowsA.innerHTML = ''; rowsB.innerHTML = ''; rowsShared.innerHTML = '';
-      rowsA.style.top = rowsB.style.top = rowsShared.style.top = '0px';
+      rowsA.style.top = rowsB.style.top = rowsShared.style.top = `${HEADER_HEIGHT}px`;
       return;
     }
 
@@ -310,9 +312,9 @@ export class TraceDiffTable extends LitElement {
     if (this._isRemapped()) {
       const maxScroll = panelA.scrollHeight - panelA.clientHeight;
       const maxStart = total - Math.ceil(containerHeight / ROW_HEIGHT);
-      top = Math.round((maxStart > 0 ? startIdx / maxStart : 0) * maxScroll);
+      top = Math.round((maxStart > 0 ? startIdx / maxStart : 0) * maxScroll) + HEADER_HEIGHT;
     } else {
-      top = startIdx * ROW_HEIGHT;
+      top = startIdx * ROW_HEIGHT + HEADER_HEIGHT;
     }
     rowsA.style.top = `${top}px`;
     rowsB.style.top = `${top}px`;
