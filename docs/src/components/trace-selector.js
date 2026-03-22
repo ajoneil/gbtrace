@@ -22,15 +22,9 @@ export class TraceSelector extends LitElement {
       color: var(--text);
       margin-right: 4px;
     }
-    .sep {
-      color: var(--border);
-      margin: 0 2px;
-    }
-    .label {
-      font-size: 0.7rem;
-      color: var(--text-muted);
-    }
-    .emu-btn {
+    .sep { color: var(--border); margin: 0 2px; }
+    .label { font-size: 0.7rem; color: var(--text-muted); }
+    .trace-btn {
       padding: 4px 10px;
       background: var(--bg);
       border: 1px solid var(--border);
@@ -40,29 +34,30 @@ export class TraceSelector extends LitElement {
       font-size: 0.78rem;
       font-family: inherit;
       transition: all 0.15s;
+      max-width: 140px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
     }
-    .emu-btn:hover {
+    .trace-btn:hover {
       border-color: var(--accent);
       color: var(--accent);
     }
-    .emu-btn.active {
+    .trace-btn.active {
       background: rgba(88,166,255,0.1);
       border-color: #58a6ff;
       color: #58a6ff;
       font-weight: 600;
     }
-    .emu-btn.compare {
+    .trace-btn.compare {
       background: rgba(210,153,34,0.1);
       border-color: #d29922;
       color: #d29922;
       font-weight: 600;
     }
-    .emu-btn:disabled {
-      opacity: 0.5;
-      cursor: not-allowed;
-    }
-    .upload-btn {
-      padding: 4px 10px;
+    .trace-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+    .add-btn {
+      padding: 4px 8px;
       background: var(--bg);
       border: 1px solid var(--border);
       border-radius: 6px;
@@ -72,7 +67,7 @@ export class TraceSelector extends LitElement {
       font-family: inherit;
       transition: all 0.15s;
     }
-    .upload-btn:hover {
+    .add-btn:hover {
       border-color: var(--accent);
       color: var(--accent);
     }
@@ -92,9 +87,7 @@ export class TraceSelector extends LitElement {
       color: var(--accent);
     }
     input[type="file"] { display: none; }
-    .status {
-      font-size: 0.75rem;
-    }
+    .status { font-size: 0.75rem; }
     .status.loading { color: var(--accent); }
     .status.error { color: var(--red); }
   `;
@@ -105,6 +98,7 @@ export class TraceSelector extends LitElement {
     testName: { type: String },
     activeA: { type: String },
     activeB: { type: String },
+    _uploads: { state: true },
     _loading: { state: true },
     _error: { state: true },
   };
@@ -116,60 +110,64 @@ export class TraceSelector extends LitElement {
     this.testName = '';
     this.activeA = null;
     this.activeB = null;
+    this._uploads = []; // { name, store }
     this._loading = null;
     this._error = null;
   }
 
+  /** All available trace names (library emulators + uploads). */
+  get _allTraces() {
+    const lib = this.suite ? EMULATORS.map(e => ({ name: e, type: 'lib' })) : [];
+    const ups = this._uploads.map(u => ({ name: u.name, type: 'upload' }));
+    return [...lib, ...ups];
+  }
+
   render() {
-    const others = this.suite
-      ? EMULATORS.filter(e => e !== this.activeA)
-      : [];
+    const traces = this._allTraces;
+    const hasActive = !!this.activeA;
 
     return html`
       <div class="bar">
         <span class="rom-name">${this.testName || this.testRom || 'trace'}</span>
         <span class="sep">|</span>
 
-        ${this.suite ? EMULATORS.map(emu => {
-          const isA = this.activeA === emu;
-          const isB = this.activeB === emu;
-          const cls = isA ? 'emu-btn active' : isB ? 'emu-btn compare' : 'emu-btn';
+        ${traces.map(t => {
+          const isA = this.activeA === t.name;
+          const isB = this.activeB === t.name;
+          const cls = isA ? 'trace-btn active' : isB ? 'trace-btn compare' : 'trace-btn';
           return html`
             <button
               class="${cls}"
               ?disabled=${this._loading !== null}
-              @click=${() => this._onEmuClick(emu)}
-            >${emu}</button>
+              @click=${() => this._onTraceClick(t.name)}
+              title=${t.name}
+            >${t.name}</button>
           `;
-        }) : ''}
-        <button
-          class="upload-btn"
-          ?disabled=${this._loading !== null}
-          @click=${() => this._clickUpload(false)}
-        >upload</button>
+        })}
 
-        ${this.activeA ? html`
+        <button
+          class="add-btn"
+          ?disabled=${this._loading !== null}
+          @click=${this._clickUpload}
+          title="upload a trace file"
+        >+ upload</button>
+        <input type="file" accept=".gbtrace,.gz,.parquet" @change=${this._onFileChange}>
+
+        ${hasActive ? html`
           <span class="sep">|</span>
           <span class="label">compare</span>
-          ${others.map(emu => {
-            const isB = this.activeB === emu;
+          ${traces.filter(t => t.name !== this.activeA).map(t => {
+            const isB = this.activeB === t.name;
             return html`
               <button
-                class="emu-btn ${isB ? 'compare' : ''}"
+                class="trace-btn ${isB ? 'compare' : ''}"
                 ?disabled=${this._loading !== null}
-                @click=${() => this._onCompareClick(emu)}
-              >${emu}</button>
+                @click=${() => this._onCompareClick(t.name)}
+                title=${t.name}
+              >${t.name}</button>
             `;
           })}
-          <button
-            class="upload-btn"
-            ?disabled=${this._loading !== null}
-            @click=${() => this._clickUpload(true)}
-          >upload</button>
         ` : ''}
-
-        <input type="file" id="upload-main" accept=".gbtrace,.gz,.parquet" @change=${(e) => this._onFileChange(e, false)}>
-        <input type="file" id="upload-compare" accept=".gbtrace,.gz,.parquet" @change=${(e) => this._onFileChange(e, true)}>
 
         ${this._loading ? html`<span class="status loading">loading ${this._loading}...</span>` : ''}
         ${this._error ? html`<span class="status error">${this._error}</span>` : ''}
@@ -179,27 +177,52 @@ export class TraceSelector extends LitElement {
     `;
   }
 
-  _onEmuClick(emu) {
-    // Clicking the compare trace switches it to single view
-    if (this.activeB === emu) {
-      this._loadEmu(emu, 'trace-selected');
-      return;
-    }
-    // Clicking any emulator (including current A) loads as single view
-    if (this.activeA === emu) return; // already active
-    this._loadEmu(emu, 'trace-selected');
+  _onTraceClick(name) {
+    if (this.activeA === name) return;
+    // Clicking any trace loads it as primary (single view)
+    this._activateTrace(name, 'trace-selected');
   }
 
-  _onCompareClick(emu) {
-    // Clicking active B deselects it
-    if (this.activeB === emu) {
+  _onCompareClick(name) {
+    if (this.activeB === name) {
+      // Clicking active B deselects it
       this.dispatchEvent(new CustomEvent('trace-deselect-b', {
         bubbles: true, composed: true,
       }));
       return;
     }
-    // Load as comparison
-    this._loadEmu(emu, 'trace-compare');
+    this._activateTrace(name, 'trace-compare');
+  }
+
+  async _activateTrace(name, eventName) {
+    // Check if it's an already-loaded upload
+    const upload = this._uploads.find(u => u.name === name);
+    if (upload) {
+      // Re-create store from saved bytes (stores can only be used once)
+      this._loading = name;
+      this._error = null;
+      try {
+        const store = await createTraceStore(new Uint8Array(upload.bytes));
+        if (this.suite && this.testRom) {
+          try {
+            const rResp = await fetch(romUrl(this.suite, this.testRom));
+            if (rResp.ok) store.loadRom(new Uint8Array(await rResp.arrayBuffer()));
+          } catch (_) {}
+        }
+        this.dispatchEvent(new CustomEvent(eventName, {
+          detail: { store, name },
+          bubbles: true, composed: true,
+        }));
+      } catch (err) {
+        this._error = `${err.message || err}`;
+      } finally {
+        this._loading = null;
+      }
+      return;
+    }
+
+    // Library emulator
+    await this._loadEmu(name, eventName);
   }
 
   async _loadEmu(emu, eventName) {
@@ -229,22 +252,27 @@ export class TraceSelector extends LitElement {
     }
   }
 
-  _clickUpload(asCompare) {
-    const id = asCompare ? '#upload-compare' : '#upload-main';
-    this.renderRoot.querySelector(id).click();
+  _clickUpload() {
+    this.renderRoot.querySelector('input[type="file"]').click();
   }
 
-  async _onFileChange(e, asCompare) {
+  async _onFileChange(e) {
     const file = e.target.files?.[0];
     if (!file) return;
+
     this._loading = file.name;
     this._error = null;
 
     try {
-      const store = await createTraceStore(new Uint8Array(await file.arrayBuffer()));
-      const eventName = asCompare ? 'trace-compare' : 'trace-selected';
-      this.dispatchEvent(new CustomEvent(eventName, {
-        detail: { store, name: file.name },
+      const bytes = await file.arrayBuffer();
+      const store = await createTraceStore(new Uint8Array(bytes));
+
+      // Save bytes so we can re-create the store when switching
+      const name = file.name;
+      this._uploads = [...this._uploads, { name, bytes: new Uint8Array(bytes) }];
+
+      this.dispatchEvent(new CustomEvent('trace-selected', {
+        detail: { store, name },
         bubbles: true, composed: true,
       }));
     } catch (err) {
