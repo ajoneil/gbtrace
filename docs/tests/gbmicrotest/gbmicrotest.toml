@@ -1,0 +1,16 @@
+[profile]
+name = "gbmicrotest"
+description = "Full CPU + PPU + timer + interrupt state for gbmicrotest cycle-accuracy tests."
+trigger = "instruction"
+
+[fields]
+cpu = ["pc", "sp", "a", "f", "b", "c", "d", "e", "h", "l", "op"]
+ppu = ["lcdc", "stat", "ly", "lyc", "scy", "scx"]
+interrupt = ["if_", "ie", "ime"]
+timer = ["div", "tima", "tma", "tac"]
+
+[fields.memory]
+# gbmicrotest result addresses
+test_result = "FF80"
+test_expect = "FF81"
+test_pass   = "FF82"
