@@ -53,8 +53,15 @@ $(RULES_MK): scripts/gen-rules.py
 
 # ── Top-level targets ────────────────────────────────────────────────
 
+# Screenshot test reference files (.pix)
+DMG_ACID2_REF := $(BUILD_DIR)/references/dmg-acid2.pix
+
+$(DMG_ACID2_REF): test-suites/dmg-acid2/reference.png scripts/png-to-pix.py
+	@mkdir -p $(dir $@)
+	@python3 scripts/png-to-pix.py $< $@
+
 .PHONY: all adapters cli wasm traces traces-gbmicrotest traces-blargg \
-        manifests site serve clean
+        traces-dmg-acid2 manifests site serve clean
 
 all: site
 
@@ -62,7 +69,7 @@ adapters: $(ADAPTER_BINS)
 
 cli: $(CLI)
 
-traces: traces-gbmicrotest traces-blargg
+traces: traces-gbmicrotest traces-blargg traces-dmg-acid2
 
 traces-gbmicrotest: $(RULES_MK) $(GBMICROTEST_STAMPS)
 	@echo "Generating gbmicrotest manifest..."
@@ -74,6 +81,29 @@ traces-blargg: $(RULES_MK) $(BLARGG_STAMPS)
 	@python3 scripts/manifest.py "$(BLARGG_TRACE_DIR)" "test-suites/blargg"
 	@echo "=== blargg complete ==="
 
+DMG_ACID2_TRACE_DIR := $(BUILD_DIR)/traces/dmg-acid2
+DMG_ACID2_ROM := test-suites/dmg-acid2/dmg-acid2.gb
+DMG_ACID2_PROFILE := test-suites/dmg-acid2/dmg-acid2.toml
+
+traces-dmg-acid2: $(DMG_ACID2_REF) | $(CLI)
+	@echo "=== dmg-acid2 ==="
+	@mkdir -p $(DMG_ACID2_TRACE_DIR)
+	@for emu in $(subst $(comma), ,$(EMUS)); do \
+		if [ -x "adapters/$$emu/gbtrace-$$emu" ]; then \
+			bash scripts/trace-screenshot.sh \
+				"adapters/$$emu/gbtrace-$$emu" \
+				"$(DMG_ACID2_ROM)" \
+				"$(DMG_ACID2_PROFILE)" \
+				"$(DMG_ACID2_REF)" \
+				"$(DMG_ACID2_TRACE_DIR)" \
+				200 || true; \
+		fi; \
+	done
+	@python3 scripts/manifest.py "$(DMG_ACID2_TRACE_DIR)" "test-suites/dmg-acid2"
+	@echo "=== dmg-acid2 complete ==="
+
+comma := ,
+
 site: wasm traces
 	@echo "Assembling site in $(BUILD_DIR)/site..."
 	@rm -rf $(BUILD_DIR)/site
@@ -83,6 +113,7 @@ site: wasm traces
 	@cp web/pkg/gbtrace_wasm.js web/pkg/gbtrace_wasm_bg.wasm $(BUILD_DIR)/site/pkg/
 	@cp -r $(GBMICROTEST_TRACE_DIR) $(BUILD_DIR)/site/tests/gbmicrotest
 	@cp -r $(BLARGG_TRACE_DIR) $(BUILD_DIR)/site/tests/blargg
+	@if [ -d "$(DMG_ACID2_TRACE_DIR)" ]; then cp -r $(DMG_ACID2_TRACE_DIR) $(BUILD_DIR)/site/tests/dmg-acid2; fi
 	@# Copy ROMs so the viewer can load them for disassembly
 	@find test-suites/gbmicrotest -name '*.gb' -exec cp {} $(BUILD_DIR)/site/tests/gbmicrotest/ \;
 	@cd test-suites/blargg && find . -name '*.gb' -exec sh -c 'mkdir -p "$(BUILD_DIR)/site/tests/blargg/$$(dirname "{}")" && cp "{}" "$(BUILD_DIR)/site/tests/blargg/{}"' \;
