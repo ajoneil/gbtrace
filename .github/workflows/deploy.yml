@@ -151,6 +151,20 @@ jobs:
         env:
           LD_LIBRARY_PATH: ${{ github.workspace }}/adapters/sameboy/SameBoy/build/lib
 
+      # ── Traces: dmg-acid2 ───────────────────────────────────
+      - name: Cache dmg-acid2 traces
+        id: cache-acid2
+        uses: actions/cache@v5
+        with:
+          path: build/traces/dmg-acid2
+          key: traces-dmg-acid2-${{ hashFiles('adapters/gambatte/gbtrace-gambatte.cpp', 'adapters/sameboy/gbtrace-sameboy.cpp', 'adapters/mgba/gbtrace-mgba.c', 'adapters/gateboy/gbtrace-gateboy.cpp', 'adapters/gateboy/audio_stub.cpp', 'adapters/*/Makefile', 'test-suites/dmg-acid2/dmg-acid2.toml', 'test-suites/dmg-acid2/*.gb', 'test-suites/dmg-acid2/reference.png', 'scripts/trace-screenshot.sh') }}
+
+      - name: Generate dmg-acid2 traces
+        if: steps.cache-acid2.outputs.cache-hit != 'true'
+        run: make traces-dmg-acid2
+        env:
+          LD_LIBRARY_PATH: ${{ github.workspace }}/adapters/sameboy/SameBoy/build/lib
+
       # ── Assemble site ────────────────────────────────────────
       - name: Assemble site
         run: make site

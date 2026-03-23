@@ -1,7 +1,7 @@
 [profile]
 name = "dmg-acid2"
 description = "PPU accuracy test with full state and pixel output."
-trigger = "instruction"
+trigger = "tcycle"
 
 [fields]
 cpu = ["pc", "sp", "a", "f", "b", "c", "d", "e", "h", "l"]

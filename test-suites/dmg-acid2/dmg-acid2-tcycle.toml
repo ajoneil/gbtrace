@@ -1,9 +1,0 @@
-[profile]
-name = "dmg-acid2-tcycle"
-description = "PPU accuracy test with per-T-cycle pixel output."
-trigger = "tcycle"
-
-[fields]
-cpu = ["pc", "sp"]
-ppu = ["lcdc", "stat", "ly"]
-pixel = ["pix"]

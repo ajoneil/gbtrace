@@ -184,41 +184,46 @@ static std::vector<FieldEmitter> g_emitters;
 static bool g_has_pix = false;
 
 // --- Pixel capture ---
-// Track pixels pushed by the PPU between trace entries.
-// GateBoy's update_framebuffer() writes one pixel per phase at
-// (pix_count-8, ly) when in mode 3. We track the framebuffer cursor
-// position and collect new pixels between emissions.
+// Uses GateBoy's pixel_callback in update_framebuffer() to capture each
+// pixel at the exact moment it's pushed to the LCD.
+// The callback fires every phase; we deduplicate by position since
+// pix_count only advances once per real pixel push.
 static std::string g_pix_buf;
+
+// Pixel capture: detect pix_count changes between phases.
+// When pix_count increments by 1, the pixel at the OLD position
+// has been shifted to the LCD and its framebuffer value is final.
 static int g_prev_pix_count = -1;
-static int g_prev_pix_ly = -1;
 
-static void collect_gateboy_pixel(const GateBoy &gb) {
+static bool g_captured_last_pixel = false;
+
+static void collect_pixel(GateBoy &gb) {
     int pix_count = bit_pack(gb.gb_state.pix_count);
-    int lcd_y = bit_pack(gb.gb_state.reg_ly);
-    int lcd_x = pix_count - 8;
-
-    // Only emit when pix_count incremented on the same scanline.
-    // On ly change, reset tracking.
-    if (lcd_y != g_prev_pix_ly) {
-        g_prev_pix_count = -1;
-        g_prev_pix_ly = lcd_y;
-    }
-
-    // Pixel pushed if pix_count advanced by exactly 1
-    if (pix_count != g_prev_pix_count + 1 || pix_count == g_prev_pix_count) {
-        g_prev_pix_count = pix_count;
-        return;
-    }
-
+    int old_pix_count = g_prev_pix_count;
     g_prev_pix_count = pix_count;
 
-    if (lcd_y < 0 || lcd_y >= 144 || lcd_x < 0 || lcd_x >= 160) return;
+    if (old_pix_count < 0) return;
 
-    // Read the shade from the framebuffer (already written by update_framebuffer)
-    uint8_t raw = gb.mem.framebuffer[lcd_x + lcd_y * 160];
-    // GateBoy stores 3-shade, undo inversion
-    uint8_t shade = (raw <= 3) ? (3 - raw) : 0;
-    g_pix_buf += ('0' + shade);
+    int lcd_y = bit_pack(gb.gb_state.reg_ly);
+    if (lcd_y < 0 || lcd_y >= 144) return;
+
+    // Normal pixel shift: pix_count incremented by 1
+    if (pix_count == old_pix_count + 1) {
+        int lcd_x = old_pix_count - 8;
+        if (lcd_x >= 0 && lcd_x < 160) {
+            uint8_t fb_val = gb.mem.framebuffer[lcd_x + lcd_y * 160];
+            g_pix_buf += ('0' + (fb_val & 3));
+        }
+        g_captured_last_pixel = false;
+    }
+
+    // Last pixel (x=159): pix_count is at 167 and we haven't captured it yet.
+    // The framebuffer has been written by update_framebuffer() at this point.
+    if (pix_count == 167 && !g_captured_last_pixel) {
+        uint8_t fb_val = gb.mem.framebuffer[159 + lcd_y * 160];
+        g_pix_buf += ('0' + (fb_val & 3));
+        g_captured_last_pixel = true;
+    }
 }
 
 static uint8_t read_cpu_reg8(const CpuState &reg, const std::string &name) {
@@ -545,6 +550,7 @@ int main(int argc, char *argv[]) {
 
     bool tcycle_mode = (profile.trigger == "tcycle");
 
+
     uint16_t prev_op_addr = gb.cpu.core.reg.op_addr;
     int prev_op_state = gb.cpu.core.reg.op_state;
     bool stopped_early = false;
@@ -557,9 +563,9 @@ int main(int argc, char *argv[]) {
         gb.next_phase(cart_blob);
         phase_count++;
 
-        // Collect pixel output from this phase (if PPU pushed one)
+        // Collect pixel output from this phase (if pix_count incremented)
         if (g_has_pix) {
-            collect_gateboy_pixel(gb);
+            collect_pixel(gb);
         }
 
         const CpuState &reg = gb.cpu.core.reg;
@@ -624,5 +630,7 @@ int main(int argc, char *argv[]) {
     } else {
         std::fprintf(stderr, "Traced %d frames, output written.\n", frames);
     }
+
+
     return 0;
 }

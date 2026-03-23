@@ -42,6 +42,15 @@ const TEST_SUITES = [
       { name: 'oam bug', filter: 'oam_bug' },
     ],
   },
+  {
+    name: 'dmg-acid2',
+    base: 'tests/dmg-acid2',
+    profile: 'tests/dmg-acid2/dmg-acid2.toml',
+    manifest: 'tests/dmg-acid2/manifest.json',
+    preferredEmu: 'gateboy',
+    tests: null,
+    categories: [],
+  },
 ];
 
 const EMULATORS = ['gateboy', 'gambatte', 'sameboy', 'mgba'];

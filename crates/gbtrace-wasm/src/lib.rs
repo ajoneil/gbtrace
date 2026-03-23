@@ -378,6 +378,7 @@ impl TraceStore {
                             JsField::Num(col.get_numeric(index) as f64)
                         }
                         ColumnData::Bool(_) => JsField::Bool(col.get_bool(index)),
+                        ColumnData::Str(_) => continue,
                     }
                 }
                 StoreKind::Lazy(s) => {
@@ -385,6 +386,7 @@ impl TraceStore {
                         FieldType::Bool => {
                             JsField::Bool(s.get_bool_named(field_name, index).unwrap_or(false))
                         }
+                        FieldType::Str => continue,
                         _ => {
                             JsField::Num(s.get_numeric(col_idx, index) as f64)
                         }
