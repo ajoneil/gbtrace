@@ -78,6 +78,7 @@ jobs:
           git clone --depth 1 https://github.com/aappleby/metroboy.git
           git clone --depth 1 https://github.com/aappleby/metrolib.git
           mkdir -p metroboy/symlinks
+          rm -rf metroboy/symlinks/metrolib
           ln -sf "$(pwd)/metrolib" metroboy/symlinks/metrolib
 
       # ── Build adapters ───────────────────────────────────────
