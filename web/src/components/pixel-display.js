@@ -5,18 +5,23 @@ const LCD_HEIGHT = 144;
 const SCALE = 2;
 
 /**
- * Renders a Game Boy LCD frame from trace pixel data.
+ * Renders Game Boy LCD frames from trace pixel data.
  *
- * Given a TraceStore with pixel data, renders the frame corresponding
- * to the current view position. Uses store.renderFrame() to get RGBA
- * pixel data and draws it to a scaled canvas.
+ * Single mode: one canvas showing the current frame.
+ * Compare mode (storeB set): three canvases — A | diff | B.
+ * The diff view highlights pixels that differ in red.
  */
 export class PixelDisplay extends LitElement {
   static properties = {
     store: { type: Object },
+    storeB: { type: Object },
+    nameA: { type: String },
+    nameB: { type: String },
     frameBoundaries: { type: Array },
+    frameBoundariesB: { type: Array },
     viewStart: { type: Number },
     _frameIndex: { state: true },
+    _frameIndexB: { state: true },
   };
 
   static styles = css`
@@ -42,6 +47,25 @@ export class PixelDisplay extends LitElement {
     .frame-info {
       color: var(--text-muted);
     }
+    .compare-row {
+      display: flex;
+      gap: 8px;
+      align-items: flex-start;
+    }
+    .compare-panel {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 2px;
+    }
+    .compare-label {
+      font-size: 0.7rem;
+      font-family: var(--mono);
+      color: var(--text-muted);
+    }
+    .compare-label.a { color: var(--accent); }
+    .compare-label.b { color: #d29922; }
+    .compare-label.diff { color: var(--red); }
     canvas {
       image-rendering: pixelated;
       border-radius: 4px;
@@ -51,21 +75,25 @@ export class PixelDisplay extends LitElement {
   constructor() {
     super();
     this.store = null;
+    this.storeB = null;
+    this.nameA = '';
+    this.nameB = '';
     this.frameBoundaries = [];
+    this.frameBoundariesB = [];
     this.viewStart = 0;
     this._frameIndex = 0;
+    this._frameIndexB = 0;
   }
 
   updated(changed) {
-    if (changed.has('viewStart') || changed.has('frameBoundaries') || changed.has('store')) {
-      this._updateFrame();
+    if (changed.has('viewStart') || changed.has('frameBoundaries') ||
+        changed.has('frameBoundariesB') || changed.has('store') || changed.has('storeB')) {
+      this._updateFrames();
     }
   }
 
-  /** Find which frame contains viewStart. */
-  _currentFrame() {
-    const bounds = this.frameBoundaries || [];
-    if (bounds.length === 0) return 0;
+  _findFrame(bounds) {
+    if (!bounds || bounds.length === 0) return 0;
     let frame = 0;
     for (let i = 0; i < bounds.length; i++) {
       if (bounds[i] <= this.viewStart) frame = i;
@@ -74,38 +102,119 @@ export class PixelDisplay extends LitElement {
     return frame;
   }
 
-  _updateFrame() {
-    const fi = this._currentFrame();
-    this._frameIndex = fi;
-    if (!this.store) return;
-
-    const canvas = this.renderRoot?.querySelector('canvas');
-    if (!canvas) return;
-
+  _renderToCanvas(id, store, frameIndex) {
+    const canvas = this.renderRoot?.querySelector(`#${id}`);
+    if (!canvas) return null;
     const ctx = canvas.getContext('2d');
+    if (!store) { ctx.clearRect(0, 0, LCD_WIDTH, LCD_HEIGHT); return null; }
     try {
-      const rgba = this.store.renderFrame(fi);
-      if (!rgba) {
-        ctx.clearRect(0, 0, LCD_WIDTH, LCD_HEIGHT);
-        return;
-      }
-      const imgData = new ImageData(new Uint8ClampedArray(rgba.buffer || rgba), LCD_WIDTH, LCD_HEIGHT);
+      const rgba = store.renderFrame(frameIndex);
+      if (!rgba) { ctx.clearRect(0, 0, LCD_WIDTH, LCD_HEIGHT); return null; }
+      const arr = new Uint8ClampedArray(rgba.buffer || rgba);
+      const imgData = new ImageData(arr, LCD_WIDTH, LCD_HEIGHT);
       ctx.putImageData(imgData, 0, 0);
+      return arr;
     } catch (err) {
       console.error('Failed to render frame:', err);
       ctx.clearRect(0, 0, LCD_WIDTH, LCD_HEIGHT);
+      return null;
+    }
+  }
+
+  _renderDiff(rgbaA, rgbaB) {
+    const canvas = this.renderRoot?.querySelector('#diff');
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!rgbaA || !rgbaB) { ctx.clearRect(0, 0, LCD_WIDTH, LCD_HEIGHT); return; }
+
+    const diff = new Uint8ClampedArray(LCD_WIDTH * LCD_HEIGHT * 4);
+    let diffCount = 0;
+    for (let i = 0; i < LCD_WIDTH * LCD_HEIGHT; i++) {
+      const off = i * 4;
+      const same = rgbaA[off] === rgbaB[off] &&
+                   rgbaA[off+1] === rgbaB[off+1] &&
+                   rgbaA[off+2] === rgbaB[off+2];
+      if (same) {
+        // Subtle desaturated version of original
+        const shade = rgbaA[off];
+        diff[off]   = shade;
+        diff[off+1] = shade;
+        diff[off+2] = shade;
+      } else {
+        diffCount++;
+        // Soft red highlight
+        const avg = (rgbaA[off] + rgbaB[off]) / 2;
+        diff[off]   = Math.min(255, avg * 0.3 + 180);
+        diff[off+1] = Math.round(avg * 0.2 + 30);
+        diff[off+2] = Math.round(avg * 0.2 + 30);
+      }
+      diff[off+3] = 255;
+    }
+    const imgData = new ImageData(diff, LCD_WIDTH, LCD_HEIGHT);
+    ctx.putImageData(imgData, 0, 0);
+    this._diffCount = diffCount;
+  }
+
+  _updateFrames() {
+    const fi = this._findFrame(this.frameBoundaries);
+    this._frameIndex = fi;
+
+    if (this.storeB) {
+      const fiB = this._findFrame(this.frameBoundariesB);
+      this._frameIndexB = fiB;
+      const rgbaA = this._renderToCanvas('canvasA', this.store, fi);
+      const rgbaB = this._renderToCanvas('canvasB', this.storeB, fiB);
+      this._renderDiff(rgbaA, rgbaB);
+    } else {
+      this._renderToCanvas('canvasA', this.store, fi);
     }
   }
 
   render() {
-    const totalFrames = this.frameBoundaries?.length || 0;
+    const totalA = this.frameBoundaries?.length || 0;
+
+    if (this.storeB) {
+      const totalB = this.frameBoundariesB?.length || 0;
+      return html`
+        <div class="pixel-wrap">
+          <div class="pixel-header">
+            <span class="pixel-title">pixels</span>
+            <span class="frame-info">
+              A: ${this._frameIndex + 1}/${totalA}
+              B: ${this._frameIndexB + 1}/${totalB}
+            </span>
+          </div>
+          <div class="compare-row">
+            <div class="compare-panel">
+              <span class="compare-label a">${this.nameA || 'A'}</span>
+              <canvas id="canvasA" width=${LCD_WIDTH} height=${LCD_HEIGHT}
+                style="width: ${LCD_WIDTH * SCALE}px; height: ${LCD_HEIGHT * SCALE}px;"
+              ></canvas>
+            </div>
+            <div class="compare-panel">
+              <span class="compare-label diff">diff</span>
+              <canvas id="diff" width=${LCD_WIDTH} height=${LCD_HEIGHT}
+                style="width: ${LCD_WIDTH * SCALE}px; height: ${LCD_HEIGHT * SCALE}px;"
+              ></canvas>
+            </div>
+            <div class="compare-panel">
+              <span class="compare-label b">${this.nameB || 'B'}</span>
+              <canvas id="canvasB" width=${LCD_WIDTH} height=${LCD_HEIGHT}
+                style="width: ${LCD_WIDTH * SCALE}px; height: ${LCD_HEIGHT * SCALE}px;"
+              ></canvas>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
     return html`
       <div class="pixel-wrap">
         <div class="pixel-header">
           <span class="pixel-title">pixels</span>
-          <span class="frame-info">frame ${this._frameIndex + 1} / ${totalFrames}</span>
+          <span class="frame-info">frame ${this._frameIndex + 1} / ${totalA}</span>
         </div>
-        <canvas width=${LCD_WIDTH} height=${LCD_HEIGHT}
+        <canvas id="canvasA" width=${LCD_WIDTH} height=${LCD_HEIGHT}
           style="width: ${LCD_WIDTH * SCALE}px; height: ${LCD_HEIGHT * SCALE}px;"
         ></canvas>
       </div>
