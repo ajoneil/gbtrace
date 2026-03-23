@@ -1,0 +1,133 @@
+name: Generate Traces
+
+on:
+  workflow_run:
+    workflows: [Build]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      suite:
+        description: 'Test suite (all, gbmicrotest, blargg, mooneye, dmg-acid2)'
+        default: 'all'
+        type: choice
+        options: [all, gbmicrotest, blargg, mooneye, dmg-acid2]
+      emulator:
+        description: 'Emulator (all, gambatte, sameboy, mgba, gateboy)'
+        default: 'all'
+        type: choice
+        options: [all, gambatte, sameboy, mgba, gateboy]
+
+jobs:
+  matrix-setup:
+    runs-on: ubuntu-latest
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+    outputs:
+      matrix: ${{ steps.set.outputs.matrix }}
+    steps:
+      - id: set
+        run: |
+          SUITES='["gbmicrotest","blargg","mooneye","dmg-acid2"]'
+          EMUS='["gambatte","sameboy","mgba","gateboy"]'
+
+          if [ "${{ inputs.suite }}" != "" ] && [ "${{ inputs.suite }}" != "all" ]; then
+            SUITES='["${{ inputs.suite }}"]'
+          fi
+          if [ "${{ inputs.emulator }}" != "" ] && [ "${{ inputs.emulator }}" != "all" ]; then
+            EMUS='["${{ inputs.emulator }}"]'
+          fi
+
+          echo "matrix={\"suite\":${SUITES},\"emulator\":${EMUS}}" >> "$GITHUB_OUTPUT"
+
+  trace:
+    needs: matrix-setup
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.matrix-setup.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install system packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y python3 python3-pil
+
+      # Download CLI from latest build
+      - name: Download CLI
+        uses: actions/download-artifact@v4
+        with:
+          name: gbtrace-cli
+          path: target/release
+          run-id: ${{ github.event.workflow_run.id || '' }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+        continue-on-error: true
+
+      - name: Fallback - find latest CLI artifact
+        if: steps.download-cli.outcome == 'failure' || !hashFiles('target/release/gbtrace-cli')
+        uses: dawidd6/action-download-artifact@v6
+        with:
+          workflow: build.yml
+          name: gbtrace-cli
+          path: target/release
+          branch: main
+
+      - name: Make CLI executable
+        run: chmod +x target/release/gbtrace-cli
+
+      # Download adapter
+      - name: Download adapter
+        uses: actions/download-artifact@v4
+        with:
+          name: adapter-${{ matrix.emulator }}
+          path: adapters/${{ matrix.emulator }}
+          run-id: ${{ github.event.workflow_run.id || '' }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+        continue-on-error: true
+
+      - name: Fallback - find latest adapter artifact
+        if: steps.download-adapter.outcome == 'failure'
+        uses: dawidd6/action-download-artifact@v6
+        with:
+          workflow: build.yml
+          name: adapter-${{ matrix.emulator }}
+          path: adapters/${{ matrix.emulator }}
+          branch: main
+
+      - name: Make adapter executable
+        run: chmod +x adapters/${{ matrix.emulator }}/gbtrace-${{ matrix.emulator }}
+
+      # Cache traces
+      - name: Cache traces
+        id: cache-traces
+        uses: actions/cache@v5
+        with:
+          path: build/traces/${{ matrix.suite }}
+          key: traces-${{ matrix.suite }}-${{ matrix.emulator }}-${{ hashFiles(format('adapters/{0}/gbtrace-{0}.cpp', matrix.emulator), format('adapters/{0}/gbtrace-{0}.c', matrix.emulator), format('test-suites/{0}/**', matrix.suite), format('scripts/trace-{0}.sh', matrix.suite), 'scripts/trace-screenshot.sh', 'crates/gbtrace/src/**') }}
+
+      # Generate pix references if needed
+      - name: Generate pix references
+        if: steps.cache-traces.outputs.cache-hit != 'true'
+        run: make pix-refs
+
+      # Generate traces
+      - name: Generate traces
+        if: steps.cache-traces.outputs.cache-hit != 'true'
+        run: |
+          make traces-${{ matrix.suite }} EMUS=${{ matrix.emulator }} -j$(nproc)
+        env:
+          LD_LIBRARY_PATH: ${{ github.workspace }}/adapters/sameboy/SameBoy/build/lib
+        timeout-minutes: 120
+
+      # Generate manifest for this emulator's traces
+      - name: Generate manifest
+        if: steps.cache-traces.outputs.cache-hit != 'true'
+        run: |
+          python3 scripts/manifest.py "build/traces/${{ matrix.suite }}" "test-suites/${{ matrix.suite }}"
+
+      - name: Upload traces
+        uses: actions/upload-artifact@v4
+        with:
+          name: traces-${{ matrix.suite }}-${{ matrix.emulator }}
+          path: build/traces/${{ matrix.suite }}
+          retention-days: 30

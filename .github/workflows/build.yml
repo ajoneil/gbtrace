@@ -1,0 +1,122 @@
+name: Build
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'crates/**'
+      - 'web/**'
+      - 'adapters/**'
+      - 'Cargo.*'
+  workflow_dispatch:
+
+jobs:
+  cli-and-wasm:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Install wasm-pack
+        run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+
+      - name: Build CLI
+        run: make cli
+
+      - name: Build WASM
+        run: make wasm
+
+      - name: Upload CLI
+        uses: actions/upload-artifact@v4
+        with:
+          name: gbtrace-cli
+          path: target/release/gbtrace-cli
+          retention-days: 7
+
+      - name: Upload WASM
+        uses: actions/upload-artifact@v4
+        with:
+          name: wasm-pkg
+          path: |
+            web/pkg/gbtrace_wasm.js
+            web/pkg/gbtrace_wasm_bg.wasm
+          retention-days: 7
+
+  adapter:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        emulator: [gambatte, sameboy, mgba, gateboy]
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install system packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake scons zlib1g-dev
+
+      - name: Cache adapter
+        id: cache
+        uses: actions/cache@v5
+        with:
+          path: |
+            adapters/${{ matrix.emulator }}/gbtrace-${{ matrix.emulator }}
+            adapters/${{ matrix.emulator }}/gambatte-speedrun
+            adapters/${{ matrix.emulator }}/SameBoy
+            adapters/${{ matrix.emulator }}/mgba
+            adapters/${{ matrix.emulator }}/metroboy
+            adapters/${{ matrix.emulator }}/metrolib
+            adapters/${{ matrix.emulator }}/build
+          key: adapter-${{ matrix.emulator }}-${{ hashFiles(format('adapters/{0}/**', matrix.emulator)) }}
+
+      - name: Clone and build gambatte
+        if: matrix.emulator == 'gambatte' && steps.cache.outputs.cache-hit != 'true'
+        run: |
+          cd adapters/gambatte
+          git clone --recursive --depth 1 https://github.com/pokemon-speedrunning/gambatte-speedrun.git
+          make -j$(nproc)
+
+      - name: Clone and build sameboy
+        if: matrix.emulator == 'sameboy' && steps.cache.outputs.cache-hit != 'true'
+        run: |
+          cd adapters/sameboy
+          git clone --depth 1 https://github.com/LIJI32/SameBoy.git
+          cd SameBoy && make build/lib/libsameboy.a build/lib/libsameboy.so CONF=release -j$(nproc)
+          cd .. && make -j$(nproc)
+
+      - name: Clone and build mgba
+        if: matrix.emulator == 'mgba' && steps.cache.outputs.cache-hit != 'true'
+        run: |
+          cd adapters/mgba
+          git clone --depth 1 https://github.com/mgba-emu/mgba.git
+          cd mgba && mkdir build && cd build && \
+          cmake .. -DLIBMGBA_ONLY=ON -DBUILD_STATIC=ON \
+            -DCMAKE_BUILD_TYPE=Release -DENABLE_DEBUGGERS=ON && \
+          make -j$(nproc)
+          cd ../.. && make -j$(nproc)
+
+      - name: Clone and build gateboy
+        if: matrix.emulator == 'gateboy' && steps.cache.outputs.cache-hit != 'true'
+        run: |
+          cd adapters/gateboy
+          git clone --depth 1 https://github.com/aappleby/metroboy.git
+          git clone --depth 1 https://github.com/aappleby/metrolib.git
+          mkdir -p metroboy/symlinks
+          ln -sf "$(pwd)/metrolib" metroboy/symlinks/metrolib
+          make -j$(nproc)
+
+      - name: Upload adapter
+        uses: actions/upload-artifact@v4
+        with:
+          name: adapter-${{ matrix.emulator }}
+          path: |
+            adapters/${{ matrix.emulator }}/gbtrace-${{ matrix.emulator }}
+            adapters/${{ matrix.emulator }}/SameBoy/build/lib/libsameboy.so
+            adapters/${{ matrix.emulator }}/boot_roms/
+          retention-days: 7

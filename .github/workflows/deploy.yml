@@ -1,189 +1,120 @@
-name: Build and Deploy
+name: Deploy Site
 
 on:
+  workflow_run:
+    workflows: [Generate Traces]
+    types: [completed]
+    branches: [main]
   workflow_dispatch:
 
 permissions:
   contents: read
   pages: write
   id-token: write
+  actions: read
 
 concurrency:
   group: pages
   cancel-in-progress: false
 
 jobs:
-  build:
+  deploy:
     runs-on: ubuntu-latest
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@v6
 
-      # ── System dependencies ──────────────────────────────────
-      - name: Install system packages
+      # Download WASM from latest build
+      - name: Download WASM
+        uses: dawidd6/action-download-artifact@v6
+        with:
+          workflow: build.yml
+          name: wasm-pkg
+          path: web/pkg
+          branch: main
+
+      # Download all available trace artifacts and merge them
+      # Each trace artifact is named traces-{suite}-{emulator}
+      - name: Download all trace artifacts
+        uses: dawidd6/action-download-artifact@v6
+        with:
+          workflow: traces.yml
+          name: traces-*
+          name_is_regexp: true
+          path: _trace_artifacts
+          branch: main
+          if_no_artifact_found: warn
+
+      # Merge trace artifacts into build/traces/
+      # Artifacts are in _trace_artifacts/traces-{suite}-{emulator}/...
+      # We need to merge them by suite into build/traces/{suite}/
+      - name: Merge traces
         run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            build-essential cmake scons zlib1g-dev \
-            libz-dev python3 python3-pil
+          mkdir -p build/traces
+          for dir in _trace_artifacts/traces-*/; do
+            [ -d "$dir" ] || continue
+            # Extract suite name: traces-{suite}-{emulator} -> {suite}
+            basename=$(basename "$dir")
+            suite=$(echo "$basename" | sed 's/^traces-//; s/-[^-]*$//')
+            mkdir -p "build/traces/$suite"
+            cp -rn "$dir"* "build/traces/$suite/" 2>/dev/null || true
+          done
+          # Regenerate manifests with merged data
+          for suite_dir in build/traces/*/; do
+            [ -d "$suite_dir" ] || continue
+            suite=$(basename "$suite_dir")
+            if [ -d "test-suites/$suite" ]; then
+              python3 scripts/manifest.py "$suite_dir" "test-suites/$suite"
+            fi
+          done
+          echo "Trace summary:"
+          for suite_dir in build/traces/*/; do
+            count=$(find "$suite_dir" -name '*.parquet' 2>/dev/null | wc -l)
+            echo "  $(basename "$suite_dir"): $count traces"
+          done
 
-      # ── Rust toolchain ───────────────────────────────────────
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: wasm32-unknown-unknown
-
-      - uses: Swatinem/rust-cache@v2
-
-      - name: Install wasm-pack
-        run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
-
-      # ── Build CLI + WASM ─────────────────────────────────────
-      - name: Build gbtrace-cli
-        run: make cli
-
-      - name: Build WASM module
-        run: make wasm
-
-      # ── Adapter: gambatte ──────────────────────────────────
-      - name: Cache gambatte adapter
-        id: cache-gambatte
-        uses: actions/cache@v5
-        with:
-          path: |
-            adapters/gambatte/gbtrace-gambatte
-            adapters/gambatte/gambatte-speedrun
-          key: adapter-gambatte-${{ hashFiles('adapters/gambatte/gbtrace-gambatte.cpp', 'adapters/gambatte/Makefile') }}
-
-      - name: Build gambatte adapter
-        if: steps.cache-gambatte.outputs.cache-hit != 'true'
-        run: |
-          cd adapters/gambatte
-          git clone --recursive --depth 1 \
-            https://github.com/pokemon-speedrunning/gambatte-speedrun.git
-          make -j$(nproc)
-
-      # ── Adapter: sameboy ───────────────────────────────────
-      - name: Cache sameboy adapter
-        id: cache-sameboy
-        uses: actions/cache@v5
-        with:
-          path: |
-            adapters/sameboy/gbtrace-sameboy
-            adapters/sameboy/SameBoy
-          key: adapter-sameboy-${{ hashFiles('adapters/sameboy/gbtrace-sameboy.cpp', 'adapters/sameboy/Makefile') }}
-
-      - name: Build sameboy adapter
-        if: steps.cache-sameboy.outputs.cache-hit != 'true'
-        run: |
-          cd adapters/sameboy
-          git clone --depth 1 https://github.com/LIJI32/SameBoy.git
-          cd SameBoy && make build/lib/libsameboy.a build/lib/libsameboy.so CONF=release -j$(nproc)
-          cd .. && make -j$(nproc)
-
-      # ── Adapter: mgba ──────────────────────────────────────
-      - name: Cache mgba adapter
-        id: cache-mgba
-        uses: actions/cache@v5
-        with:
-          path: |
-            adapters/mgba/gbtrace-mgba
-            adapters/mgba/mgba
-          key: adapter-mgba-${{ hashFiles('adapters/mgba/gbtrace-mgba.c', 'adapters/mgba/Makefile') }}
-
-      - name: Build mgba adapter
-        if: steps.cache-mgba.outputs.cache-hit != 'true'
-        run: |
-          cd adapters/mgba
-          git clone --depth 1 https://github.com/mgba-emu/mgba.git
-          cd mgba && mkdir build && cd build && \
-          cmake .. -DLIBMGBA_ONLY=ON -DBUILD_STATIC=ON \
-            -DCMAKE_BUILD_TYPE=Release -DENABLE_DEBUGGERS=ON && \
-          make -j$(nproc)
-          cd ../.. && make -j$(nproc)
-
-      # ── Adapter: gateboy ───────────────────────────────────
-      - name: Cache gateboy adapter
-        id: cache-gateboy
-        uses: actions/cache@v5
-        with:
-          path: |
-            adapters/gateboy/gbtrace-gateboy
-            adapters/gateboy/metroboy
-            adapters/gateboy/metrolib
-            adapters/gateboy/build
-          key: adapter-gateboy-${{ hashFiles('adapters/gateboy/gbtrace-gateboy.cpp', 'adapters/gateboy/audio_stub.cpp', 'adapters/gateboy/Makefile') }}
-
-      - name: Build gateboy adapter
-        if: steps.cache-gateboy.outputs.cache-hit != 'true'
-        run: |
-          cd adapters/gateboy
-          git clone --depth 1 https://github.com/aappleby/metroboy.git
-          git clone --depth 1 https://github.com/aappleby/metrolib.git
-          mkdir -p metroboy/symlinks
-          rm -rf metroboy/symlinks/metrolib
-          ln -sf "$(pwd)/metrolib" metroboy/symlinks/metrolib
-          make -j$(nproc)
-
-      # ── Traces: gbmicrotest ────────────────────────────────
-      - name: Cache gbmicrotest traces
-        id: cache-micro
-        uses: actions/cache@v5
-        with:
-          path: build/traces/gbmicrotest
-          key: traces-gbmicrotest-${{ hashFiles('adapters/gambatte/gbtrace-gambatte.cpp', 'adapters/sameboy/gbtrace-sameboy.cpp', 'adapters/mgba/gbtrace-mgba.c', 'adapters/gateboy/gbtrace-gateboy.cpp', 'adapters/gateboy/audio_stub.cpp', 'adapters/*/Makefile', 'test-suites/gbmicrotest/gbmicrotest.toml', 'test-suites/gbmicrotest/*.gb', 'scripts/trace-gbmicrotest.sh') }}
-
-      - name: Generate gbmicrotest traces
-        if: steps.cache-micro.outputs.cache-hit != 'true'
-        run: make traces-gbmicrotest -j$(nproc)
-        env:
-          LD_LIBRARY_PATH: ${{ github.workspace }}/adapters/sameboy/SameBoy/build/lib
-
-      # ── Traces: blargg ─────────────────────────────────────
-      - name: Cache blargg traces
-        id: cache-blargg
-        uses: actions/cache@v5
-        with:
-          path: build/traces/blargg
-          key: traces-blargg-${{ hashFiles('adapters/gambatte/gbtrace-gambatte.cpp', 'adapters/sameboy/gbtrace-sameboy.cpp', 'adapters/mgba/gbtrace-mgba.c', 'adapters/*/Makefile', 'test-suites/blargg/blargg.toml', 'test-suites/blargg/**/*.gb', 'scripts/trace-blargg.sh') }}
-
-      - name: Generate blargg traces
-        if: steps.cache-blargg.outputs.cache-hit != 'true'
-        run: make traces-blargg -j$(nproc)
-        env:
-          LD_LIBRARY_PATH: ${{ github.workspace }}/adapters/sameboy/SameBoy/build/lib
-
-      # ── Traces: dmg-acid2 ───────────────────────────────────
-      - name: Cache dmg-acid2 traces
-        id: cache-acid2
-        uses: actions/cache@v5
-        with:
-          path: build/traces/dmg-acid2
-          key: traces-dmg-acid2-${{ hashFiles('adapters/gambatte/gbtrace-gambatte.cpp', 'adapters/sameboy/gbtrace-sameboy.cpp', 'adapters/mgba/gbtrace-mgba.c', 'adapters/gateboy/gbtrace-gateboy.cpp', 'adapters/gateboy/audio_stub.cpp', 'adapters/*/Makefile', 'test-suites/dmg-acid2/dmg-acid2.toml', 'test-suites/dmg-acid2/*.gb', 'test-suites/dmg-acid2/reference.png', 'scripts/trace-screenshot.sh') }}
-
-      - name: Generate dmg-acid2 traces
-        if: steps.cache-acid2.outputs.cache-hit != 'true'
-        run: make traces-dmg-acid2
-        env:
-          LD_LIBRARY_PATH: ${{ github.workspace }}/adapters/sameboy/SameBoy/build/lib
-
-      # ── Assemble site ────────────────────────────────────────
+      # Assemble site
       - name: Assemble site
-        run: make site
-        env:
-          LD_LIBRARY_PATH: ${{ github.workspace }}/adapters/sameboy/SameBoy/build/lib
+        run: |
+          mkdir -p build/site/pkg build/site/tests
+          cp web/index.html build/site/
+          cp -r web/src build/site/
+          cp web/pkg/gbtrace_wasm.js web/pkg/gbtrace_wasm_bg.wasm build/site/pkg/
 
-      # ── Deploy to Pages ──────────────────────────────────────
+          # Copy traces
+          for suite_dir in build/traces/*/; do
+            [ -d "$suite_dir" ] || continue
+            suite=$(basename "$suite_dir")
+            cp -r "$suite_dir" "build/site/tests/$suite"
+          done
+
+          # Copy ROMs for disassembly
+          for suite in gbmicrotest blargg mooneye dmg-acid2; do
+            if [ -d "build/site/tests/$suite" ] && [ -d "test-suites/$suite" ]; then
+              cd "test-suites/$suite"
+              find . -name '*.gb' -exec sh -c 'mkdir -p "../../build/site/tests/'"$suite"'/$(dirname "{}")" && cp "{}" "../../build/site/tests/'"$suite"'/{}"' \;
+              cd ../..
+            fi
+          done
+
+          # Copy profile TOMLs
+          for suite in gbmicrotest blargg mooneye dmg-acid2; do
+            toml="test-suites/$suite/$suite.toml"
+            if [ -f "$toml" ] && [ -d "build/site/tests/$suite" ]; then
+              cp "$toml" "build/site/tests/$suite/"
+            fi
+          done
+
+          echo "Site assembled in build/site/"
+
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v4
         with:
           path: build/site
 
-  deploy:
-    needs: build
-    runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    steps:
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
