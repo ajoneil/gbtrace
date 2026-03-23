@@ -269,19 +269,11 @@ export class AppShell extends LitElement {
       ...stats,
       fields: stats.fields.filter(([name]) => !this._hiddenFields.has(name)),
     } : null;
-    // Recompute match pct from filtered fields
+    // Recompute match pct from visible (non-hidden) diff fields only
     let matchPct = 100;
-    if (filteredStats && filteredStats.total > 0) {
-      // Count rows where ANY visible field differs
-      let differing = filteredStats.differing;
-      // If we've hidden some fields, the overall stats may over-count.
-      // For accuracy, just show the field-level stats and skip overall %.
-      // But as an approximation, use the max field diff count.
-      if (this._hiddenFields.size > 0 && filteredStats.fields.length > 0) {
-        const maxDiff = Math.max(...filteredStats.fields.map(([, c]) => c));
-        differing = maxDiff;
-      }
-      matchPct = Math.round((1 - differing / filteredStats.total) * 1000) / 10;
+    if (filteredStats && filteredStats.total > 0 && filteredStats.fields.length > 0) {
+      const maxDiff = Math.max(...filteredStats.fields.map(([, c]) => c));
+      matchPct = Math.round((1 - maxDiff / filteredStats.total) * 1000) / 10;
     }
 
     return html`
