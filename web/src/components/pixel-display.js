@@ -7,9 +7,9 @@ const SCALE = 2;
 /**
  * Renders Game Boy LCD frames from trace pixel data.
  *
- * Single mode: one canvas showing the current frame.
- * Compare mode (storeB set): three canvases — A | diff | B.
- * The diff view highlights pixels that differ in red.
+ * Single mode: one canvas showing the current frame, navigated by viewStart.
+ * Compare mode (storeB set): three canvases — A | diff | B, aligned by
+ * visual frame index so frame N in A is compared with frame N in B.
  */
 export class PixelDisplay extends LitElement {
   static properties = {
@@ -18,10 +18,9 @@ export class PixelDisplay extends LitElement {
     nameA: { type: String },
     nameB: { type: String },
     frameBoundaries: { type: Array },
-    frameBoundariesB: { type: Array },
     viewStart: { type: Number },
     _frameIndex: { state: true },
-    _frameIndexB: { state: true },
+    _frameCountA: { state: true },
   };
 
   static styles = css`
@@ -79,27 +78,37 @@ export class PixelDisplay extends LitElement {
     this.nameA = '';
     this.nameB = '';
     this.frameBoundaries = [];
-    this.frameBoundariesB = [];
     this.viewStart = 0;
     this._frameIndex = 0;
-    this._frameIndexB = 0;
+    this._frameCountA = 0;
   }
 
   updated(changed) {
+    if (changed.has('store') || changed.has('storeB')) {
+      this._frameCountA = this.store?.frameCount() || 0;
+    }
     if (changed.has('viewStart') || changed.has('frameBoundaries') ||
-        changed.has('frameBoundariesB') || changed.has('store') || changed.has('storeB')) {
-      this._updateFrames();
+        changed.has('store') || changed.has('storeB')) {
+      this._syncFrameIndex();
+      this._draw();
     }
   }
 
-  _findFrame(bounds) {
-    if (!bounds || bounds.length === 0) return 0;
+  /** In single mode, derive frame index from viewStart. In compare mode,
+   *  also derive from viewStart (using trace A's boundaries) but apply
+   *  the same index to both traces for visual alignment. */
+  _syncFrameIndex() {
+    const bounds = this.frameBoundaries || [];
+    if (bounds.length === 0) {
+      this._frameIndex = 0;
+      return;
+    }
     let frame = 0;
     for (let i = 0; i < bounds.length; i++) {
       if (bounds[i] <= this.viewStart) frame = i;
       else break;
     }
-    return frame;
+    this._frameIndex = frame;
   }
 
   _renderToCanvas(id, store, frameIndex) {
@@ -128,21 +137,17 @@ export class PixelDisplay extends LitElement {
     if (!rgbaA || !rgbaB) { ctx.clearRect(0, 0, LCD_WIDTH, LCD_HEIGHT); return; }
 
     const diff = new Uint8ClampedArray(LCD_WIDTH * LCD_HEIGHT * 4);
-    let diffCount = 0;
     for (let i = 0; i < LCD_WIDTH * LCD_HEIGHT; i++) {
       const off = i * 4;
       const same = rgbaA[off] === rgbaB[off] &&
                    rgbaA[off+1] === rgbaB[off+1] &&
                    rgbaA[off+2] === rgbaB[off+2];
       if (same) {
-        // Subtle desaturated version of original
         const shade = rgbaA[off];
         diff[off]   = shade;
         diff[off+1] = shade;
         diff[off+2] = shade;
       } else {
-        diffCount++;
-        // Soft red highlight
         const avg = (rgbaA[off] + rgbaB[off]) / 2;
         diff[off]   = Math.min(255, avg * 0.3 + 180);
         diff[off+1] = Math.round(avg * 0.2 + 30);
@@ -152,18 +157,13 @@ export class PixelDisplay extends LitElement {
     }
     const imgData = new ImageData(diff, LCD_WIDTH, LCD_HEIGHT);
     ctx.putImageData(imgData, 0, 0);
-    this._diffCount = diffCount;
   }
 
-  _updateFrames() {
-    const fi = this._findFrame(this.frameBoundaries);
-    this._frameIndex = fi;
-
+  _draw() {
+    const fi = this._frameIndex;
     if (this.storeB) {
-      const fiB = this._findFrame(this.frameBoundariesB);
-      this._frameIndexB = fiB;
       const rgbaA = this._renderToCanvas('canvasA', this.store, fi);
-      const rgbaB = this._renderToCanvas('canvasB', this.storeB, fiB);
+      const rgbaB = this._renderToCanvas('canvasB', this.storeB, fi);
       this._renderDiff(rgbaA, rgbaB);
     } else {
       this._renderToCanvas('canvasA', this.store, fi);
@@ -171,18 +171,14 @@ export class PixelDisplay extends LitElement {
   }
 
   render() {
-    const totalA = this.frameBoundaries?.length || 0;
+    const total = this._frameCountA;
 
     if (this.storeB) {
-      const totalB = this.frameBoundariesB?.length || 0;
       return html`
         <div class="pixel-wrap">
           <div class="pixel-header">
             <span class="pixel-title">pixels</span>
-            <span class="frame-info">
-              A: ${this._frameIndex + 1}/${totalA}
-              B: ${this._frameIndexB + 1}/${totalB}
-            </span>
+            <span class="frame-info">frame ${this._frameIndex + 1} / ${total}</span>
           </div>
           <div class="compare-row">
             <div class="compare-panel">
@@ -212,7 +208,7 @@ export class PixelDisplay extends LitElement {
       <div class="pixel-wrap">
         <div class="pixel-header">
           <span class="pixel-title">pixels</span>
-          <span class="frame-info">frame ${this._frameIndex + 1} / ${totalA}</span>
+          <span class="frame-info">frame ${this._frameIndex + 1} / ${total}</span>
         </div>
         <canvas id="canvasA" width=${LCD_WIDTH} height=${LCD_HEIGHT}
           style="width: ${LCD_WIDTH * SCALE}px; height: ${LCD_HEIGHT * SCALE}px;"

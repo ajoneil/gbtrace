@@ -113,6 +113,13 @@ impl TraceStore {
         self.has_field("pix")
     }
 
+    /// Number of reconstructed pixel frames.
+    #[wasm_bindgen(js_name = frameCount)]
+    pub fn frame_count(&self) -> usize {
+        self.ensure_frames();
+        self.frames_cache.borrow().as_ref().map(|f| f.len()).unwrap_or(0)
+    }
+
     /// Render a frame as RGBA pixel data (160×144×4 = 92160 bytes).
     /// Returns null if no pixel data or frame index is out of range.
     #[wasm_bindgen(js_name = renderFrame)]
@@ -386,28 +393,49 @@ impl TraceStore {
 // Private helpers
 impl TraceStore {
     /// Lazily reconstruct frames and cache the result.
+    ///
+    /// If the current store yields no frames (e.g. after T-cycle collapse
+    /// strips pixel data), falls back to reconstructing from the original
+    /// bytes so pixel display still works in comparison mode.
     fn ensure_frames(&self) {
         if self.frames_cache.borrow().is_some() {
             return;
         }
-        let eager = match &self.store {
-            StoreKind::Eager(s) => {
-                let frames = framebuffer::reconstruct_frames(s);
-                *self.frames_cache.borrow_mut() = Some(frames);
-                return;
-            }
-            StoreKind::Lazy(s) => {
-                match s.to_eager() {
-                    Ok(e) => e,
-                    Err(_) => {
-                        *self.frames_cache.borrow_mut() = Some(Vec::new());
-                        return;
-                    }
+        let frames = self.reconstruct_from_store();
+        if Self::has_visible_pixels(&frames) {
+            *self.frames_cache.borrow_mut() = Some(frames);
+            return;
+        }
+        // Current store has no visible pixel frames (e.g. after T-cycle
+        // collapse stripped pix data) — reconstruct from original bytes.
+        if let Some(ref bytes) = self.original_bytes {
+            if let Ok(store) = gbtrace::column_store::load_column_store_from_bytes(bytes) {
+                let frames = framebuffer::reconstruct_frames(&store);
+                if !frames.is_empty() {
+                    *self.frames_cache.borrow_mut() = Some(frames);
+                    return;
                 }
             }
-        };
-        let frames = framebuffer::reconstruct_frames(&eager);
+        }
+        // Fall back to whatever we got (may be empty or blank)
         *self.frames_cache.borrow_mut() = Some(frames);
+    }
+
+    /// Check if any frame has non-zero pixel data.
+    fn has_visible_pixels(frames: &[Frame]) -> bool {
+        frames.iter().any(|f| f.pixels.iter().any(|&p| p != 0))
+    }
+
+    fn reconstruct_from_store(&self) -> Vec<Frame> {
+        match &self.store {
+            StoreKind::Eager(s) => framebuffer::reconstruct_frames(s),
+            StoreKind::Lazy(s) => {
+                match s.to_eager() {
+                    Ok(e) => framebuffer::reconstruct_frames(&e),
+                    Err(_) => Vec::new(),
+                }
+            }
+        }
     }
 
     fn row_to_map(&self, index: usize) -> BTreeMap<String, JsField> {

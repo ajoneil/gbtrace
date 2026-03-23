@@ -242,8 +242,8 @@ export class TraceTimeline extends LitElement {
             <div class="sync-controls">
               <span class="sync-label">sync</span>
               ${[
+                ['ly=0', 'frame'],
                 ['pc', 'PC'],
-                ['ly=0', 'ly=0'],
                 ['lcdc&80', 'LCD on'],
                 ['none', 'none'],
               ].map(([mode, label]) => html`
