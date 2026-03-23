@@ -2,6 +2,15 @@ import { LitElement, html, css } from 'lit';
 import { createTraceStore } from '../lib/wasm-bridge.js';
 import { EMULATORS, traceUrl, romUrl } from './test-picker.js';
 
+/** Field groups for toggling related columns together. */
+const FIELD_GROUPS = [
+  { name: 'cpu',       fields: ['pc', 'sp', 'a', 'f', 'b', 'c', 'd', 'e', 'h', 'l'] },
+  { name: 'ppu',       fields: ['lcdc', 'stat', 'ly', 'lyc', 'scy', 'scx', 'wy', 'wx', 'bgp', 'obp0', 'obp1'] },
+  { name: 'interrupt', fields: ['if_', 'ie', 'ime'] },
+  { name: 'timer',     fields: ['div', 'tima', 'tma', 'tac'] },
+  { name: 'serial',    fields: ['sb', 'sc'] },
+];
+
 export class TraceSelector extends LitElement {
   static styles = css`
     :host { display: block; }
@@ -116,6 +125,33 @@ export class TraceSelector extends LitElement {
       border-color: var(--accent);
       color: var(--accent);
     }
+    .ft-group {
+      padding: 1px 7px;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      color: var(--text-muted);
+      cursor: pointer;
+      font-size: 0.7rem;
+      font-family: var(--sans);
+      font-weight: 600;
+      user-select: none;
+      transition: all 0.1s;
+      text-transform: uppercase;
+      letter-spacing: 0.03em;
+    }
+    .ft-group:hover { border-color: var(--accent); color: var(--accent); }
+    .ft-group.on {
+      background: var(--accent-subtle);
+      border-color: var(--accent);
+      color: var(--accent);
+    }
+    .ft-sep {
+      width: 1px;
+      height: 16px;
+      background: var(--border);
+      margin: 0 2px;
+    }
     .downloads {
       display: flex;
       gap: 8px;
@@ -157,6 +193,7 @@ export class TraceSelector extends LitElement {
     _uploads: { state: true },
     _loading: { state: true },
     _error: { state: true },
+    _hiddenGroups: { state: true },
   };
 
   constructor() {
@@ -175,6 +212,7 @@ export class TraceSelector extends LitElement {
     this._uploads = []; // { name, store }
     this._loading = null;
     this._error = null;
+    this._hiddenGroups = new Set(); // group names that are toggled off
   }
 
   /** All available trace names (library emulators with traces + uploads). */
@@ -242,12 +280,7 @@ export class TraceSelector extends LitElement {
         ${this.allFields.length ? html`
           <div class="fields-row">
             <span class="ft-label">columns</span>
-            ${this.allFields.map(f => html`
-              <span
-                class="ft-chip ${this.hiddenFields?.has(f) ? '' : 'on'}"
-                @click=${() => this._toggleField(f)}
-              >${f}</span>
-            `)}
+            ${this._renderFieldGroups()}
             ${this.suite?.profile || this.testRom ? html`
               <span class="downloads">
                 ${this.suite?.profile ? html`<a href="${this.suite.profile}" download>profile</a>` : ''}
@@ -258,6 +291,85 @@ export class TraceSelector extends LitElement {
         ` : ''}
       </div>
     `;
+  }
+
+  _renderFieldGroups() {
+    const allFields = this.allFields || [];
+    const hidden = this.hiddenFields || new Set();
+    const grouped = new Set();
+    const parts = [];
+
+    // Render each group that has fields in this trace
+    for (const group of FIELD_GROUPS) {
+      const present = group.fields.filter(f => allFields.includes(f));
+      if (present.length === 0) continue;
+      present.forEach(f => grouped.add(f));
+
+      const groupHidden = this._hiddenGroups.has(group.name);
+      const anyVisible = present.some(f => !hidden.has(f));
+
+      parts.push(html`
+        <span class="ft-group ${!groupHidden && anyVisible ? 'on' : ''}"
+          @click=${() => this._toggleGroup(group.name)}
+        >${group.name}</span>
+      `);
+
+      // Show individual field chips only when group is visible
+      if (!groupHidden) {
+        for (const f of present) {
+          parts.push(html`
+            <span class="ft-chip ${hidden.has(f) ? '' : 'on'}"
+              @click=${() => this._toggleField(f)}
+            >${f}</span>
+          `);
+        }
+      }
+
+      parts.push(html`<span class="ft-sep"></span>`);
+    }
+
+    // Ungrouped fields (e.g. custom memory addresses)
+    const ungrouped = allFields.filter(f => !grouped.has(f));
+    for (const f of ungrouped) {
+      parts.push(html`
+        <span class="ft-chip ${hidden.has(f) ? '' : 'on'}"
+          @click=${() => this._toggleField(f)}
+        >${f}</span>
+      `);
+    }
+
+    return parts;
+  }
+
+  _toggleGroup(groupName) {
+    const group = FIELD_GROUPS.find(g => g.name === groupName);
+    if (!group) return;
+
+    const present = group.fields.filter(f => (this.allFields || []).includes(f));
+    const newHiddenGroups = new Set(this._hiddenGroups);
+    const newHidden = new Set(this.hiddenFields || []);
+
+    if (this._hiddenGroups.has(groupName)) {
+      // Show group — remove group fields from hidden
+      // (restores them all; individual toggles within the group are preserved
+      // because we only added them when hiding the group)
+      newHiddenGroups.delete(groupName);
+      for (const f of present) {
+        newHidden.delete(f);
+      }
+    } else {
+      // Hide group — add all group fields to hidden
+      newHiddenGroups.add(groupName);
+      for (const f of present) {
+        newHidden.add(f);
+      }
+    }
+
+    this._hiddenGroups = newHiddenGroups;
+    this.dispatchEvent(new CustomEvent('hidden-fields-changed', {
+      detail: { hiddenFields: newHidden },
+      bubbles: true, composed: true,
+    }));
   }
 
   _toggleField(f) {
