@@ -105,4 +105,4 @@ jobs:
         with:
           name: traces-${{ matrix.suite }}-${{ matrix.emulator }}
           path: build/traces/${{ matrix.suite }}
-          retention-days: 30
+          retention-days: 90
