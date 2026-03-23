@@ -190,6 +190,24 @@ static void capture_mgba_frame(void) {
     g_pending_pix[160 * 144] = '\0';
 }
 
+/* --- Reference matching --- */
+static char g_reference_pix[160 * 144 + 1];
+static int g_has_reference = 0;
+
+static int load_reference(const char *path) {
+    FILE *f = fopen(path, "rb");
+    if (!f) return 0;
+    size_t n = fread(g_reference_pix, 1, 160 * 144, f);
+    fclose(f);
+    g_reference_pix[n] = '\0';
+    /* Strip trailing newlines */
+    while (n > 0 && (g_reference_pix[n-1] == '\n' || g_reference_pix[n-1] == '\r')) {
+        n--;
+        g_reference_pix[n] = '\0';
+    }
+    return (int)n == 160 * 144;
+}
+
 static void build_emitters(const struct Profile *prof) {
     g_nemitters = 0;
     for (int i = 0; i < prof->nfields; i++) {
@@ -395,6 +413,8 @@ int main(int argc, char *argv[]) {
     const char *profile_path = NULL;
     const char *output_path = NULL;
     const char *boot_rom_path = NULL;
+    const char *reference_path = NULL;
+    int extra_frames = 0;
     int max_frames = 3000;
     const char *model = "DMG-B";
     struct { unsigned short addr; unsigned char value; } stop_conditions[16];
@@ -430,6 +450,10 @@ int main(int argc, char *argv[]) {
             if (strcmp(m, "cgb") == 0 || strcmp(m, "CGB") == 0) {
                 model = "CGB-E";
             }
+        } else if (strcmp(argv[i], "--reference") == 0 && i + 1 < argc) {
+            reference_path = argv[++i];
+        } else if (strcmp(argv[i], "--extra-frames") == 0 && i + 1 < argc) {
+            extra_frames = atoi(argv[++i]);
         } else if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0) {
             print_usage(argv[0]);
             return 0;
@@ -557,27 +581,68 @@ int main(int argc, char *argv[]) {
                 g_stop_serial_count == 1 ? "" : "s");
     }
 
+    /* Load reference image */
+    if (reference_path) {
+        if (load_reference(reference_path)) {
+            g_has_reference = 1;
+            fprintf(stderr, "Reference: %s (%d pixels)\n", reference_path, 160 * 144);
+        } else {
+            fprintf(stderr, "Warning: could not load reference '%s'\n", reference_path);
+        }
+    }
+
     int frames = 0;
     int stopped_early = 0;
+    int remaining_extra = -1;  /* -1 = not triggered yet */
     for (frames = 0; frames < max_frames; frames++) {
         mDebuggerRunFrame(&debugger);
-        if (g_has_pix) {
+        if (g_has_pix || g_has_reference) {
             capture_mgba_frame();
         }
+
+        /* Check reference match (immediate stop) */
+        if (g_has_reference && memcmp(g_pending_pix, g_reference_pix, 160 * 144) == 0) {
+            fprintf(stderr, "Reference match at frame %d\n", frames + 1);
+            mDebuggerRunFrame(&debugger);
+            stopped_early = 1;
+            frames++;
+            break;
+        }
+
+        /* If in extra-frames countdown, just decrement */
+        if (remaining_extra >= 0) {
+            if (remaining_extra == 0) {
+                stopped_early = 1;
+                frames++;
+                break;
+            }
+            remaining_extra--;
+            continue;
+        }
+
+        /* Check stop conditions — start countdown */
         for (int sc = 0; sc < num_stop_conditions; sc++) {
             if (g_core->rawRead8(g_core, stop_conditions[sc].addr, -1) == stop_conditions[sc].value) {
-                stopped_early = 1;
+                fprintf(stderr, "Stop condition met at frame %d, running %d extra frame%s\n",
+                        frames + 1, extra_frames, extra_frames == 1 ? "" : "s");
+                remaining_extra = extra_frames;
                 break;
             }
         }
-        if (stopped_early) {
+        if (remaining_extra >= 0 && remaining_extra == 0) {
+            stopped_early = 1;
             frames++;
             break;
         }
         if (g_stop_serial_triggered) {
-            stopped_early = 1;
-            frames++;
-            break;
+            fprintf(stderr, "Serial stop at frame %d, running %d extra frame%s\n",
+                    frames + 1, extra_frames, extra_frames == 1 ? "" : "s");
+            remaining_extra = extra_frames;
+            if (remaining_extra == 0) {
+                stopped_early = 1;
+                frames++;
+                break;
+            }
         }
     }
 

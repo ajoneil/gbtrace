@@ -53,12 +53,19 @@ $(RULES_MK): scripts/gen-rules.py
 
 # ── Top-level targets ────────────────────────────────────────────────
 
-# Screenshot test reference files (.pix)
-DMG_ACID2_REF := $(BUILD_DIR)/references/dmg-acid2.pix
+# Screenshot test reference files: .png (checked in) → .pix (generated)
+# Uses a shell loop to handle filenames with spaces.
+.PHONY: pix-refs
+pix-refs: scripts/png-to-pix.py
+	@for png in test-suites/blargg/*.png test-suites/blargg/**/*.png test-suites/dmg-acid2/*.png; do \
+		[ -f "$$png" ] || continue; \
+		pix="$${png%.png}.pix"; \
+		if [ ! -f "$$pix" ] || [ "$$png" -nt "$$pix" ]; then \
+			python3 scripts/png-to-pix.py "$$png" "$$pix"; \
+		fi; \
+	done
 
-$(DMG_ACID2_REF): test-suites/dmg-acid2/reference.png scripts/png-to-pix.py
-	@mkdir -p $(dir $@)
-	@python3 scripts/png-to-pix.py $< $@
+DMG_ACID2_REF := test-suites/dmg-acid2/reference.pix
 
 .PHONY: all adapters cli wasm traces traces-gbmicrotest traces-blargg \
         traces-dmg-acid2 manifests site serve clean
@@ -76,7 +83,7 @@ traces-gbmicrotest: $(RULES_MK) $(GBMICROTEST_STAMPS)
 	@python3 scripts/manifest.py "$(GBMICROTEST_TRACE_DIR)" "test-suites/gbmicrotest"
 	@echo "=== gbmicrotest complete ==="
 
-traces-blargg: $(RULES_MK) $(BLARGG_STAMPS)
+traces-blargg: $(RULES_MK) pix-refs $(BLARGG_STAMPS)
 	@echo "Generating blargg manifest..."
 	@python3 scripts/manifest.py "$(BLARGG_TRACE_DIR)" "test-suites/blargg"
 	@echo "=== blargg complete ==="
@@ -85,7 +92,7 @@ DMG_ACID2_TRACE_DIR := $(BUILD_DIR)/traces/dmg-acid2
 DMG_ACID2_ROM := test-suites/dmg-acid2/dmg-acid2.gb
 DMG_ACID2_PROFILE := test-suites/dmg-acid2/dmg-acid2.toml
 
-traces-dmg-acid2: $(DMG_ACID2_REF) | $(CLI)
+traces-dmg-acid2: pix-refs | $(CLI)
 	@echo "=== dmg-acid2 ==="
 	@mkdir -p $(DMG_ACID2_TRACE_DIR)
 	@for emu in $(subst $(comma), ,$(EMUS)); do \

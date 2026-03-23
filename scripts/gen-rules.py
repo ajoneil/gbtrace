@@ -42,7 +42,7 @@ def gen_suite(suite_name, rom_dir, profile, trace_dir, emus, script):
 
 def main():
     emus = sys.argv[1].split(',') if len(sys.argv) > 1 else ['gambatte', 'sameboy', 'mgba', 'gateboy']
-    blargg_emus = [e for e in emus if e != 'gateboy']
+    blargg_emus = emus
 
     micro_stamps = gen_suite(
         'gbmicrotest',
