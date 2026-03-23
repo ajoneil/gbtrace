@@ -7,9 +7,10 @@ const SCALE = 2;
 /**
  * Renders Game Boy LCD frames from trace pixel data.
  *
- * Single mode: one canvas showing the current frame, navigated by viewStart.
- * Compare mode (storeB set): three canvases — A | diff | B, aligned by
- * visual frame index so frame N in A is compared with frame N in B.
+ * Single mode: one canvas showing the current frame.
+ * Compare mode (storeB set): three canvases — A | diff | B.
+ * T-cycle mode (tcyclePixels): adds a scrubber for progressive rendering
+ * and supports pixel hover highlighting.
  */
 export class PixelDisplay extends LitElement {
   static properties = {
@@ -19,8 +20,14 @@ export class PixelDisplay extends LitElement {
     nameB: { type: String },
     frameBoundaries: { type: Array },
     viewStart: { type: Number },
+    tcyclePixels: { type: Boolean },
+    hoverIndex: { type: Number },
     _frameIndex: { state: true },
     _frameCountA: { state: true },
+    _scrubEntry: { state: true },
+    _highlightPixel: { state: true },
+    _pixMap: { state: true },
+    _pixMapFrame: { state: true },
   };
 
   static styles = css`
@@ -45,6 +52,29 @@ export class PixelDisplay extends LitElement {
     }
     .frame-info {
       color: var(--text-muted);
+    }
+    .canvas-wrap {
+      position: relative;
+      display: block;
+      width: fit-content;
+    }
+    .highlight-overlay {
+      position: absolute;
+      top: 0;
+      left: 0;
+      pointer-events: none;
+      image-rendering: pixelated;
+    }
+    .scrubber {
+      width: 100%;
+      max-width: 320px;
+      margin-top: 4px;
+    }
+    .scrub-info {
+      font-size: 0.65rem;
+      color: var(--text-muted);
+      font-family: var(--mono);
+      margin-top: 2px;
     }
     .compare-row {
       display: flex;
@@ -79,36 +109,167 @@ export class PixelDisplay extends LitElement {
     this.nameB = '';
     this.frameBoundaries = [];
     this.viewStart = 0;
+    this.tcyclePixels = false;
+    this.hoverIndex = null;
     this._frameIndex = 0;
     this._frameCountA = 0;
+    this._scrubEntry = null;
+    this._highlightPixel = null;
+    this._pixMap = null;
+    this._pixMapFrame = -1;
+    this._rafPending = false;
   }
 
   updated(changed) {
     if (changed.has('store') || changed.has('storeB')) {
       this._frameCountA = this.store?.frameCount() || 0;
+      this._pixMap = null;
+      this._pixMapFrame = -1;
     }
     if (changed.has('viewStart') || changed.has('frameBoundaries') ||
         changed.has('store') || changed.has('storeB')) {
       this._syncFrameIndex();
       this._draw();
     }
+    if (changed.has('hoverIndex') && this.tcyclePixels) {
+      this._updateHighlight();
+    }
   }
 
-  /** In single mode, derive frame index from viewStart. In compare mode,
-   *  also derive from viewStart (using trace A's boundaries) but apply
-   *  the same index to both traces for visual alignment. */
   _syncFrameIndex() {
     const bounds = this.frameBoundaries || [];
-    if (bounds.length === 0) {
-      this._frameIndex = 0;
-      return;
-    }
     let frame = 0;
     for (let i = 0; i < bounds.length; i++) {
       if (bounds[i] <= this.viewStart) frame = i;
       else break;
     }
-    this._frameIndex = frame;
+    if (frame !== this._frameIndex) {
+      this._frameIndex = frame;
+      this._scrubEntry = null; // reset scrubber on frame change
+      this._pixMap = null;
+      this._pixMapFrame = -1;
+    }
+  }
+
+  _getFrameRange() {
+    const bounds = this.frameBoundaries || [];
+    const fi = this._frameIndex;
+    const start = bounds[fi] || 0;
+    const end = fi + 1 < bounds.length ? bounds[fi + 1] : (this.store?.entryCount() || 0);
+    return { start, end };
+  }
+
+  _ensurePixMap() {
+    if (this._pixMapFrame === this._frameIndex || !this.store || !this.tcyclePixels) return;
+    try {
+      this._pixMap = this.store.buildPixelPositionMap(this._frameIndex);
+      this._pixMapFrame = this._frameIndex;
+    } catch (_) {
+      this._pixMap = null;
+    }
+  }
+
+  _updateHighlight() {
+    if (!this.tcyclePixels || this.hoverIndex == null) {
+      if (this._highlightPixel) {
+        this._highlightPixel = null;
+        this._drawHighlight();
+      }
+      return;
+    }
+    this._ensurePixMap();
+    if (!this._pixMap) return;
+
+    const { start } = this._getFrameRange();
+    const mapIdx = this.hoverIndex - start;
+    if (mapIdx < 0 || mapIdx >= this._pixMap.length) {
+      this._highlightPixel = null;
+      this._drawHighlight();
+      return;
+    }
+    const packed = this._pixMap[mapIdx];
+    if (packed === 0xFFFFFFFF) {
+      this._highlightPixel = null;
+    } else {
+      this._highlightPixel = { x: packed >> 16, y: packed & 0xFFFF };
+    }
+    this._drawHighlight();
+
+    // Also update scrubber to hover position
+    if (this.hoverIndex >= start) {
+      this._scrubEntry = this.hoverIndex;
+      this._drawPartial();
+    }
+  }
+
+  _drawHighlight() {
+    const overlay = this.renderRoot?.querySelector('.highlight-overlay');
+    if (!overlay) return;
+    const ctx = overlay.getContext('2d');
+    ctx.clearRect(0, 0, LCD_WIDTH, LCD_HEIGHT);
+    if (!this._highlightPixel) return;
+    const { x, y } = this._highlightPixel;
+    ctx.strokeStyle = '#ff4444';
+    ctx.lineWidth = 1;
+    // Draw crosshair
+    ctx.beginPath();
+    ctx.moveTo(x, 0); ctx.lineTo(x, LCD_HEIGHT);
+    ctx.moveTo(0, y + 0.5); ctx.lineTo(LCD_WIDTH, y + 0.5);
+    ctx.stroke();
+    // Draw pixel highlight
+    ctx.fillStyle = 'rgba(255,68,68,0.5)';
+    ctx.fillRect(x, y, 1, 1);
+  }
+
+  _onScrub(e) {
+    this._scrubEntry = parseInt(e.target.value, 10);
+    if (!this._rafPending) {
+      this._rafPending = true;
+      requestAnimationFrame(() => {
+        this._rafPending = false;
+        this._drawPartial();
+      });
+    }
+  }
+
+  _drawPartial() {
+    if (!this.store || !this.tcyclePixels || this._scrubEntry == null) return;
+    const canvas = this.renderRoot?.querySelector('#canvasA');
+    if (!canvas) return;
+    try {
+      const rgba = this.store.renderPartialFrame(this._frameIndex, this._scrubEntry);
+      if (!rgba) return;
+      const ctx = canvas.getContext('2d');
+      const arr = new Uint8ClampedArray(rgba.buffer || rgba);
+      // Draw checkerboard background for unrendered pixels (alpha=0)
+      this._drawCheckerboard(ctx);
+      const imgData = new ImageData(arr, LCD_WIDTH, LCD_HEIGHT);
+      ctx.putImageData(imgData, 0, 0, 0, 0, LCD_WIDTH, LCD_HEIGHT);
+      // putImageData replaces pixels — we need to composite instead.
+      // Use a temp canvas to composite over the checkerboard.
+      if (!this._tmpCanvas) {
+        this._tmpCanvas = document.createElement('canvas');
+        this._tmpCanvas.width = LCD_WIDTH;
+        this._tmpCanvas.height = LCD_HEIGHT;
+      }
+      const tmp = this._tmpCanvas.getContext('2d');
+      tmp.putImageData(imgData, 0, 0);
+      this._drawCheckerboard(ctx);
+      ctx.drawImage(this._tmpCanvas, 0, 0);
+    } catch (err) {
+      console.error('Failed to render partial frame:', err);
+    }
+  }
+
+  _drawCheckerboard(ctx) {
+    const size = 4; // checker size in LCD pixels
+    for (let y = 0; y < LCD_HEIGHT; y += size) {
+      for (let x = 0; x < LCD_WIDTH; x += size) {
+        const dark = ((x / size) + (y / size)) % 2 === 0;
+        ctx.fillStyle = dark ? '#1a1a2e' : '#16213e';
+        ctx.fillRect(x, y, size, size);
+      }
+    }
   }
 
   _renderToCanvas(id, store, frameIndex) {
@@ -135,28 +296,21 @@ export class PixelDisplay extends LitElement {
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
     if (!rgbaA || !rgbaB) { ctx.clearRect(0, 0, LCD_WIDTH, LCD_HEIGHT); return; }
-
     const diff = new Uint8ClampedArray(LCD_WIDTH * LCD_HEIGHT * 4);
     for (let i = 0; i < LCD_WIDTH * LCD_HEIGHT; i++) {
       const off = i * 4;
-      const same = rgbaA[off] === rgbaB[off] &&
-                   rgbaA[off+1] === rgbaB[off+1] &&
-                   rgbaA[off+2] === rgbaB[off+2];
+      const same = rgbaA[off] === rgbaB[off] && rgbaA[off+1] === rgbaB[off+1] && rgbaA[off+2] === rgbaB[off+2];
       if (same) {
-        const shade = rgbaA[off];
-        diff[off]   = shade;
-        diff[off+1] = shade;
-        diff[off+2] = shade;
+        diff[off] = rgbaA[off]; diff[off+1] = rgbaA[off+1]; diff[off+2] = rgbaA[off+2];
       } else {
         const avg = (rgbaA[off] + rgbaB[off]) / 2;
-        diff[off]   = Math.min(255, avg * 0.3 + 180);
+        diff[off] = Math.min(255, avg * 0.3 + 180);
         diff[off+1] = Math.round(avg * 0.2 + 30);
         diff[off+2] = Math.round(avg * 0.2 + 30);
       }
       diff[off+3] = 255;
     }
-    const imgData = new ImageData(diff, LCD_WIDTH, LCD_HEIGHT);
-    ctx.putImageData(imgData, 0, 0);
+    ctx.putImageData(new ImageData(diff, LCD_WIDTH, LCD_HEIGHT), 0, 0);
   }
 
   _draw() {
@@ -165,6 +319,8 @@ export class PixelDisplay extends LitElement {
       const rgbaA = this._renderToCanvas('canvasA', this.store, fi);
       const rgbaB = this._renderToCanvas('canvasB', this.storeB, fi);
       this._renderDiff(rgbaA, rgbaB);
+    } else if (this._scrubEntry != null && this.tcyclePixels) {
+      this._drawPartial();
     } else {
       this._renderToCanvas('canvasA', this.store, fi);
     }
@@ -172,6 +328,7 @@ export class PixelDisplay extends LitElement {
 
   render() {
     const total = this._frameCountA;
+    const { start, end } = this._getFrameRange();
 
     if (this.storeB) {
       return html`
@@ -184,20 +341,17 @@ export class PixelDisplay extends LitElement {
             <div class="compare-panel">
               <span class="compare-label a">${this.nameA || 'A'}</span>
               <canvas id="canvasA" width=${LCD_WIDTH} height=${LCD_HEIGHT}
-                style="width: ${LCD_WIDTH * SCALE}px; height: ${LCD_HEIGHT * SCALE}px;"
-              ></canvas>
+                style="width: ${LCD_WIDTH * SCALE}px; height: ${LCD_HEIGHT * SCALE}px;"></canvas>
             </div>
             <div class="compare-panel">
               <span class="compare-label diff">diff</span>
               <canvas id="diff" width=${LCD_WIDTH} height=${LCD_HEIGHT}
-                style="width: ${LCD_WIDTH * SCALE}px; height: ${LCD_HEIGHT * SCALE}px;"
-              ></canvas>
+                style="width: ${LCD_WIDTH * SCALE}px; height: ${LCD_HEIGHT * SCALE}px;"></canvas>
             </div>
             <div class="compare-panel">
               <span class="compare-label b">${this.nameB || 'B'}</span>
               <canvas id="canvasB" width=${LCD_WIDTH} height=${LCD_HEIGHT}
-                style="width: ${LCD_WIDTH * SCALE}px; height: ${LCD_HEIGHT * SCALE}px;"
-              ></canvas>
+                style="width: ${LCD_WIDTH * SCALE}px; height: ${LCD_HEIGHT * SCALE}px;"></canvas>
             </div>
           </div>
         </div>
@@ -210,9 +364,20 @@ export class PixelDisplay extends LitElement {
           <span class="pixel-title">pixels</span>
           <span class="frame-info">frame ${this._frameIndex + 1} / ${total}</span>
         </div>
-        <canvas id="canvasA" width=${LCD_WIDTH} height=${LCD_HEIGHT}
-          style="width: ${LCD_WIDTH * SCALE}px; height: ${LCD_HEIGHT * SCALE}px;"
-        ></canvas>
+        <div class="canvas-wrap">
+          <canvas id="canvasA" width=${LCD_WIDTH} height=${LCD_HEIGHT}
+            style="width: ${LCD_WIDTH * SCALE}px; height: ${LCD_HEIGHT * SCALE}px;"></canvas>
+          ${this.tcyclePixels ? html`
+            <canvas class="highlight-overlay" width=${LCD_WIDTH} height=${LCD_HEIGHT}
+              style="width: ${LCD_WIDTH * SCALE}px; height: ${LCD_HEIGHT * SCALE}px;"></canvas>
+          ` : ''}
+        </div>
+        ${this.tcyclePixels ? html`
+          <input type="range" class="scrubber"
+            min=${start} max=${end} .value=${String(this._scrubEntry ?? end)}
+            @input=${this._onScrub}>
+          <div class="scrub-info">entry ${this._scrubEntry ?? end} / ${end}</div>
+        ` : ''}
       </div>
     `;
   }
