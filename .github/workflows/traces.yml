@@ -96,26 +96,32 @@ jobs:
           ROM_DIR="test-suites/${SUITE}"
           mkdir -p "$TRACE_DIR"
 
+          MAX_JOBS=$(nproc)
+
           case "$SUITE" in
             gbmicrotest)
               PROFILE="test-suites/gbmicrotest/gbmicrotest.toml"
               SCRIPT="scripts/trace-gbmicrotest.sh"
-              find "$ROM_DIR" -name '*.gb' | sort | while read rom; do
-                bash "$SCRIPT" "$BIN" "$rom" "$PROFILE" "$TRACE_DIR" || true
+              find "$ROM_DIR" -name '*.gb' -print0 | sort -z | while IFS= read -r -d '' rom; do
+                bash "$SCRIPT" "$BIN" "$rom" "$PROFILE" "$TRACE_DIR" &
+                # Limit parallelism
+                while [ "$(jobs -r | wc -l)" -ge "$MAX_JOBS" ]; do wait -n; done
               done
               ;;
             blargg)
               PROFILE="test-suites/blargg/blargg.toml"
               SCRIPT="scripts/trace-blargg.sh"
-              find "$ROM_DIR" -name '*.gb' | sort | while read rom; do
-                bash "$SCRIPT" "$BIN" "$rom" "$PROFILE" "$TRACE_DIR" "$ROM_DIR" || true
+              find "$ROM_DIR" -name '*.gb' -print0 | sort -z | while IFS= read -r -d '' rom; do
+                bash "$SCRIPT" "$BIN" "$rom" "$PROFILE" "$TRACE_DIR" "$ROM_DIR" &
+                while [ "$(jobs -r | wc -l)" -ge "$MAX_JOBS" ]; do wait -n; done
               done
               ;;
             mooneye)
               PROFILE="test-suites/mooneye/mooneye.toml"
               SCRIPT="scripts/trace-mooneye.sh"
-              find "$ROM_DIR" -name '*.gb' | sort | while read rom; do
-                bash "$SCRIPT" "$BIN" "$rom" "$PROFILE" "$TRACE_DIR" "$ROM_DIR" || true
+              find "$ROM_DIR" -name '*.gb' -print0 | sort -z | while IFS= read -r -d '' rom; do
+                bash "$SCRIPT" "$BIN" "$rom" "$PROFILE" "$TRACE_DIR" "$ROM_DIR" &
+                while [ "$(jobs -r | wc -l)" -ge "$MAX_JOBS" ]; do wait -n; done
               done
               ;;
             dmg-acid2)
@@ -125,6 +131,7 @@ jobs:
                 "test-suites/dmg-acid2/dmg-acid2.gb" "$PROFILE" "$REF" "$TRACE_DIR" 30 || true
               ;;
           esac
+          wait
 
           python3 scripts/manifest.py "$TRACE_DIR" "$ROM_DIR"
         env:
