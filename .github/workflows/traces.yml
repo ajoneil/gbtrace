@@ -85,20 +85,52 @@ jobs:
         if: steps.cache-traces.outputs.cache-hit != 'true'
         run: make pix-refs
 
-      # Generate traces
+      # Generate traces by running scripts directly (no make, no adapter rebuild)
       - name: Generate traces
         if: steps.cache-traces.outputs.cache-hit != 'true'
         run: |
-          make traces-${{ matrix.suite }} EMUS=${{ matrix.emulator }} -j$(nproc)
+          SUITE="${{ matrix.suite }}"
+          EMU="${{ matrix.emulator }}"
+          BIN="adapters/${EMU}/gbtrace-${EMU}"
+          TRACE_DIR="build/traces/${SUITE}"
+          ROM_DIR="test-suites/${SUITE}"
+          mkdir -p "$TRACE_DIR"
+
+          case "$SUITE" in
+            gbmicrotest)
+              PROFILE="test-suites/gbmicrotest/gbmicrotest.toml"
+              SCRIPT="scripts/trace-gbmicrotest.sh"
+              find "$ROM_DIR" -name '*.gb' | sort | while read rom; do
+                bash "$SCRIPT" "$BIN" "$rom" "$PROFILE" "$TRACE_DIR" || true
+              done
+              ;;
+            blargg)
+              PROFILE="test-suites/blargg/blargg.toml"
+              SCRIPT="scripts/trace-blargg.sh"
+              find "$ROM_DIR" -name '*.gb' | sort | while read rom; do
+                bash "$SCRIPT" "$BIN" "$rom" "$PROFILE" "$TRACE_DIR" "$ROM_DIR" || true
+              done
+              ;;
+            mooneye)
+              PROFILE="test-suites/mooneye/mooneye.toml"
+              SCRIPT="scripts/trace-mooneye.sh"
+              find "$ROM_DIR" -name '*.gb' | sort | while read rom; do
+                bash "$SCRIPT" "$BIN" "$rom" "$PROFILE" "$TRACE_DIR" "$ROM_DIR" || true
+              done
+              ;;
+            dmg-acid2)
+              PROFILE="test-suites/dmg-acid2/dmg-acid2.toml"
+              REF="test-suites/dmg-acid2/reference.pix"
+              bash scripts/trace-screenshot.sh "$BIN" \
+                "test-suites/dmg-acid2/dmg-acid2.gb" "$PROFILE" "$REF" "$TRACE_DIR" 30 || true
+              ;;
+          esac
+
+          python3 scripts/manifest.py "$TRACE_DIR" "$ROM_DIR"
         env:
           LD_LIBRARY_PATH: ${{ github.workspace }}/adapters/sameboy/SameBoy/build/lib
+          CLI: ${{ github.workspace }}/target/release/gbtrace-cli
         timeout-minutes: 120
-
-      # Generate manifest for this emulator's traces
-      - name: Generate manifest
-        if: steps.cache-traces.outputs.cache-hit != 'true'
-        run: |
-          python3 scripts/manifest.py "build/traces/${{ matrix.suite }}" "test-suites/${{ matrix.suite }}"
 
       - name: Upload traces
         uses: actions/upload-artifact@v6
