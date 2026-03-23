@@ -419,6 +419,27 @@ impl ColumnStore {
         Ok((a, b))
     }
 
+    // --- Frame boundaries ---
+
+    /// Detect frame boundaries by scanning `ly` for vblank→active transitions.
+    /// Returns entry indices where each frame starts. Handles instruction-level
+    /// traces where the exact 153→0 may not be sampled.
+    pub fn frame_boundaries(&self) -> Vec<u32> {
+        let ly_col = match self.field_col("ly") {
+            Some(c) => c,
+            None => return Vec::new(),
+        };
+        let mut boundaries = vec![0u32];
+        for i in 1..self.len {
+            let prev = self.columns[ly_col].get_numeric(i - 1) as u8;
+            let cur = self.columns[ly_col].get_numeric(i) as u8;
+            if cur < prev && prev >= 144 {
+                boundaries.push(i as u32);
+            }
+        }
+        boundaries
+    }
+
     // --- Query ---
 
     /// Evaluate a condition against all rows and return matching indices.
@@ -966,6 +987,29 @@ mod lazy {
 
         pub fn field_col(&self, name: &str) -> Option<usize> {
             self.field_index.get(name).copied()
+        }
+
+        /// Detect frame boundaries by scanning `ly` for vblank wraps.
+        /// For multi-row-group files with frame-aligned groups, uses metadata.
+        /// Otherwise scans ly values.
+        pub fn frame_boundaries(&self) -> Vec<u32> {
+            if self.index.num_row_groups() > 1 {
+                (0..self.index.num_row_groups())
+                    .map(|rg| self.index.row_group_start(rg) as u32)
+                    .collect()
+            } else {
+                if self.field_col("ly").is_none() { return Vec::new(); }
+                let mut boundaries = vec![0u32];
+                let count = self.entry_count();
+                for i in 1..count {
+                    let prev = self.get_u8_named("ly", i - 1).unwrap_or(0);
+                    let cur = self.get_u8_named("ly", i).unwrap_or(0);
+                    if cur < prev && prev >= 144 {
+                        boundaries.push(i as u32);
+                    }
+                }
+                boundaries
+            }
         }
 
         /// Ensure a row group is in the cache, decoding if necessary.

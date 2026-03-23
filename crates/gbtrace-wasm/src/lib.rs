@@ -84,20 +84,8 @@ impl TraceStore {
     #[wasm_bindgen(js_name = frameBoundaries)]
     pub fn frame_boundaries(&self) -> js_sys::Uint32Array {
         let boundaries = match &self.store {
-            StoreKind::Lazy(s) => {
-                // If there are multiple row groups, use them as frame boundaries.
-                // Otherwise fall back to ly-based detection (old files with 1 big row group).
-                if s.num_row_groups() > 1 {
-                    let mut b = Vec::with_capacity(s.num_row_groups());
-                    for rg in 0..s.num_row_groups() {
-                        b.push(s.row_group_start(rg) as u32);
-                    }
-                    b
-                } else {
-                    Self::detect_frame_boundaries_lazy(s)
-                }
-            }
-            StoreKind::Eager(s) => Self::detect_frame_boundaries_eager(s),
+            StoreKind::Lazy(s) => s.frame_boundaries(),
+            StoreKind::Eager(s) => s.frame_boundaries(),
         };
         let arr = js_sys::Uint32Array::new_with_length(boundaries.len() as u32);
         arr.copy_from(&boundaries);
@@ -422,43 +410,6 @@ impl TraceStore {
         }
     }
 
-    /// Detect a frame boundary: ly wrapped around (decreased while in vblank range).
-    /// Handles instruction-level traces where the exact 153→0 transition may not
-    /// be sampled — any decrease from vblank ly values counts.
-    fn is_frame_boundary(prev_ly: u8, cur_ly: u8) -> bool {
-        cur_ly < prev_ly && prev_ly >= 144
-    }
-
-    fn detect_frame_boundaries_lazy(s: &LazyColumnStore) -> Vec<u32> {
-        if s.field_col("ly").is_none() { return Vec::new(); }
-        let mut boundaries = vec![0u32];
-        let count = s.entry_count();
-        for i in 1..count {
-            let prev = s.get_u8_named("ly", i - 1).unwrap_or(0);
-            let cur = s.get_u8_named("ly", i).unwrap_or(0);
-            if Self::is_frame_boundary(prev, cur) {
-                boundaries.push(i as u32);
-            }
-        }
-        boundaries
-    }
-
-    fn detect_frame_boundaries_eager(s: &ColumnStore) -> Vec<u32> {
-        let ly_col = match s.field_col("ly") {
-            Some(c) => c,
-            None => return Vec::new(),
-        };
-        let mut boundaries = vec![0u32];
-        let count = s.entry_count();
-        for i in 1..count {
-            let prev = s.column(ly_col).get_numeric(i - 1) as u8;
-            let cur = s.column(ly_col).get_numeric(i) as u8;
-            if Self::is_frame_boundary(prev, cur) {
-                boundaries.push(i as u32);
-            }
-        }
-        boundaries
-    }
 }
 
 /// Prepare two TraceStores for comparison with a sync condition.
