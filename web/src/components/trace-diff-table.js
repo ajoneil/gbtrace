@@ -70,6 +70,8 @@ export class TraceDiffTable extends LitElement {
     fields: { type: Array },
     highlightIndices: { type: Object },
     hiddenFields: { type: Object },
+    viewStart: { type: Number },
+    viewEnd: { type: Number },
     _pcMatches: { state: true },
   };
 
@@ -82,6 +84,8 @@ export class TraceDiffTable extends LitElement {
     this.fields = [];
     this.highlightIndices = null;
     this.hiddenFields = new Set();
+    this.viewStart = 0;
+    this.viewEnd = 0;
     this._renderedStart = -1;
     this._renderedCount = 0;
     this._rafId = null;
@@ -109,11 +113,11 @@ export class TraceDiffTable extends LitElement {
   }
 
   updated(changed) {
-    if (changed.has('storeA') || changed.has('storeB') || changed.has('fields') || changed.has('hiddenFields')) {
+    if (changed.has('storeA') || changed.has('storeB') || changed.has('fields') || changed.has('hiddenFields') || changed.has('viewStart') || changed.has('viewEnd')) {
       this._renderedStart = -1;
       this._checkPcMatch();
     }
-    if (changed.has('storeA') || changed.has('storeB') || changed.has('fields') || changed.has('highlightIndices') || changed.has('hiddenFields') || changed.has('_pcMatches')) {
+    if (changed.has('storeA') || changed.has('storeB') || changed.has('fields') || changed.has('highlightIndices') || changed.has('hiddenFields') || changed.has('_pcMatches') || changed.has('viewStart') || changed.has('viewEnd')) {
       this.updateComplete.then(() => {
         this._renderRows();
       });
@@ -248,7 +252,9 @@ export class TraceDiffTable extends LitElement {
   }
 
   _entryCount() {
-    return Math.min(this.storeA.entryCount(), this.storeB.entryCount());
+    const ve = this.viewEnd || Math.min(this.storeA.entryCount(), this.storeB.entryCount());
+    const vs = this.viewStart || 0;
+    return ve - vs;
   }
 
   _spacerHeight() {
@@ -302,10 +308,12 @@ export class TraceDiffTable extends LitElement {
       return;
     }
 
+    const vs = this.viewStart || 0;
+    const globalStart = vs + startIdx;
     let entriesA, entriesB;
     try {
-      entriesA = this.storeA.entriesRange(startIdx, count);
-      entriesB = this.storeB.entriesRange(startIdx, count);
+      entriesA = this.storeA.entriesRange(globalStart, count);
+      entriesB = this.storeB.entriesRange(globalStart, count);
     } catch (err) { console.error(err); return; }
 
     let top;
@@ -343,7 +351,7 @@ export class TraceDiffTable extends LitElement {
     const partsB = [];
 
     for (let i = 0; i < entriesA.length; i++) {
-      const idx = startIdx + i;
+      const idx = globalStart + i;
       const a = entriesA[i];
       const b = entriesB[i];
 

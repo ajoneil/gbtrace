@@ -76,6 +76,8 @@ export class TraceChart extends LitElement {
     field: { type: String },
     highlightIndices: { type: Object },
     cursorIndex: { type: Number },
+    viewStart: { type: Number },
+    viewEnd: { type: Number },
     _viewStart: { state: true },
     _viewEnd: { state: true },
     _tooltip: { state: true },
@@ -115,10 +117,10 @@ export class TraceChart extends LitElement {
   }
 
   updated(changed) {
-    if (changed.has('store') || changed.has('storeB') || changed.has('field')) {
+    if (changed.has('store') || changed.has('storeB') || changed.has('field') || changed.has('viewStart') || changed.has('viewEnd')) {
       if (this.store && this.field) {
-        this._viewStart = 0;
-        this._viewEnd = this.store.entryCount();
+        this._viewStart = this.viewStart ?? 0;
+        this._viewEnd = this.viewEnd ?? this.store.entryCount();
         this.updateComplete.then(() => this._draw());
       }
     }
@@ -493,8 +495,8 @@ export class TraceChart extends LitElement {
   }
 
   _resetZoom() {
-    this._viewStart = 0;
-    this._viewEnd = this.store.entryCount();
+    this._viewStart = this.viewStart ?? 0;
+    this._viewEnd = this.viewEnd ?? this.store.entryCount();
   }
 }
 
