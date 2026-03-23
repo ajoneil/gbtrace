@@ -1345,7 +1345,12 @@ mod lazy {
 
                 for row in 0..rg_store.entry_count() {
                     for col in 0..ncols {
-                        store.push_u64(col, rg_store.column(col).get_numeric(row));
+                        let src = rg_store.column(col);
+                        match src {
+                            ColumnData::Str(_) => store.push_str(col, src.get_str(row)),
+                            ColumnData::Bool(_) => store.push_bool(col, src.get_bool(row)),
+                            _ => store.push_u64(col, src.get_numeric(row)),
+                        }
                     }
                     store.finish_row();
                 }

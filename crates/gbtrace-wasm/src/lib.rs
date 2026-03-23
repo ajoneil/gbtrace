@@ -114,7 +114,7 @@ impl TraceStore {
     /// Returns null if no pixel data or frame index is out of range.
     #[wasm_bindgen(js_name = renderFrame)]
     pub fn render_frame(&self, frame_index: usize) -> Result<JsValue, JsError> {
-        let store = match &self.store {
+        let eager = match &self.store {
             StoreKind::Eager(s) => {
                 let frames = framebuffer::reconstruct_frames(s);
                 return match frames.into_iter().nth(frame_index) {
@@ -123,15 +123,11 @@ impl TraceStore {
                 };
             }
             StoreKind::Lazy(s) => {
-                if frame_index >= s.num_row_groups() {
-                    return Ok(JsValue::NULL);
-                }
-                s.row_group_store(frame_index)
-                    .map_err(|e| JsError::new(&format!("{e}")))?
+                s.to_eager().map_err(|e| JsError::new(&format!("{e}")))?
             }
         };
-        let frames = framebuffer::reconstruct_frames(&store);
-        match frames.into_iter().next() {
+        let frames = framebuffer::reconstruct_frames(&eager);
+        match frames.into_iter().nth(frame_index) {
             Some(f) => Ok(js_sys::Uint8ClampedArray::from(&f.to_rgba()[..]).into()),
             None => Ok(JsValue::NULL),
         }
