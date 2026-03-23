@@ -423,8 +423,21 @@ impl ColumnStore {
 
     /// Evaluate a condition against all rows and return matching indices.
     pub fn query(&self, condition_str: &str) -> std::result::Result<Vec<u32>, String> {
+        self.query_range(condition_str, 0, self.len)
+    }
+
+    /// Evaluate a condition within a range and return matching global indices.
+    pub fn query_range(&self, condition_str: &str, start: usize, end: usize) -> std::result::Result<Vec<u32>, String> {
         let condition = query::parse_condition(condition_str)?;
-        Ok(self.query_condition(&condition))
+        let start = start.min(self.len);
+        let end = end.min(self.len);
+        let mut indices = Vec::new();
+        for i in start..end {
+            if self.eval_condition(&condition, i) {
+                indices.push(i as u32);
+            }
+        }
+        Ok(indices)
     }
 
     /// Evaluate a parsed condition against all rows.
@@ -1070,35 +1083,55 @@ mod lazy {
         // --- Query (one row group at a time) ---
 
         pub fn query(&self, condition_str: &str) -> std::result::Result<Vec<u32>, String> {
+            self.query_range(condition_str, 0, self.entry_count())
+        }
+
+        pub fn query_range(&self, condition_str: &str, start: usize, end: usize) -> std::result::Result<Vec<u32>, String> {
             let condition = crate::query::parse_condition(condition_str)?;
             let stateful = Self::is_stateful(&condition);
+            let total = self.entry_count();
+            let start = start.min(total);
+            let end = end.min(total);
             let mut results = Vec::new();
 
             for rg in 0..self.index.num_row_groups() {
-                self.ensure_loaded(rg);
-                let global_start = self.index.row_group_start(rg) as u32;
+                let rg_start = self.index.row_group_start(rg);
                 let rg_len = self.index.row_group_len(rg);
+                let rg_end = rg_start + rg_len;
 
-                // Handle row 0: may need cross-boundary check for stateful conditions
-                if rg_len > 0 && stateful && rg > 0 {
-                    if self.eval_cross_boundary(&condition, rg) {
-                        results.push(global_start);
-                    }
-                } else if rg_len > 0 {
-                    let cache = self.cache.borrow();
-                    let store = &cache.entries.iter().find(|(k, _)| *k == rg).unwrap().1;
-                    if store.eval_condition(&condition, 0) {
-                        results.push(global_start);
-                    }
-                }
+                // Skip row groups entirely outside the range
+                if rg_end <= start || rg_start >= end { continue; }
 
-                // Handle rows 1..end normally (within-group, no boundary issues)
-                if rg_len > 1 {
-                    let cache = self.cache.borrow();
-                    let store = &cache.entries.iter().find(|(k, _)| *k == rg).unwrap().1;
-                    for local in 1..store.entry_count() {
-                        if store.eval_condition(&condition, local) {
-                            results.push(global_start + local as u32);
+                self.ensure_loaded(rg);
+                let global_start = rg_start as u32;
+
+                // Determine local bounds within this row group
+                let local_start = if rg_start < start { start - rg_start } else { 0 };
+                let local_end = if rg_end > end { end - rg_start } else { rg_len };
+
+                // Handle first row of the local range
+                if local_start < local_end {
+                    let first = local_start;
+                    if first == 0 && stateful && rg > 0 {
+                        if self.eval_cross_boundary(&condition, rg) {
+                            results.push(global_start);
+                        }
+                    } else {
+                        let cache = self.cache.borrow();
+                        let store = &cache.entries.iter().find(|(k, _)| *k == rg).unwrap().1;
+                        if store.eval_condition(&condition, first) {
+                            results.push(global_start + first as u32);
+                        }
+                    }
+
+                    // Remaining rows
+                    if local_start + 1 < local_end {
+                        let cache = self.cache.borrow();
+                        let store = &cache.entries.iter().find(|(k, _)| *k == rg).unwrap().1;
+                        for local in (local_start + 1)..local_end {
+                            if store.eval_condition(&condition, local) {
+                                results.push(global_start + local as u32);
+                            }
                         }
                     }
                 }

@@ -218,6 +218,8 @@ export class TraceQuery extends LitElement {
     storeB: { type: Object },
     compareMode: { type: Boolean },
     fields: { type: Array },
+    viewStart: { type: Number },
+    viewEnd: { type: Number },
     _selectedField: { state: true },
     _fieldOp: { state: true },
     _fieldValue: { state: true },
@@ -233,6 +235,8 @@ export class TraceQuery extends LitElement {
   updated(changed) {
     if (changed.has('store') || changed.has('storeB')) {
       this._clear();
+    } else if ((changed.has('viewStart') || changed.has('viewEnd')) && this._activeQuery) {
+      this._runQuery(this._activeQuery, this._activeLabel);
     }
   }
 
@@ -503,7 +507,9 @@ export class TraceQuery extends LitElement {
     this._currentMatch = -1;
 
     try {
-      this._matches = this.store.query(queryStr);
+      const vs = this.viewStart ?? 0;
+      const ve = this.viewEnd ?? this.store.entryCount();
+      this._matches = this.store.queryRange(queryStr, vs, ve);
 
       const cap = Math.min(this._matches.length, 500);
       const entries = [];
