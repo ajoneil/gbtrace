@@ -280,20 +280,26 @@ impl ColumnStore {
         let ncols = self.header.fields.len();
         let mut prev_pc = self.columns[pc_col].get_numeric(0);
 
+        let copy_row = |store: &mut Self, src: &Self, i: usize| {
+            for col in 0..ncols {
+                let c = &src.columns[col];
+                match c {
+                    ColumnData::Str(_) => store.push_str(col, c.get_str(i)),
+                    ColumnData::Bool(_) => store.push_bool(col, c.get_bool(i)),
+                    _ => store.push_u64(col, c.get_numeric(i)),
+                }
+            }
+            store.finish_row();
+        };
+
         // Emit first entry
-        for col in 0..ncols {
-            new_store.push_u64(col, self.columns[col].get_numeric(0));
-        }
-        new_store.finish_row();
+        copy_row(&mut new_store, self, 0);
 
         for i in 1..count {
             let cur_pc = self.columns[pc_col].get_numeric(i);
             if cur_pc != prev_pc {
                 // PC changed — emit first T-cycle of new instruction
-                for col in 0..ncols {
-                    new_store.push_u64(col, self.columns[col].get_numeric(i));
-                }
-                new_store.finish_row();
+                copy_row(&mut new_store, self, i);
             }
             prev_pc = cur_pc;
         }

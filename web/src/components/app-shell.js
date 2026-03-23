@@ -409,6 +409,11 @@ export class AppShell extends LitElement {
     const trigB = store.header()?.trigger;
     this._downsampled = false;
 
+    // Default to frame sync when both traces have pixel data
+    if (this._syncMode === 'pc' && this._store?.hasPixels() && store.hasPixels()) {
+      this._syncMode = 'ly=0';
+    }
+
     try {
       const [prepA, prepB] = prepareForDiffSync(this._store, store, this._syncMode);
       this._store = prepA;
@@ -518,7 +523,14 @@ export class AppShell extends LitElement {
   }
 
   _onFieldSelected(e) {
+    const prev = this._chartField;
     this._chartField = e.detail.field;
+    // When entering pixel compare mode, switch to frame sync if currently on PC
+    if (e.detail.field === '__pixels__' && prev !== '__pixels__' &&
+        this._storeB && this._syncMode === 'pc') {
+      // Trigger sync change to ly=0 (frame alignment)
+      this._onSyncChanged({ detail: { sync: 'ly=0' } });
+    }
   }
 
   _onHoverIndex(e) {
