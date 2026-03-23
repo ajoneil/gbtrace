@@ -132,9 +132,15 @@ impl TraceStore {
 
     /// Parse a condition string and find all matching entry indices.
     pub fn query(&self, condition_str: &str) -> Result<js_sys::Uint32Array, JsError> {
+        self.query_range(condition_str, 0, self.entry_count())
+    }
+
+    /// Find matching entry indices within a range.
+    #[wasm_bindgen(js_name = queryRange)]
+    pub fn query_range(&self, condition_str: &str, start: usize, end: usize) -> Result<js_sys::Uint32Array, JsError> {
         let indices = match &self.store {
-            StoreKind::Lazy(s) => s.query(condition_str).map_err(|e| JsError::new(&e))?,
-            StoreKind::Eager(s) => s.query(condition_str).map_err(|e| JsError::new(&e))?,
+            StoreKind::Lazy(s) => s.query_range(condition_str, start, end).map_err(|e| JsError::new(&e))?,
+            StoreKind::Eager(s) => s.query_range(condition_str, start, end).map_err(|e| JsError::new(&e))?,
         };
         let arr = js_sys::Uint32Array::new_with_length(indices.len() as u32);
         arr.copy_from(&indices);
