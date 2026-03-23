@@ -18,9 +18,8 @@ all: $(TARGET)
 gambatte-speedrun:
 	git clone --recursive https://github.com/pokemon-speedrunning/gambatte-speedrun.git
 
-# Apply gbtrace patches and build libgambatte via scons
+# Build libgambatte via scons (no patches needed)
 $(LIB): gambatte-speedrun
-	bash patches/apply.sh
 	cd $(GAMBATTE_DIR)/libgambatte && scons -j$$(nproc)
 
 $(TARGET): gbtrace-gambatte.cpp $(LIB)
