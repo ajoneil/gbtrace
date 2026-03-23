@@ -442,15 +442,15 @@ export class AppShell extends LitElement {
   _recomputeDiffStats() {
     if (!this._store || !this._storeB) {
       this._diffStats = null;
-    this._downsampled = false;
+      this._downsampled = false;
       return;
     }
     try {
-      this._diffStats = this._store.diffStats(this._storeB);
+      this._diffStats = this._store.diffStatsRange(this._storeB, this._viewStart, this._viewEnd);
     } catch (err) {
       console.error('Failed to compute diff stats:', err);
       this._diffStats = null;
-    this._downsampled = false;
+      this._downsampled = false;
     }
   }
 
@@ -479,6 +479,7 @@ export class AppShell extends LitElement {
   _onViewRangeChanged(e) {
     this._viewStart = e.detail.start;
     this._viewEnd = e.detail.end;
+    this._recomputeDiffStats();
   }
 
 }
