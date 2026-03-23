@@ -140,11 +140,37 @@ static bool g_stop_serial_triggered = false;
 // Pre-computed list of what to emit per entry, for fast callback execution.
 struct FieldEmitter {
     std::string name;
-    enum Source { CALLBACK_8, CALLBACK_16, IO_READ, IME } source;
+    enum Source { CALLBACK_8, CALLBACK_16, IO_READ, IME, PIX } source;
     int cb_index;           // for CALLBACK_8/16
     unsigned short io_addr; // for IO_READ
 };
 static std::vector<FieldEmitter> g_emitters;
+static bool g_has_pix = false;
+
+// --- Pixel capture ---
+// Gambatte fills video_buf as a 160x144 RGBA framebuffer during runFor().
+// After each frame completes, we convert to a 2-bit shade string and emit
+// it on the next trace entry. Pixels accumulate in g_pending_pix.
+static gambatte::uint_least32_t *g_video_buf_ptr = nullptr;
+static std::string g_pending_pix;
+
+static inline char rgba_to_shade_char(gambatte::uint_least32_t rgba) {
+    // Use red channel — gambatte's default greyscale palette
+    unsigned r = rgba & 0xFF;
+    if (r >= 0xC0) return '0';
+    if (r >= 0x70) return '1';
+    if (r >= 0x30) return '2';
+    return '3';
+}
+
+static void capture_frame_pixels() {
+    if (!g_video_buf_ptr) return;
+    g_pending_pix.clear();
+    g_pending_pix.reserve(160 * 144);
+    for (int i = 0; i < 160 * 144; i++) {
+        g_pending_pix += rgba_to_shade_char(g_video_buf_ptr[i]);
+    }
+}
 
 static void build_emitters(const Profile &prof) {
     g_emitters.clear();
@@ -155,6 +181,11 @@ static void build_emitters(const Profile &prof) {
         if (field == "ime") {
             // gambatte doesn't expose IME — skip rather than emit fake data
             std::fprintf(stderr, "Note: skipping 'ime' (not available in gambatte)\n");
+            continue;
+        } else if (field == "pix") {
+            em.source = FieldEmitter::PIX;
+            g_has_pix = true;
+            g_emitters.push_back(em);
             continue;
         } else if (auto it = CALLBACK_FIELDS.find(field); it != CALLBACK_FIELDS.end()) {
             em.source = it->second.is_16bit ? FieldEmitter::CALLBACK_16 : FieldEmitter::CALLBACK_8;
@@ -229,6 +260,11 @@ static void trace_callback(void *data) {
         case FieldEmitter::IME:
             // IME not available in gambatte — should be skipped by build_emitters
             break;
+        case FieldEmitter::PIX: {
+            std::fprintf(g_output, "\"%s\"", g_pending_pix.c_str());
+            g_pending_pix.clear();
+            break;
+        }
         }
     }
 
@@ -458,6 +494,9 @@ int main(int argc, char *argv[]) {
                      g_stop_serial_count == 1 ? "" : "s");
     }
 
+    // Set up pixel capture
+    g_video_buf_ptr = video_buf.data();
+
     int frames = 0;
     bool stopped_early = false;
     while (frames < max_frames) {
@@ -467,6 +506,35 @@ int main(int argc, char *argv[]) {
             audio_buf.data(), samples);
         if (result >= 0) {
             frames++;
+            if (g_has_pix) {
+                // Emit a standalone entry with the full frame's pixel data.
+                // This entry has the current IO state and the complete frame.
+                capture_frame_pixels();
+                bool first = true;
+                std::fprintf(g_output, "{");
+                for (const auto &em : g_emitters) {
+                    if (!first) std::fprintf(g_output, ",");
+                    first = false;
+                    std::fprintf(g_output, "\"%s\":", em.name.c_str());
+                    switch (em.source) {
+                    case FieldEmitter::CALLBACK_8:
+                    case FieldEmitter::CALLBACK_16:
+                        // Use cached IO values for CPU regs (not available here)
+                        std::fprintf(g_output, "0");
+                        break;
+                    case FieldEmitter::IO_READ:
+                        fput_u8(g_output, gb.externalRead(em.io_addr));
+                        break;
+                    case FieldEmitter::IME:
+                        break;
+                    case FieldEmitter::PIX:
+                        std::fprintf(g_output, "\"%s\"", g_pending_pix.c_str());
+                        g_pending_pix.clear();
+                        break;
+                    }
+                }
+                std::fprintf(g_output, "}\n");
+            }
             for (const auto &cond : stop_conditions) {
                 if (gb.externalRead(cond.addr) == cond.value) {
                     stopped_early = true;

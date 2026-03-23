@@ -46,6 +46,12 @@ impl TraceEntry {
         self.fields.insert(name.into(), Value::Bool(val));
     }
 
+    /// Set a string field (e.g. `"pix"`).
+    pub fn set_str(&mut self, name: impl Into<String>, val: &str) {
+        self.fields
+            .insert(name.into(), Value::String(val.to_string()));
+    }
+
     /// Get a field value by name.
     pub fn get(&self, name: &str) -> Option<&Value> {
         self.fields.get(name)

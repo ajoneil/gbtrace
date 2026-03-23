@@ -26,6 +26,7 @@ pub enum ColumnData {
     U16(Vec<u16>),
     U8(Vec<u8>),
     Bool(Vec<bool>),
+    Str(Vec<String>),
 }
 
 impl ColumnData {
@@ -35,6 +36,7 @@ impl ColumnData {
             FieldType::UInt16 => Self::U16(Vec::with_capacity(cap)),
             FieldType::UInt8 => Self::U8(Vec::with_capacity(cap)),
             FieldType::Bool => Self::Bool(Vec::with_capacity(cap)),
+            FieldType::Str => Self::Str(Vec::with_capacity(cap)),
         }
     }
 
@@ -45,13 +47,22 @@ impl ColumnData {
             Self::U16(v) => v[row] as u64,
             Self::U8(v) => v[row] as u64,
             Self::Bool(v) => v[row] as u64,
+            Self::Str(_) => 0,
         }
     }
 
     pub fn get_bool(&self, row: usize) -> bool {
         match self {
             Self::Bool(v) => v[row],
+            Self::Str(_) => false,
             other => other.get_numeric(row) != 0,
+        }
+    }
+
+    pub fn get_str(&self, row: usize) -> &str {
+        match self {
+            Self::Str(v) => &v[row],
+            _ => "",
         }
     }
 
@@ -105,6 +116,7 @@ impl ColumnStore {
             ColumnData::U16(v) => v.push(val as u16),
             ColumnData::U8(v) => v.push(val as u8),
             ColumnData::Bool(v) => v.push(val != 0),
+            ColumnData::Str(v) => v.push(String::new()),
         }
     }
 
@@ -115,6 +127,7 @@ impl ColumnStore {
             ColumnData::U16(v) => v.push(val),
             ColumnData::U8(v) => v.push(val as u8),
             ColumnData::Bool(v) => v.push(val != 0),
+            ColumnData::Str(v) => v.push(String::new()),
         }
     }
 
@@ -125,6 +138,7 @@ impl ColumnStore {
             ColumnData::U16(v) => v.push(val as u16),
             ColumnData::U8(v) => v.push(val),
             ColumnData::Bool(v) => v.push(val != 0),
+            ColumnData::Str(v) => v.push(String::new()),
         }
     }
 
@@ -135,6 +149,14 @@ impl ColumnStore {
             ColumnData::U8(v) => v.push(val as u8),
             ColumnData::U16(v) => v.push(val as u16),
             ColumnData::U64(v) => v.push(val as u64),
+            ColumnData::Str(v) => v.push(String::new()),
+        }
+    }
+
+    /// Push a string value to a column by index.
+    pub fn push_str(&mut self, col: usize, val: &str) {
+        if let ColumnData::Str(v) = &mut self.columns[col] {
+            v.push(val.to_string());
         }
     }
 
@@ -222,6 +244,7 @@ impl ColumnStore {
                 ColumnData::U16(v) => entry.set_u16(name, v[index]),
                 ColumnData::U8(v) => entry.set_u8(name, v[index]),
                 ColumnData::Bool(v) => entry.set_bool(name, v[index]),
+                ColumnData::Str(v) => entry.set_str(name, &v[index]),
             }
         }
         entry
@@ -644,7 +667,7 @@ pub fn load_column_store(path: impl AsRef<std::path::Path>) -> Result<ColumnStor
 
 #[cfg(feature = "parquet")]
 fn load_from_parquet(path: &std::path::Path) -> Result<ColumnStore> {
-    use arrow::array::{BooleanArray, UInt16Array, UInt64Array, UInt8Array};
+    use arrow::array::{BooleanArray, StringArray, UInt16Array, UInt64Array, UInt8Array};
 
     let reader = ParquetTraceReader::open(path)?;
     let header = reader.header().clone();
@@ -690,6 +713,14 @@ fn load_from_parquet(path: &std::path::Path) -> Result<ColumnStore> {
                         }
                     }
                 }
+                FieldType::Str => {
+                    let arr = col.as_any().downcast_ref::<StringArray>().unwrap();
+                    if let ColumnData::Str(v) = &mut store.columns[col_idx] {
+                        for i in 0..num_rows {
+                            v.push(arr.value(i).to_string());
+                        }
+                    }
+                }
             }
         }
         store.len += num_rows;
@@ -725,7 +756,7 @@ fn load_from_jsonl(path: &std::path::Path) -> Result<ColumnStore> {
 /// Load a column store from in-memory bytes (for WASM).
 #[cfg(feature = "parquet")]
 pub fn load_column_store_from_bytes(data: &[u8]) -> Result<ColumnStore> {
-    use arrow::array::{BooleanArray, UInt16Array, UInt64Array, UInt8Array};
+    use arrow::array::{BooleanArray, StringArray, UInt16Array, UInt64Array, UInt8Array};
 
     const PARQUET_MAGIC: &[u8] = b"PAR1";
 
@@ -772,6 +803,14 @@ pub fn load_column_store_from_bytes(data: &[u8]) -> Result<ColumnStore> {
                         if let ColumnData::Bool(v) = &mut store.columns[col_idx] {
                             for i in 0..num_rows {
                                 v.push(arr.value(i));
+                            }
+                        }
+                    }
+                    FieldType::Str => {
+                        let arr = col.as_any().downcast_ref::<StringArray>().unwrap();
+                        if let ColumnData::Str(v) = &mut store.columns[col_idx] {
+                            for i in 0..num_rows {
+                                v.push(arr.value(i).to_string());
                             }
                         }
                     }
@@ -849,7 +888,7 @@ mod lazy {
     use super::*;
     use std::cell::RefCell;
 
-    use arrow::array::{BooleanArray, UInt16Array, UInt64Array, UInt8Array};
+    use arrow::array::{BooleanArray, StringArray, UInt16Array, UInt64Array, UInt8Array};
 
     const LRU_CAPACITY: usize = 3;
 
@@ -1066,6 +1105,14 @@ mod lazy {
                             if let ColumnData::Bool(v) = &mut store.columns[col_idx] {
                                 for i in 0..num_rows {
                                     v.push(arr.value(i));
+                                }
+                            }
+                        }
+                        FieldType::Str => {
+                            let arr = col.as_any().downcast_ref::<StringArray>().unwrap();
+                            if let ColumnData::Str(v) = &mut store.columns[col_idx] {
+                                for i in 0..num_rows {
+                                    v.push(arr.value(i).to_string());
                                 }
                             }
                         }

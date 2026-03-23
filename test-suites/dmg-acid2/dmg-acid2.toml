@@ -1,0 +1,9 @@
+[profile]
+name = "dmg-acid2"
+description = "PPU accuracy test with pixel output for frame comparison."
+trigger = "instruction"
+
+[fields]
+cpu = ["pc", "sp"]
+ppu = ["lcdc", "stat", "ly"]
+pixel = ["pix"]
