@@ -405,6 +405,26 @@ export class AppShell extends LitElement {
     this._frameBoundariesB = Array.from(store.frameBoundaries());
     this._viewStart = 0;
     this._viewEnd = this._store.entryCount();
+
+    // Auto-hide fields missing from either trace
+    const fieldsA = new Set(this._store.header()?.fields || []);
+    const fieldsB = new Set(store.header()?.fields || []);
+    const newHidden = new Set(this._hiddenFields);
+    this._compareHiddenFields = new Set(); // track what we auto-hid
+    for (const f of fieldsA) {
+      if (!fieldsB.has(f)) {
+        newHidden.add(f);
+        this._compareHiddenFields.add(f);
+      }
+    }
+    for (const f of fieldsB) {
+      if (!fieldsA.has(f)) {
+        newHidden.add(f);
+        this._compareHiddenFields.add(f);
+      }
+    }
+    this._hiddenFields = newHidden;
+
     this._recomputeDiffStats();
   }
 
@@ -417,6 +437,15 @@ export class AppShell extends LitElement {
     this._hoverIndex = null;
     this._diffStats = null;
     this._downsampled = false;
+    // Restore fields that were auto-hidden for compare
+    if (this._compareHiddenFields?.size) {
+      const restored = new Set(this._hiddenFields);
+      for (const f of this._compareHiddenFields) {
+        restored.delete(f);
+      }
+      this._hiddenFields = restored;
+      this._compareHiddenFields = null;
+    }
   }
 
   _reset() {
