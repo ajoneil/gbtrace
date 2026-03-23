@@ -1,9 +1,10 @@
 use gbtrace::column_store::{ColumnData, ColumnStore, LazyColumnStore};
 use gbtrace::disasm;
-use gbtrace::framebuffer;
+use gbtrace::framebuffer::{self, Frame};
 use gbtrace::profile::FieldType;
 use wasm_bindgen::prelude::*;
 
+use std::cell::RefCell;
 use std::collections::BTreeMap;
 
 /// Serializable entry type for JS interop.
@@ -36,6 +37,8 @@ pub struct TraceStore {
     rom: Option<Vec<u8>>,
     /// Original bytes for re-loading when sync changes.
     original_bytes: Option<Vec<u8>>,
+    /// Cached reconstructed frames (lazily populated).
+    frames_cache: RefCell<Option<Vec<Frame>>>,
 }
 
 #[wasm_bindgen]
@@ -56,7 +59,7 @@ impl TraceStore {
                     .map_err(|e| JsError::new(&format!("{e}")))?
             )
         };
-        Ok(TraceStore { store, rom: None, original_bytes: Some(data.to_vec()) })
+        Ok(TraceStore { store, rom: None, original_bytes: Some(data.to_vec()), frames_cache: RefCell::new(None) })
     }
 
     /// Return the trace header as a JS object.
@@ -79,15 +82,15 @@ impl TraceStore {
 
     /// Get frame boundary entry indices as a Uint32Array.
     ///
-    /// For frame-indexed parquet files, these come from row group metadata.
-    /// For eager stores, frame boundaries are detected by scanning `ly` for
-    /// wraps from 153→0. Returns empty array if no frame info is available.
+    /// Uses `reconstruct_frames` as the single source of truth so that
+    /// frame indices are consistent between the timeline and pixel display.
     #[wasm_bindgen(js_name = frameBoundaries)]
     pub fn frame_boundaries(&self) -> js_sys::Uint32Array {
-        let boundaries = match &self.store {
-            StoreKind::Lazy(s) => s.frame_boundaries(),
-            StoreKind::Eager(s) => s.frame_boundaries(),
-        };
+        self.ensure_frames();
+        let cache = self.frames_cache.borrow();
+        let boundaries: Vec<u32> = cache.as_ref()
+            .map(|frames| frames.iter().map(|f| f.start_entry as u32).collect())
+            .unwrap_or_default();
         let arr = js_sys::Uint32Array::new_with_length(boundaries.len() as u32);
         arr.copy_from(&boundaries);
         arr
@@ -114,20 +117,9 @@ impl TraceStore {
     /// Returns null if no pixel data or frame index is out of range.
     #[wasm_bindgen(js_name = renderFrame)]
     pub fn render_frame(&self, frame_index: usize) -> Result<JsValue, JsError> {
-        let eager = match &self.store {
-            StoreKind::Eager(s) => {
-                let frames = framebuffer::reconstruct_frames(s);
-                return match frames.into_iter().nth(frame_index) {
-                    Some(f) => Ok(js_sys::Uint8ClampedArray::from(&f.to_rgba()[..]).into()),
-                    None => Ok(JsValue::NULL),
-                };
-            }
-            StoreKind::Lazy(s) => {
-                s.to_eager().map_err(|e| JsError::new(&format!("{e}")))?
-            }
-        };
-        let frames = framebuffer::reconstruct_frames(&eager);
-        match frames.into_iter().nth(frame_index) {
+        self.ensure_frames();
+        let cache = self.frames_cache.borrow();
+        match cache.as_ref().and_then(|frames| frames.get(frame_index)) {
             Some(f) => Ok(js_sys::Uint8ClampedArray::from(&f.to_rgba()[..]).into()),
             None => Ok(JsValue::NULL),
         }
@@ -393,6 +385,31 @@ impl TraceStore {
 
 // Private helpers
 impl TraceStore {
+    /// Lazily reconstruct frames and cache the result.
+    fn ensure_frames(&self) {
+        if self.frames_cache.borrow().is_some() {
+            return;
+        }
+        let eager = match &self.store {
+            StoreKind::Eager(s) => {
+                let frames = framebuffer::reconstruct_frames(s);
+                *self.frames_cache.borrow_mut() = Some(frames);
+                return;
+            }
+            StoreKind::Lazy(s) => {
+                match s.to_eager() {
+                    Ok(e) => e,
+                    Err(_) => {
+                        *self.frames_cache.borrow_mut() = Some(Vec::new());
+                        return;
+                    }
+                }
+            }
+        };
+        let frames = framebuffer::reconstruct_frames(&eager);
+        *self.frames_cache.borrow_mut() = Some(frames);
+    }
+
     fn row_to_map(&self, index: usize) -> BTreeMap<String, JsField> {
         let fields = match &self.store {
             StoreKind::Lazy(s) => s.header().fields.clone(),
@@ -470,7 +487,7 @@ pub fn prepare_for_diff(a: TraceStore, b: TraceStore, sync: Option<String>) -> R
         .map_err(|e| JsError::new(&format!("{e}")))?;
 
     let arr = js_sys::Array::new();
-    arr.push(&JsValue::from(TraceStore { store: StoreKind::Eager(new_a), rom: rom_a, original_bytes: bytes_a }));
-    arr.push(&JsValue::from(TraceStore { store: StoreKind::Eager(new_b), rom: rom_b, original_bytes: bytes_b }));
+    arr.push(&JsValue::from(TraceStore { store: StoreKind::Eager(new_a), rom: rom_a, original_bytes: bytes_a, frames_cache: RefCell::new(None) }));
+    arr.push(&JsValue::from(TraceStore { store: StoreKind::Eager(new_b), rom: rom_b, original_bytes: bytes_b, frames_cache: RefCell::new(None) }));
     Ok(arr)
 }
