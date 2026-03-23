@@ -85,7 +85,7 @@ impl TraceStore {
             StoreKind::Lazy(s) => {
                 let mut b = Vec::with_capacity(s.num_row_groups());
                 for rg in 0..s.num_row_groups() {
-                    b.push(self.row_group_start_lazy(s, rg) as u32);
+                    b.push(s.row_group_start(rg) as u32);
                 }
                 b
             }
@@ -391,10 +391,6 @@ impl TraceStore {
             StoreKind::Lazy(s) => s.field_col(name).is_some(),
             StoreKind::Eager(s) => s.field_col(name).is_some(),
         }
-    }
-
-    fn row_group_start_lazy(s: &LazyColumnStore, rg: usize) -> usize {
-        s.row_group_start(rg)
     }
 
     fn detect_frame_boundaries_eager(s: &ColumnStore) -> Vec<u32> {
