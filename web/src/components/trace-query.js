@@ -345,6 +345,8 @@ export class TraceQuery extends LitElement {
               <div
                 class="result-item ${i === this._currentMatch ? 'current' : ''}"
                 @click=${() => this._jumpTo(i)}
+                @mouseenter=${() => this._emitHover(this._matches[i])}
+                @mouseleave=${() => this._emitHover(null)}
               >
                 <span class="result-idx">#${this._matches[i]}</span>
                 <span class="result-fields">
@@ -527,6 +529,12 @@ export class TraceQuery extends LitElement {
   _jumpTo(matchIndex) {
     this._currentMatch = matchIndex;
     this._emitJump(this._matches[matchIndex]);
+  }
+
+  _emitHover(index) {
+    this.dispatchEvent(new CustomEvent('hover-index', {
+      detail: { index }, bubbles: true, composed: true,
+    }));
   }
 
   _clear() {
