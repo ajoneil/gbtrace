@@ -192,6 +192,8 @@ export class TraceSelector extends LitElement {
     triggerA: { type: String },
     triggerB: { type: String },
     downsampled: { type: Boolean },
+    hasPixels: { type: Boolean },
+    pixelsActive: { type: Boolean },
     _uploads: { state: true },
     _loading: { state: true },
     _error: { state: true },
@@ -212,6 +214,8 @@ export class TraceSelector extends LitElement {
     this.triggerA = null;
     this.triggerB = null;
     this.downsampled = false;
+    this.hasPixels = false;
+    this.pixelsActive = false;
     this._uploads = []; // { name, store }
     this._loading = null;
     this._error = null;
@@ -284,6 +288,12 @@ export class TraceSelector extends LitElement {
           <div class="fields-row">
             <span class="ft-label">columns</span>
             ${this._renderFieldGroups()}
+            ${this.hasPixels ? html`
+              <span class="ft-sep"></span>
+              <span class="ft-chip ${this.pixelsActive ? 'on' : ''}"
+                @click=${this._togglePixels}
+              >pixels</span>
+            ` : ''}
             ${this.suite?.profile || this.testRom ? html`
               <span class="downloads">
                 ${this.suite?.profile ? html`<a href="${this.suite.profile}" download>profile</a>` : ''}
@@ -381,6 +391,13 @@ export class TraceSelector extends LitElement {
     if (s.has(f)) s.delete(f); else s.add(f);
     this.dispatchEvent(new CustomEvent('hidden-fields-changed', {
       detail: { hiddenFields: s },
+      bubbles: true, composed: true,
+    }));
+  }
+
+  _togglePixels() {
+    this.dispatchEvent(new CustomEvent('field-selected', {
+      detail: { field: this.pixelsActive ? null : '__pixels__' },
       bubbles: true, composed: true,
     }));
   }

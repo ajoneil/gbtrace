@@ -1,5 +1,6 @@
 use gbtrace::column_store::{ColumnData, ColumnStore, LazyColumnStore};
 use gbtrace::disasm;
+use gbtrace::framebuffer;
 use gbtrace::profile::FieldType;
 use wasm_bindgen::prelude::*;
 
@@ -92,14 +93,48 @@ impl TraceStore {
         arr
     }
 
-    /// Get the field names from the header.
+    /// Get the field names from the header (excludes internal fields like `pix`).
     #[wasm_bindgen(js_name = fieldNames)]
     pub fn field_names(&self) -> Result<JsValue, JsError> {
         let fields = match &self.store {
             StoreKind::Lazy(s) => &s.header().fields,
             StoreKind::Eager(s) => &s.header().fields,
         };
-        Ok(to_js(fields)?)
+        let filtered: Vec<&String> = fields.iter().filter(|f| f.as_str() != "pix").collect();
+        Ok(to_js(&filtered)?)
+    }
+
+    /// Whether this trace has pixel data (a `pix` column).
+    #[wasm_bindgen(js_name = hasPixels)]
+    pub fn has_pixels(&self) -> bool {
+        self.has_field("pix")
+    }
+
+    /// Render a frame as RGBA pixel data (160×144×4 = 92160 bytes).
+    /// Returns null if no pixel data or frame index is out of range.
+    #[wasm_bindgen(js_name = renderFrame)]
+    pub fn render_frame(&self, frame_index: usize) -> Result<JsValue, JsError> {
+        let store = match &self.store {
+            StoreKind::Eager(s) => {
+                let frames = framebuffer::reconstruct_frames(s);
+                return match frames.into_iter().nth(frame_index) {
+                    Some(f) => Ok(js_sys::Uint8ClampedArray::from(&f.to_rgba()[..]).into()),
+                    None => Ok(JsValue::NULL),
+                };
+            }
+            StoreKind::Lazy(s) => {
+                if frame_index >= s.num_row_groups() {
+                    return Ok(JsValue::NULL);
+                }
+                s.row_group_store(frame_index)
+                    .map_err(|e| JsError::new(&format!("{e}")))?
+            }
+        };
+        let frames = framebuffer::reconstruct_frames(&store);
+        match frames.into_iter().next() {
+            Some(f) => Ok(js_sys::Uint8ClampedArray::from(&f.to_rgba()[..]).into()),
+            None => Ok(JsValue::NULL),
+        }
     }
 
     /// Get a single entry as a JS object. Returns null if out of range.

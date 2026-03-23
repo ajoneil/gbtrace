@@ -1026,6 +1026,11 @@ mod lazy {
 
         pub fn row_group_len(&self, rg: usize) -> usize { self.index.row_group_len(rg) }
 
+        /// Decode a single row group into an eager ColumnStore.
+        pub fn row_group_store(&self, rg: usize) -> Result<ColumnStore> {
+            self.decode_row_group(rg)
+        }
+
         pub fn field_col(&self, name: &str) -> Option<usize> {
             self.field_index.get(name).copied()
         }
