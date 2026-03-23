@@ -36,15 +36,15 @@ jobs:
       - name: Install wasm-pack
         run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
 
-      # ── Build CLI ────────────────────────────────────────────
+      # ── Build CLI + WASM ─────────────────────────────────────
       - name: Build gbtrace-cli
         run: make cli
 
-      # ── Build WASM ───────────────────────────────────────────
       - name: Build WASM module
         run: make wasm
 
-      # ── Clone and build adapter dependencies ─────────────────
+      # ── Clone adapter dependencies ───────────────────────────
+      # Clone all repos first so $(wildcard) in Makefiles resolves correctly.
       - name: Clone gambatte-speedrun
         run: |
           cd adapters/gambatte
@@ -55,18 +55,30 @@ jobs:
         run: |
           cd adapters/sameboy
           git clone --depth 1 https://github.com/LIJI32/SameBoy.git
-          cd SameBoy && make lib CONF=release -j$(nproc)
+
+      - name: Build SameBoy lib
+        run: |
+          cd adapters/sameboy/SameBoy
+          # Build the static + shared lib directly, skipping boot ROMs
+          # (rgbds) and public headers (cppp) which we don't need
+          make build/lib/libsameboy.a build/lib/libsameboy.so CONF=release -j$(nproc)
 
       - name: Clone mGBA
         run: |
           cd adapters/mgba
           git clone --depth 1 https://github.com/mgba-emu/mgba.git
-          cd mgba && mkdir build && cd build
+          cd mgba && mkdir build && cd build && \
           cmake .. -DLIBMGBA_ONLY=ON -DBUILD_STATIC=ON \
-            -DCMAKE_BUILD_TYPE=Release -DENABLE_DEBUGGERS=ON
+            -DCMAKE_BUILD_TYPE=Release -DENABLE_DEBUGGERS=ON && \
           make -j$(nproc)
 
-      # Gateboy clones automatically via its Makefile
+      - name: Clone metroboy/metrolib (for GateBoy)
+        run: |
+          cd adapters/gateboy
+          git clone --depth 1 https://github.com/aappleby/metroboy.git
+          git clone --depth 1 https://github.com/aappleby/metrolib.git
+          mkdir -p metroboy/symlinks
+          ln -sf "$(pwd)/metrolib" metroboy/symlinks/metrolib
 
       # ── Build adapters ───────────────────────────────────────
       - name: Build all adapters

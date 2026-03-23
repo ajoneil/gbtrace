@@ -111,19 +111,19 @@ clean:
 
 adapters/gambatte/gbtrace-gambatte:
 	@echo "Building gambatte adapter..."
-	@$(MAKE) -C adapters/gambatte -j$$(nproc) > /dev/null 2>&1
+	@$(MAKE) -C adapters/gambatte -j$$(nproc)
 
 adapters/sameboy/gbtrace-sameboy:
 	@echo "Building sameboy adapter..."
-	@$(MAKE) -C adapters/sameboy -j$$(nproc) > /dev/null 2>&1
+	@$(MAKE) -C adapters/sameboy -j$$(nproc)
 
 adapters/mgba/gbtrace-mgba:
 	@echo "Building mgba adapter..."
-	@$(MAKE) -C adapters/mgba -j$$(nproc) > /dev/null 2>&1
+	@$(MAKE) -C adapters/mgba -j$$(nproc)
 
 adapters/gateboy/gbtrace-gateboy:
 	@echo "Building gateboy adapter..."
-	@$(MAKE) -C adapters/gateboy -j$$(nproc) > /dev/null 2>&1
+	@$(MAKE) -C adapters/gateboy -j$$(nproc)
 
 $(CLI): $(wildcard crates/gbtrace-cli/src/*.rs crates/gbtrace/src/*.rs)
 	@echo "Building gbtrace-cli..."
