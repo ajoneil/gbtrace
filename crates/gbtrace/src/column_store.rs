@@ -943,6 +943,10 @@ mod lazy {
 
         pub fn num_row_groups(&self) -> usize { self.index.num_row_groups() }
 
+        pub fn row_group_start(&self, rg: usize) -> usize { self.index.row_group_start(rg) }
+
+        pub fn row_group_len(&self, rg: usize) -> usize { self.index.row_group_len(rg) }
+
         pub fn field_col(&self, name: &str) -> Option<usize> {
             self.field_index.get(name).copied()
         }

@@ -8,6 +8,7 @@ import './trace-table.js';
 import './trace-query.js';
 import './trace-chart.js';
 import './trace-diff-table.js';
+import './trace-timeline.js';
 
 export class AppShell extends LitElement {
   static styles = css`
@@ -103,6 +104,10 @@ export class AppShell extends LitElement {
     _diffStats: { state: true },
     _hiddenFields: { state: true },
     _downsampled: { state: true },
+    _viewStart: { state: true },
+    _viewEnd: { state: true },
+    _frameBoundaries: { state: true },
+    _frameBoundariesB: { state: true },
   };
 
   constructor() {
@@ -122,6 +127,10 @@ export class AppShell extends LitElement {
     this._hoverIndex = null;
     this._diffStats = null;
     this._downsampled = false;
+    this._viewStart = 0;
+    this._viewEnd = 0;
+    this._frameBoundaries = [];
+    this._frameBoundariesB = [];
   }
 
   /** All fields from the trace header. */
@@ -141,6 +150,7 @@ export class AppShell extends LitElement {
         @trace-compare=${this._onTraceCompare}
         @trace-deselect-b=${this._exitCompare}
         @change-rom=${this._reset}
+        @view-range-changed=${this._onViewRangeChanged}
         @highlight-changed=${this._onHighlightChanged}
         @jump-to-index=${this._onJumpToIndex}
         @field-selected=${this._onFieldSelected}
@@ -183,6 +193,18 @@ export class AppShell extends LitElement {
         .downsampled=${this._downsampled}
       ></trace-selector>
 
+      ${this._store ? html`
+        <trace-timeline
+          .entryCount=${this._store.entryCount()}
+          .entryCountB=${this._storeB?.entryCount() || 0}
+          .frameBoundaries=${this._frameBoundaries}
+          .frameBoundariesB=${this._frameBoundariesB}
+          .viewStart=${this._viewStart}
+          .viewEnd=${this._viewEnd}
+          .compareMode=${!!this._storeB}
+        ></trace-timeline>
+      ` : ''}
+
       ${this._store
         ? (this._storeB ? this._renderCompare() : this._renderSingle())
         : ''
@@ -194,7 +216,9 @@ export class AppShell extends LitElement {
     const vf = this._visibleFields;
     return html`
       <div class="sections">
-        <trace-query .store=${this._store} .fields=${vf}></trace-query>
+        <trace-query .store=${this._store} .fields=${vf}
+          .viewStart=${this._viewStart} .viewEnd=${this._viewEnd}
+        ></trace-query>
 
         ${this._chartField ? html`
           <trace-chart
@@ -202,11 +226,15 @@ export class AppShell extends LitElement {
             .field=${this._chartField}
             .highlightIndices=${this._highlightIndices}
             .cursorIndex=${this._hoverIndex}
+            .viewStart=${this._viewStart}
+            .viewEnd=${this._viewEnd}
           ></trace-chart>
         ` : ''}
 
         <trace-table
           .store=${this._store}
+          .viewStart=${this._viewStart}
+          .viewEnd=${this._viewEnd}
           .fields=${this._allFields}
           .highlightIndices=${this._highlightIndices}
           .hiddenFields=${this._hiddenFields}
@@ -266,6 +294,8 @@ export class AppShell extends LitElement {
           .storeB=${this._storeB}
           .fields=${vf}
           .compareMode=${true}
+          .viewStart=${this._viewStart}
+          .viewEnd=${this._viewEnd}
         ></trace-query>
 
         ${this._chartField ? html`
@@ -277,6 +307,8 @@ export class AppShell extends LitElement {
             .field=${this._chartField}
             .highlightIndices=${this._highlightIndices}
             .cursorIndex=${this._hoverIndex}
+            .viewStart=${this._viewStart}
+            .viewEnd=${this._viewEnd}
           ></trace-chart>
         ` : ''}
 
@@ -288,6 +320,8 @@ export class AppShell extends LitElement {
           .fields=${this._allFields}
           .highlightIndices=${this._highlightIndices}
           .hiddenFields=${this._hiddenFields}
+          .viewStart=${this._viewStart}
+          .viewEnd=${this._viewEnd}
         ></trace-diff-table>
       </div>
     `;
@@ -336,6 +370,10 @@ export class AppShell extends LitElement {
     this._hoverIndex = null;
     this._diffStats = null;
     this._downsampled = false;
+    this._frameBoundaries = Array.from(store.frameBoundaries());
+    this._frameBoundariesB = [];
+    this._viewStart = 0;
+    this._viewEnd = store.entryCount();
     // Don't reset _hiddenFields — persist across trace switches
   }
 
@@ -362,6 +400,11 @@ export class AppShell extends LitElement {
     this._highlightIndices = null;
     this._chartField = null;
     this._hoverIndex = null;
+    // Recompute frame boundaries after diff preparation (stores may have changed)
+    this._frameBoundaries = Array.from(this._store.frameBoundaries());
+    this._frameBoundariesB = Array.from(store.frameBoundaries());
+    this._viewStart = 0;
+    this._viewEnd = this._store.entryCount();
     this._recomputeDiffStats();
   }
 
@@ -431,6 +474,11 @@ export class AppShell extends LitElement {
 
   _onHiddenFieldsChanged(e) {
     this._hiddenFields = e.detail.hiddenFields;
+  }
+
+  _onViewRangeChanged(e) {
+    this._viewStart = e.detail.start;
+    this._viewEnd = e.detail.end;
   }
 
 }

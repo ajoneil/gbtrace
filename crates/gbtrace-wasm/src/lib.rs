@@ -74,6 +74,28 @@ impl TraceStore {
         }
     }
 
+    /// Get frame boundary entry indices as a Uint32Array.
+    ///
+    /// For frame-indexed parquet files, these come from row group metadata.
+    /// For eager stores, frame boundaries are detected by scanning `ly` for
+    /// wraps from 153→0. Returns empty array if no frame info is available.
+    #[wasm_bindgen(js_name = frameBoundaries)]
+    pub fn frame_boundaries(&self) -> js_sys::Uint32Array {
+        let boundaries = match &self.store {
+            StoreKind::Lazy(s) => {
+                let mut b = Vec::with_capacity(s.num_row_groups());
+                for rg in 0..s.num_row_groups() {
+                    b.push(self.row_group_start_lazy(s, rg) as u32);
+                }
+                b
+            }
+            StoreKind::Eager(s) => Self::detect_frame_boundaries_eager(s),
+        };
+        let arr = js_sys::Uint32Array::new_with_length(boundaries.len() as u32);
+        arr.copy_from(&boundaries);
+        arr
+    }
+
     /// Get the field names from the header.
     #[wasm_bindgen(js_name = fieldNames)]
     pub fn field_names(&self) -> Result<JsValue, JsError> {
@@ -369,6 +391,27 @@ impl TraceStore {
             StoreKind::Lazy(s) => s.field_col(name).is_some(),
             StoreKind::Eager(s) => s.field_col(name).is_some(),
         }
+    }
+
+    fn row_group_start_lazy(s: &LazyColumnStore, rg: usize) -> usize {
+        s.row_group_start(rg)
+    }
+
+    fn detect_frame_boundaries_eager(s: &ColumnStore) -> Vec<u32> {
+        let ly_col = match s.field_col("ly") {
+            Some(c) => c,
+            None => return Vec::new(),
+        };
+        let mut boundaries = vec![0u32]; // first entry is always a boundary
+        let count = s.entry_count();
+        for i in 1..count {
+            let prev = s.column(ly_col).get_numeric(i - 1) as u8;
+            let cur = s.column(ly_col).get_numeric(i) as u8;
+            if prev == 153 && cur == 0 {
+                boundaries.push(i as u32);
+            }
+        }
+        boundaries
     }
 }
 
