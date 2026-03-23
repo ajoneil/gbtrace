@@ -36,7 +36,7 @@ jobs:
         with:
           name: gbtrace-cli
           path: target/release/gbtrace-cli
-          retention-days: 7
+          retention-days: 90
 
       - name: Upload WASM
         uses: actions/upload-artifact@v4
@@ -45,7 +45,7 @@ jobs:
           path: |
             web/pkg/gbtrace_wasm.js
             web/pkg/gbtrace_wasm_bg.wasm
-          retention-days: 7
+          retention-days: 90
 
   adapter:
     runs-on: ubuntu-latest
@@ -119,4 +119,4 @@ jobs:
             adapters/${{ matrix.emulator }}/gbtrace-${{ matrix.emulator }}
             adapters/${{ matrix.emulator }}/SameBoy/build/lib/libsameboy.so
             adapters/${{ matrix.emulator }}/boot_roms/
-          retention-days: 7
+          retention-days: 90
