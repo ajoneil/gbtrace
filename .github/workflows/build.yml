@@ -62,45 +62,57 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y build-essential cmake scons zlib1g-dev
 
-      - name: Cache adapter
-        id: cache
+      # Cache upstream repos only (the expensive clones), not the built binary
+      - name: Cache upstream repos
         uses: actions/cache@v5
         with:
-          path: adapters/${{ matrix.emulator }}
-          key: adapter-v3-${{ matrix.emulator }}-${{ hashFiles(format('adapters/{0}/gbtrace-*.cpp', matrix.emulator), format('adapters/{0}/gbtrace-*.c', matrix.emulator), format('adapters/{0}/Makefile', matrix.emulator), format('adapters/{0}/audio_stub*', matrix.emulator)) }}
+          path: |
+            adapters/${{ matrix.emulator }}/gambatte-speedrun
+            adapters/${{ matrix.emulator }}/SameBoy
+            adapters/${{ matrix.emulator }}/mgba
+            adapters/${{ matrix.emulator }}/metroboy
+            adapters/${{ matrix.emulator }}/metrolib
+          key: upstream-${{ matrix.emulator }}-v1
 
       - name: Clone and build gambatte
-        if: matrix.emulator == 'gambatte' && steps.cache.outputs.cache-hit != 'true'
+        if: matrix.emulator == 'gambatte'
         run: |
           cd adapters/gambatte
-          git clone --recursive --depth 1 https://github.com/pokemon-speedrunning/gambatte-speedrun.git
+          [ -d gambatte-speedrun ] || git clone --recursive --depth 1 \
+            https://github.com/pokemon-speedrunning/gambatte-speedrun.git
           make -j$(nproc)
 
       - name: Clone and build sameboy
-        if: matrix.emulator == 'sameboy' && steps.cache.outputs.cache-hit != 'true'
+        if: matrix.emulator == 'sameboy'
         run: |
           cd adapters/sameboy
-          git clone --depth 1 https://github.com/LIJI32/SameBoy.git
-          cd SameBoy && make build/lib/libsameboy.a build/lib/libsameboy.so CONF=release -j$(nproc)
-          cd .. && make -j$(nproc)
+          if [ ! -d SameBoy ]; then
+            git clone --depth 1 https://github.com/LIJI32/SameBoy.git
+            cd SameBoy && make build/lib/libsameboy.a build/lib/libsameboy.so CONF=release -j$(nproc)
+            cd ..
+          fi
+          make -j$(nproc)
 
       - name: Clone and build mgba
-        if: matrix.emulator == 'mgba' && steps.cache.outputs.cache-hit != 'true'
+        if: matrix.emulator == 'mgba'
         run: |
           cd adapters/mgba
-          git clone --depth 1 https://github.com/mgba-emu/mgba.git
-          cd mgba && mkdir build && cd build && \
-          cmake .. -DLIBMGBA_ONLY=ON -DBUILD_STATIC=ON \
-            -DCMAKE_BUILD_TYPE=Release -DENABLE_DEBUGGERS=ON && \
+          if [ ! -d mgba ]; then
+            git clone --depth 1 https://github.com/mgba-emu/mgba.git
+            cd mgba && mkdir build && cd build && \
+            cmake .. -DLIBMGBA_ONLY=ON -DBUILD_STATIC=ON \
+              -DCMAKE_BUILD_TYPE=Release -DENABLE_DEBUGGERS=ON && \
+            make -j$(nproc)
+            cd ../..
+          fi
           make -j$(nproc)
-          cd ../.. && make -j$(nproc)
 
       - name: Clone and build gateboy
-        if: matrix.emulator == 'gateboy' && steps.cache.outputs.cache-hit != 'true'
+        if: matrix.emulator == 'gateboy'
         run: |
           cd adapters/gateboy
-          git clone --depth 1 https://github.com/aappleby/metroboy.git
-          git clone --depth 1 https://github.com/aappleby/metrolib.git
+          [ -d metroboy ] || git clone --depth 1 https://github.com/aappleby/metroboy.git
+          [ -d metrolib ] || git clone --depth 1 https://github.com/aappleby/metrolib.git
           mkdir -p metroboy/symlinks
           rm -rf metroboy/symlinks/metrolib
           ln -sf "$(pwd)/metrolib" metroboy/symlinks/metrolib
