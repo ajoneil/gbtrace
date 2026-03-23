@@ -96,7 +96,7 @@ traces-dmg-acid2: $(DMG_ACID2_REF) | $(CLI)
 				"$(DMG_ACID2_PROFILE)" \
 				"$(DMG_ACID2_REF)" \
 				"$(DMG_ACID2_TRACE_DIR)" \
-				200 || true; \
+				30 || true; \
 		fi; \
 	done
 	@python3 scripts/manifest.py "$(DMG_ACID2_TRACE_DIR)" "test-suites/dmg-acid2"
@@ -117,6 +117,11 @@ site: wasm traces
 	@# Copy ROMs so the viewer can load them for disassembly
 	@find test-suites/gbmicrotest -name '*.gb' -exec cp {} $(BUILD_DIR)/site/tests/gbmicrotest/ \;
 	@cd test-suites/blargg && find . -name '*.gb' -exec sh -c 'mkdir -p "$(BUILD_DIR)/site/tests/blargg/$$(dirname "{}")" && cp "{}" "$(BUILD_DIR)/site/tests/blargg/{}"' \;
+	@if [ -d "$(BUILD_DIR)/site/tests/dmg-acid2" ]; then cp test-suites/dmg-acid2/dmg-acid2.gb $(BUILD_DIR)/site/tests/dmg-acid2/; fi
+	@# Copy profile TOMLs so the viewer can offer them for download
+	@cp test-suites/gbmicrotest/gbmicrotest.toml $(BUILD_DIR)/site/tests/gbmicrotest/
+	@cp test-suites/blargg/blargg.toml $(BUILD_DIR)/site/tests/blargg/
+	@if [ -d "$(BUILD_DIR)/site/tests/dmg-acid2" ]; then cp test-suites/dmg-acid2/dmg-acid2.toml $(BUILD_DIR)/site/tests/dmg-acid2/; fi
 	@echo "Site ready: $(BUILD_DIR)/site/"
 
 serve: wasm
@@ -127,6 +132,10 @@ serve: wasm
 	@cp web/pkg/gbtrace_wasm.js web/pkg/gbtrace_wasm_bg.wasm $(BUILD_DIR)/site/pkg/
 	@if [ -d "$(GBMICROTEST_TRACE_DIR)" ]; then cp -r $(GBMICROTEST_TRACE_DIR) $(BUILD_DIR)/site/tests/gbmicrotest; fi
 	@if [ -d "$(BLARGG_TRACE_DIR)" ]; then cp -r $(BLARGG_TRACE_DIR) $(BUILD_DIR)/site/tests/blargg; fi
+	@if [ -d "$(DMG_ACID2_TRACE_DIR)" ]; then cp -r $(DMG_ACID2_TRACE_DIR) $(BUILD_DIR)/site/tests/dmg-acid2; fi
+	@if [ -d "$(BUILD_DIR)/site/tests/gbmicrotest" ]; then cp test-suites/gbmicrotest/gbmicrotest.toml $(BUILD_DIR)/site/tests/gbmicrotest/; fi
+	@if [ -d "$(BUILD_DIR)/site/tests/blargg" ]; then cp test-suites/blargg/blargg.toml $(BUILD_DIR)/site/tests/blargg/; fi
+	@if [ -d "$(BUILD_DIR)/site/tests/dmg-acid2" ]; then cp test-suites/dmg-acid2/dmg-acid2.toml $(BUILD_DIR)/site/tests/dmg-acid2/; fi
 	@echo "Serving on http://localhost:3080"
 	@echo "  Local files from web/, traces from local build or $(PAGES_URL)"
 	@cd $(BUILD_DIR)/site && python3 $(PROJECT_DIR)/scripts/devserver.py $(PAGES_URL)

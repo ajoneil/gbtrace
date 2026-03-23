@@ -59,6 +59,26 @@ impl Frame {
     }
 }
 
+/// Flush a scanline buffer into the frame pixel data.
+/// Takes the last 160 pixels (extra pixels push earlier ones off the left,
+/// matching real LCD hardware behavior).
+fn flush_scanline(scanline_buf: &[u8], y: usize, pixels: &mut [u8]) {
+    if y >= LCD_HEIGHT || scanline_buf.is_empty() {
+        return;
+    }
+    let start = if scanline_buf.len() > LCD_WIDTH {
+        scanline_buf.len() - LCD_WIDTH
+    } else {
+        0
+    };
+    let visible = &scanline_buf[start..];
+    for (x, &pix) in visible.iter().enumerate() {
+        if x < LCD_WIDTH {
+            pixels[y * LCD_WIDTH + x] = pix;
+        }
+    }
+}
+
 /// Reconstruct LCD frames from a column store's `pix` field.
 ///
 /// Returns one `Frame` per detected frame boundary. Uses `ly` to track
@@ -89,9 +109,9 @@ pub fn reconstruct_frames(store: &ColumnStore) -> Vec<Frame> {
         let mut frame = Frame::new(fi, start);
         frame.end_entry = end;
 
-        let mut x: usize = 0;
         let mut y: usize = 0;
         let mut prev_ly: Option<u8> = None;
+        let mut scanline_buf: Vec<u8> = Vec::with_capacity(LCD_WIDTH + 16);
 
         for i in start..end {
             let pix_str = store.column(pix_col).get_str(i);
@@ -108,28 +128,34 @@ pub fn reconstruct_frames(store: &ColumnStore) -> Vec<Frame> {
                 continue;
             }
 
-            // Per-pixel/scanline output: track position from ly
+            // Get y position from ly
             if let Some(lc) = ly_col {
                 let cur_ly = store.column(lc).get_numeric(i) as u8;
                 if let Some(pl) = prev_ly {
-                    if cur_ly != pl && (cur_ly as usize) < LCD_HEIGHT {
-                        y = cur_ly as usize;
-                        x = 0;
+                    if cur_ly != pl {
+                        // Flush previous scanline: take last 160 pixels
+                        flush_scanline(&scanline_buf, y, &mut frame.pixels);
+                        scanline_buf.clear();
+                        if (cur_ly as usize) < LCD_HEIGHT {
+                            y = cur_ly as usize;
+                        }
                     }
                 } else if (cur_ly as usize) < LCD_HEIGHT {
                     y = cur_ly as usize;
-                    x = 0;
                 }
                 prev_ly = Some(cur_ly);
             }
 
+            // Accumulate pixels for the current scanline
             for ch in pix_str.bytes() {
-                if ch >= b'0' && ch <= b'3' && y < LCD_HEIGHT && x < LCD_WIDTH {
-                    frame.pixels[y * LCD_WIDTH + x] = ch - b'0';
-                    x += 1;
+                if ch >= b'0' && ch <= b'3' {
+                    scanline_buf.push(ch - b'0');
                 }
             }
         }
+
+        // Flush final scanline
+        flush_scanline(&scanline_buf, y, &mut frame.pixels);
 
         frames.push(frame);
     }

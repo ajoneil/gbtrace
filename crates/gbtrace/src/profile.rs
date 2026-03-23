@@ -60,7 +60,7 @@ const KNOWN_FIELDS: &[&str] = &[
     // ppu
     "lcdc", "stat", "ly", "lyc", "scy", "scx", "wy", "wx", "bgp", "obp0", "obp1", "dma",
     // pixel output
-    "pix",
+    "pix", "pix_x",
     // timer
     "div", "tima", "tma", "tac",
     // interrupt

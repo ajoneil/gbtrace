@@ -740,6 +740,8 @@ fn load_from_jsonl(path: &std::path::Path) -> Result<ColumnStore> {
             if let Some(val) = entry.get(name) {
                 if let Some(b) = val.as_bool() {
                     store.push_bool(col, b);
+                } else if let Some(s) = val.as_str() {
+                    store.push_str(col, s);
                 } else {
                     store.push_u64(col, val.as_u64().unwrap_or(0));
                 }
