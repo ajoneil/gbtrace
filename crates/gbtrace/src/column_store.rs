@@ -1054,27 +1054,14 @@ mod lazy {
             self.field_index.get(name).copied()
         }
 
-        /// Detect frame boundaries by scanning `ly` for vblank wraps.
-        /// For multi-row-group files with frame-aligned groups, uses metadata.
-        /// Otherwise scans ly values.
+        /// Detect frame boundaries from row group starts.
+        ///
+        /// Row groups are aligned with frames by the parquet writer (flushed
+        /// at ly wraps and full-frame pix dumps).
         pub fn frame_boundaries(&self) -> Vec<u32> {
-            if self.index.num_row_groups() > 1 {
-                (0..self.index.num_row_groups())
-                    .map(|rg| self.index.row_group_start(rg) as u32)
-                    .collect()
-            } else {
-                if self.field_col("ly").is_none() { return Vec::new(); }
-                let mut boundaries = vec![0u32];
-                let count = self.entry_count();
-                for i in 1..count {
-                    let prev = self.get_u8_named("ly", i - 1).unwrap_or(0);
-                    let cur = self.get_u8_named("ly", i).unwrap_or(0);
-                    if cur < prev && prev >= 144 {
-                        boundaries.push(i as u32);
-                    }
-                }
-                boundaries
-            }
+            (0..self.index.num_row_groups())
+                .map(|rg| self.index.row_group_start(rg) as u32)
+                .collect()
         }
 
         /// Ensure a row group is in the cache, decoding if necessary.

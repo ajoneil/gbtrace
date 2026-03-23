@@ -74,8 +74,9 @@ impl ColumnBuffer {
 /// Writes trace entries to a Parquet file with native integer types.
 ///
 /// When the trace includes an `ly` field, row groups are flushed at frame
-/// boundaries (when `ly` wraps from 153→0). This allows readers to decode
-/// individual frames on demand without loading the entire file.
+/// boundaries (when `ly` wraps from 153→0). When the trace includes full-frame
+/// `pix` dumps (23040 chars), each dump also starts a new row group.
+/// This allows readers to decode individual frames on demand.
 pub struct ParquetTraceWriter {
     writer: ArrowWriter<File>,
     schema: Arc<Schema>,
@@ -84,6 +85,8 @@ pub struct ParquetTraceWriter {
     field_types: Vec<FieldType>,
     /// Column index of the `ly` field, if present.
     ly_col: Option<usize>,
+    /// Column index of the `pix` field, if present.
+    pix_col: Option<usize>,
     /// Previous value of `ly`, for detecting frame boundaries.
     prev_ly: Option<u8>,
 }
@@ -130,6 +133,7 @@ impl ParquetTraceWriter {
         let columns: Vec<ColumnBuffer> = field_types.iter().map(|ft| ColumnBuffer::new(*ft)).collect();
 
         let ly_col = field_names.iter().position(|n| n == "ly");
+        let pix_col = field_names.iter().position(|n| n == "pix");
 
         Ok(Self {
             writer,
@@ -138,6 +142,7 @@ impl ParquetTraceWriter {
             field_names,
             field_types,
             ly_col,
+            pix_col,
             prev_ly: None,
         })
     }
@@ -150,15 +155,28 @@ impl ParquetTraceWriter {
     pub fn write_entry(&mut self, entry: &TraceEntry) -> Result<()> {
         // Detect frame boundary before appending (so the new frame starts
         // a fresh row group).
+        let mut boundary = false;
         if let Some(ly_idx) = self.ly_col {
             let cur_ly = parse_u8(entry.get(&self.field_names[ly_idx]));
             if let Some(prev) = self.prev_ly {
                 if prev == 153 && cur_ly == 0 {
-                    self.flush_batch()?;
-                    self.writer.flush()?;
+                    boundary = true;
                 }
             }
             self.prev_ly = Some(cur_ly);
+        }
+        if let Some(pix_idx) = self.pix_col {
+            if let Some(val) = entry.get(&self.field_names[pix_idx]) {
+                if let Some(s) = val.as_str() {
+                    if s.len() == 160 * 144 {
+                        boundary = true;
+                    }
+                }
+            }
+        }
+        if boundary {
+            self.flush_batch()?;
+            self.writer.flush()?;
         }
 
         for (i, (name, ft)) in self.field_names.iter().zip(&self.field_types).enumerate() {
