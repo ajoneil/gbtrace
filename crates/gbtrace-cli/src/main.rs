@@ -63,6 +63,11 @@ enum Command {
         #[arg(long, conflicts_with = "until")]
         after: Option<String>,
     },
+    /// Show frame boundaries detected from ly scanline counter
+    Frames {
+        /// Trace file to inspect
+        input: PathBuf,
+    },
     /// Compare two or more trace files and report divergences
     Diff {
         /// First trace file (reference)
@@ -113,6 +118,7 @@ fn main() {
         Command::Query { input, r#where: conditions, max, context } => {
             cmd_query(&input, &conditions, max, context)
         }
+        Command::Frames { input } => cmd_frames(&input),
         Command::Trim { input, output, until, after } => {
             cmd_trim(&input, output, until, after)
         }
@@ -189,6 +195,44 @@ fn cmd_info(path: &PathBuf) -> i32 {
                 }
             }
         }
+    }
+
+    0
+}
+
+// ---------------------------------------------------------------------------
+// frames
+// ---------------------------------------------------------------------------
+
+fn cmd_frames(path: &PathBuf) -> i32 {
+    let store = match gbtrace::column_store::load_column_store(path) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("Error: {e}");
+            return 1;
+        }
+    };
+
+    let boundaries = store.frame_boundaries();
+    if boundaries.is_empty() {
+        println!("No frames detected (trace has no ly field)");
+        return 0;
+    }
+
+    let total = store.entry_count();
+    println!("Frames: {}", boundaries.len());
+    println!("Entries: {total}");
+    println!();
+
+    for (i, &start) in boundaries.iter().enumerate() {
+        let start = start as usize;
+        let end = if i + 1 < boundaries.len() {
+            boundaries[i + 1] as usize
+        } else {
+            total
+        };
+        let size = end - start;
+        println!("  Frame {:>3}  entries {:>8}..{:<8}  ({} entries)", i + 1, start, end, size);
     }
 
     0
