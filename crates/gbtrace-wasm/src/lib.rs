@@ -85,11 +85,17 @@ impl TraceStore {
     pub fn frame_boundaries(&self) -> js_sys::Uint32Array {
         let boundaries = match &self.store {
             StoreKind::Lazy(s) => {
-                let mut b = Vec::with_capacity(s.num_row_groups());
-                for rg in 0..s.num_row_groups() {
-                    b.push(s.row_group_start(rg) as u32);
+                // If there are multiple row groups, use them as frame boundaries.
+                // Otherwise fall back to ly-based detection (old files with 1 big row group).
+                if s.num_row_groups() > 1 {
+                    let mut b = Vec::with_capacity(s.num_row_groups());
+                    for rg in 0..s.num_row_groups() {
+                        b.push(s.row_group_start(rg) as u32);
+                    }
+                    b
+                } else {
+                    Self::detect_frame_boundaries_lazy(s)
                 }
-                b
             }
             StoreKind::Eager(s) => Self::detect_frame_boundaries_eager(s),
         };
@@ -408,6 +414,20 @@ impl TraceStore {
             StoreKind::Lazy(s) => s.field_col(name).is_some(),
             StoreKind::Eager(s) => s.field_col(name).is_some(),
         }
+    }
+
+    fn detect_frame_boundaries_lazy(s: &LazyColumnStore) -> Vec<u32> {
+        if s.field_col("ly").is_none() { return Vec::new(); }
+        let mut boundaries = vec![0u32];
+        let count = s.entry_count();
+        for i in 1..count {
+            let prev = s.get_u8_named("ly", i - 1).unwrap_or(0);
+            let cur = s.get_u8_named("ly", i).unwrap_or(0);
+            if prev == 153 && cur == 0 {
+                boundaries.push(i as u32);
+            }
+        }
+        boundaries
     }
 
     fn detect_frame_boundaries_eager(s: &ColumnStore) -> Vec<u32> {
