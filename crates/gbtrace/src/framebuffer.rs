@@ -34,11 +34,16 @@ impl Frame {
     }
 
     /// Return raw RGBA pixel data (160×144×4 bytes). DMG palette: 0=white, 3=black.
+    /// Pixels with value 0xFF (unrendered sentinel) get alpha=0.
     pub fn to_rgba(&self) -> Vec<u8> {
         const PALETTE: [u8; 4] = [0xFF, 0xAA, 0x55, 0x00]; // DMG shades
 
         let mut rgba = vec![0u8; LCD_WIDTH * LCD_HEIGHT * 4];
         for (i, &pix) in self.pixels.iter().enumerate() {
+            if pix == 0xFF {
+                // Unrendered — transparent
+                continue;
+            }
             let shade = PALETTE[pix.min(3) as usize];
             rgba[i * 4] = shade;
             rgba[i * 4 + 1] = shade;
@@ -167,4 +172,128 @@ pub fn reconstruct_frames(store: &ColumnStore) -> Vec<Frame> {
     }
 
     frames
+}
+
+/// Reconstruct a partial frame up to (but not including) `stop_entry`.
+///
+/// Processes entries from `frame_start` to `stop_entry`, building the
+/// LCD image progressively. Unrendered pixels are set to 0xFF (sentinel)
+/// so `to_rgba()` outputs them as transparent.
+pub fn reconstruct_partial_frame(
+    store: &ColumnStore,
+    frame_start: usize,
+    stop_entry: usize,
+) -> Frame {
+    let mut frame = Frame::new(0, frame_start);
+    frame.pixels.fill(0xFF); // mark all as unrendered
+    frame.end_entry = stop_entry;
+
+    let pix_col = match store.field_col("pix") {
+        Some(c) => c,
+        None => return frame,
+    };
+    let ly_col = store.field_col("ly");
+
+    let mut y: usize = 0;
+    let mut prev_ly: Option<u8> = None;
+    let mut scanline_buf: Vec<u8> = Vec::with_capacity(LCD_WIDTH + 16);
+
+    let end = stop_entry.min(store.entry_count());
+    for i in frame_start..end {
+        let pix_str = store.column(pix_col).get_str(i);
+        if pix_str.is_empty() { continue; }
+
+        if pix_str.len() == LCD_WIDTH * LCD_HEIGHT {
+            for (j, ch) in pix_str.bytes().enumerate() {
+                if ch >= b'0' && ch <= b'3' {
+                    frame.pixels[j] = ch - b'0';
+                }
+            }
+            continue;
+        }
+
+        if let Some(lc) = ly_col {
+            let cur_ly = store.column(lc).get_numeric(i) as u8;
+            if let Some(pl) = prev_ly {
+                if cur_ly != pl {
+                    flush_scanline(&scanline_buf, y, &mut frame.pixels);
+                    scanline_buf.clear();
+                    if (cur_ly as usize) < LCD_HEIGHT {
+                        y = cur_ly as usize;
+                    }
+                }
+            } else if (cur_ly as usize) < LCD_HEIGHT {
+                y = cur_ly as usize;
+            }
+            prev_ly = Some(cur_ly);
+        }
+
+        for ch in pix_str.bytes() {
+            if ch >= b'0' && ch <= b'3' {
+                scanline_buf.push(ch - b'0');
+            }
+        }
+    }
+
+    flush_scanline(&scanline_buf, y, &mut frame.pixels);
+    frame
+}
+
+/// Build a map of pixel (x, y) positions for each entry in a frame.
+///
+/// Returns a Vec of `(x, y)` pairs indexed by `entry - frame_start`.
+/// Entries with no pixel data get `(0xFFFF, 0xFFFF)`.
+pub fn build_pixel_position_map(
+    store: &ColumnStore,
+    frame_start: usize,
+    frame_end: usize,
+) -> Vec<(u16, u16)> {
+    let count = frame_end.saturating_sub(frame_start);
+    let mut map = vec![(0xFFFFu16, 0xFFFFu16); count];
+
+    let pix_col = match store.field_col("pix") {
+        Some(c) => c,
+        None => return map,
+    };
+    let ly_col = store.field_col("ly");
+
+    let mut y: usize = 0;
+    let mut x: usize = 0;
+    let mut prev_ly: Option<u8> = None;
+
+    let end = frame_end.min(store.entry_count());
+    for i in frame_start..end {
+        let pix_str = store.column(pix_col).get_str(i);
+        if pix_str.is_empty() { continue; }
+
+        // Skip full-frame dumps for position tracking
+        if pix_str.len() == LCD_WIDTH * LCD_HEIGHT { continue; }
+
+        if let Some(lc) = ly_col {
+            let cur_ly = store.column(lc).get_numeric(i) as u8;
+            if let Some(pl) = prev_ly {
+                if cur_ly != pl {
+                    x = 0;
+                    if (cur_ly as usize) < LCD_HEIGHT {
+                        y = cur_ly as usize;
+                    }
+                }
+            } else if (cur_ly as usize) < LCD_HEIGHT {
+                y = cur_ly as usize;
+            }
+            prev_ly = Some(cur_ly);
+        }
+
+        let idx = i - frame_start;
+        for ch in pix_str.bytes() {
+            if ch >= b'0' && ch <= b'3' {
+                if y < LCD_HEIGHT && x < LCD_WIDTH {
+                    map[idx] = (x as u16, y as u16);
+                }
+                x += 1;
+            }
+        }
+    }
+
+    map
 }

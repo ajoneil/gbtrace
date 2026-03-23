@@ -218,6 +218,13 @@ impl ColumnStore {
             .map(|&col| self.columns[col].get_bool(row))
     }
 
+    /// Get a string value by field name.
+    pub fn get_str_named(&self, name: &str, row: usize) -> Option<&str> {
+        self.field_index
+            .get(name)
+            .map(|&col| self.columns[col].get_str(row))
+    }
+
     /// Get a zero-allocation view of a row.
     pub fn row(&self, index: usize) -> EntryView<'_> {
         EntryView {
@@ -1164,6 +1171,14 @@ mod lazy {
             self.ensure_loaded(rg);
             let cache = self.cache.borrow();
             Some(cache.entries.iter().find(|(k, _)| *k == rg)?.1.column(col_idx).get_bool(local))
+        }
+
+        pub fn get_str_named(&self, name: &str, row: usize) -> Option<String> {
+            let col_idx = *self.field_index.get(name)?;
+            let (rg, local) = self.index.locate(row);
+            self.ensure_loaded(rg);
+            let cache = self.cache.borrow();
+            Some(cache.entries.iter().find(|(k, _)| *k == rg)?.1.column(col_idx).get_str(local).to_string())
         }
 
         /// Get a column value as numeric by column index and global row.

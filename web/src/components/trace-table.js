@@ -8,6 +8,8 @@ const MAX_SPACER = 10_000_000;
 const COL_WIDTH = 56;
 const IDX_WIDTH = 50;
 const ASM_WIDTH = 120;
+const PIX_WIDTH = 28;
+const PIX_COLORS = ['#fff', '#aaa', '#555', '#000'];
 
 export class TraceTable extends LitElement {
   static styles = css`
@@ -47,6 +49,7 @@ export class TraceTable extends LitElement {
     hiddenFields: { type: Object },
     viewStart: { type: Number },
     viewEnd: { type: Number },
+    tcyclePixels: { type: Boolean },
   };
 
   constructor() {
@@ -57,6 +60,7 @@ export class TraceTable extends LitElement {
     this.hiddenFields = new Set();
     this.viewStart = 0;
     this.viewEnd = 0;
+    this.tcyclePixels = false;
     this._renderedStart = -1;
     this._renderedCount = 0;
     this._rafId = null;
@@ -89,6 +93,7 @@ export class TraceTable extends LitElement {
         <div class="inner">
           <div class="header-row">
             <span style="${hdrStyle(IDX_WIDTH)}">#</span>
+            ${this.tcyclePixels ? html`<span style="${hdrStyle(PIX_WIDTH)}">pix</span>` : ''}
             ${vf.map(f => html`
               <span style="${hdrStyle(COL_WIDTH)}">${f}</span>
               ${hasRom && f === 'pc' ? html`<span style="${hdrStyle(ASM_WIDTH, 'text-align:left;')}">asm</span>` : ''}
@@ -185,6 +190,12 @@ export class TraceTable extends LitElement {
       try { disasmArr = this.store.disassembleRange(globalStart, count); } catch (_) {}
     }
 
+    // Fetch pixel values for T-cycle traces
+    let pixArr = null;
+    if (this.tcyclePixels) {
+      try { pixArr = this.store.pixRange(globalStart, count); } catch (_) {}
+    }
+
     const cs = this._cellStyle.bind(this);
     const hl = this.highlightIndices;
     const parts = [];
@@ -194,6 +205,14 @@ export class TraceTable extends LitElement {
       const bg = hl?.has(globalIdx) ? 'background:var(--accent-subtle);' : '';
       parts.push(`<div style="display:flex;height:${ROW_HEIGHT}px;align-items:center;border-bottom:1px solid var(--bg);${bg}" data-idx="${globalIdx}">`);
       parts.push(`<span style="${cs(IDX_WIDTH, 'color:var(--text-muted);')}">${globalIdx}</span>`);
+      if (pixArr) {
+        const pv = pixArr[i];
+        if (pv <= 3) {
+          parts.push(`<span style="${cs(PIX_WIDTH, 'text-align:center;')}"><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:${PIX_COLORS[pv]};border:1px solid var(--border);"></span></span>`);
+        } else {
+          parts.push(`<span style="${cs(PIX_WIDTH)}"></span>`);
+        }
+      }
       for (const f of vf) {
         parts.push(`<span style="${cs(COL_WIDTH)}">${displayVal(data[f], f)}</span>`);
         if (disasmArr && f === 'pc') {

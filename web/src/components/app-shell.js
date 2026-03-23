@@ -233,6 +233,8 @@ export class AppShell extends LitElement {
             .store=${this._store}
             .frameBoundaries=${this._frameBoundaries}
             .viewStart=${this._viewStart}
+            .tcyclePixels=${this._store?.isTcyclePixels() || false}
+            .hoverIndex=${this._hoverIndex}
           ></pixel-display>
         ` : this._chartField ? html`
           <trace-chart
@@ -252,6 +254,7 @@ export class AppShell extends LitElement {
           .fields=${this._allFields}
           .highlightIndices=${this._highlightIndices}
           .hiddenFields=${this._hiddenFields}
+          .tcyclePixels=${this._store?.isTcyclePixels() || false}
         ></trace-table>
       </div>
     `;

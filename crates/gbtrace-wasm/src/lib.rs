@@ -113,6 +113,17 @@ impl TraceStore {
         self.has_field("pix")
     }
 
+    /// Whether this is a T-cycle level trace with per-pixel pix data.
+    #[wasm_bindgen(js_name = isTcyclePixels)]
+    pub fn is_tcycle_pixels(&self) -> bool {
+        if !self.has_field("pix") { return false; }
+        let header = match &self.store {
+            StoreKind::Lazy(s) => s.header(),
+            StoreKind::Eager(s) => s.header(),
+        };
+        header.trigger == gbtrace::header::Trigger::Tcycle
+    }
+
     /// Number of reconstructed pixel frames.
     #[wasm_bindgen(js_name = frameCount)]
     pub fn frame_count(&self) -> usize {
@@ -130,6 +141,67 @@ impl TraceStore {
             Some(f) => Ok(js_sys::Uint8ClampedArray::from(&f.to_rgba()[..]).into()),
             None => Ok(JsValue::NULL),
         }
+    }
+
+    /// Render a partial frame up to `stop_entry` as RGBA pixel data.
+    /// Used for the progressive scrubber in T-cycle traces.
+    #[wasm_bindgen(js_name = renderPartialFrame)]
+    pub fn render_partial_frame(&self, frame_index: usize, stop_entry: usize) -> Result<JsValue, JsError> {
+        self.ensure_frames();
+        let frame_start = {
+            let cache = self.frames_cache.borrow();
+            match cache.as_ref().and_then(|f| f.get(frame_index)) {
+                Some(f) => f.start_entry,
+                None => return Ok(JsValue::NULL),
+            }
+        };
+        let store = self.get_eager_store()?;
+        let frame = framebuffer::reconstruct_partial_frame(&store, frame_start, stop_entry);
+        Ok(js_sys::Uint8ClampedArray::from(&frame.to_rgba()[..]).into())
+    }
+
+    /// Get pixel values for a range of entries as a Uint8Array.
+    /// Each byte is 0-3 (pixel shade) or 255 (no pixel at this entry).
+    #[wasm_bindgen(js_name = pixRange)]
+    pub fn pix_range(&self, start: usize, count: usize) -> Result<JsValue, JsError> {
+        if !self.has_field("pix") { return Ok(JsValue::NULL); }
+        let mut result = vec![255u8; count];
+        let end = (start + count).min(self.entry_count());
+        for i in start..end {
+            let pix_val = match &self.store {
+                StoreKind::Eager(s) => s.get_str_named("pix", i).unwrap_or("").to_string(),
+                StoreKind::Lazy(s) => s.get_str_named("pix", i).unwrap_or_default(),
+            };
+            if pix_val.len() == 1 {
+                let ch = pix_val.as_bytes()[0];
+                if ch >= b'0' && ch <= b'3' {
+                    result[i - start] = ch - b'0';
+                }
+            }
+        }
+        Ok(js_sys::Uint8Array::from(&result[..]).into())
+    }
+
+    /// Build a pixel position map for a frame. Returns a Uint32Array
+    /// where each element is `(x << 16) | y`, or 0xFFFFFFFF for no pixel.
+    #[wasm_bindgen(js_name = buildPixelPositionMap)]
+    pub fn build_pixel_position_map(&self, frame_index: usize) -> Result<JsValue, JsError> {
+        self.ensure_frames();
+        let (frame_start, frame_end) = {
+            let cache = self.frames_cache.borrow();
+            match cache.as_ref().and_then(|f| f.get(frame_index)) {
+                Some(f) => (f.start_entry, f.end_entry),
+                None => return Ok(JsValue::NULL),
+            }
+        };
+        let store = self.get_eager_store()?;
+        let map = framebuffer::build_pixel_position_map(&store, frame_start, frame_end);
+        let packed: Vec<u32> = map.iter().map(|&(x, y)| {
+            if x == 0xFFFF { 0xFFFFFFFF } else { ((x as u32) << 16) | (y as u32) }
+        }).collect();
+        let arr = js_sys::Uint32Array::new_with_length(packed.len() as u32);
+        arr.copy_from(&packed);
+        Ok(arr.into())
     }
 
     /// Get a single entry as a JS object. Returns null if out of range.
@@ -424,6 +496,25 @@ impl TraceStore {
     /// Check if any frame has non-zero pixel data.
     fn has_visible_pixels(frames: &[Frame]) -> bool {
         frames.iter().any(|f| f.pixels.iter().any(|&p| p != 0))
+    }
+
+    fn get_eager_store(&self) -> Result<ColumnStore, JsError> {
+        match &self.store {
+            StoreKind::Eager(s) => {
+                // Clone is expensive but needed for the borrow checker.
+                // For lazy stores we decode from bytes instead.
+                // For eager stores used in partial rendering, reconstruct from original_bytes if available.
+                if let Some(ref bytes) = self.original_bytes {
+                    gbtrace::column_store::load_column_store_from_bytes(bytes)
+                        .map_err(|e| JsError::new(&format!("{e}")))
+                } else {
+                    Err(JsError::new("no original bytes for eager store"))
+                }
+            }
+            StoreKind::Lazy(s) => {
+                s.to_eager().map_err(|e| JsError::new(&format!("{e}")))
+            }
+        }
     }
 
     fn reconstruct_from_store(&self) -> Vec<Frame> {
