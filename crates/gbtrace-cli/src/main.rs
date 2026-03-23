@@ -176,6 +176,21 @@ fn cmd_info(path: &PathBuf) -> i32 {
         println!("File size: {size} bytes ({:.1} MB)", size as f64 / 1024.0 / 1024.0);
     }
 
+    // Show row group info for parquet files
+    if path.to_str().map_or(false, |s| s.contains(".parquet")) {
+        if let Ok(file) = std::fs::File::open(path) {
+            if let Ok(builder) = parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder::try_new(file) {
+                let metadata = builder.metadata();
+                let num_rg = metadata.num_row_groups();
+                println!("Row groups: {num_rg}");
+                for i in 0..num_rg {
+                    let rg = metadata.row_group(i);
+                    println!("  [{i}] {} rows", rg.num_rows());
+                }
+            }
+        }
+    }
+
     0
 }
 

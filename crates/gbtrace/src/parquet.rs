@@ -67,12 +67,20 @@ impl ColumnBuffer {
 }
 
 /// Writes trace entries to a Parquet file with native integer types.
+///
+/// When the trace includes an `ly` field, row groups are flushed at frame
+/// boundaries (when `ly` wraps from 153→0). This allows readers to decode
+/// individual frames on demand without loading the entire file.
 pub struct ParquetTraceWriter {
     writer: ArrowWriter<File>,
     schema: Arc<Schema>,
     columns: Vec<ColumnBuffer>,
     field_names: Vec<String>,
     field_types: Vec<FieldType>,
+    /// Column index of the `ly` field, if present.
+    ly_col: Option<usize>,
+    /// Previous value of `ly`, for detecting frame boundaries.
+    prev_ly: Option<u8>,
 }
 
 impl ParquetTraceWriter {
@@ -109,10 +117,13 @@ impl ParquetTraceWriter {
         let file = File::create(path.as_ref())?;
         let props = WriterProperties::builder()
             .set_compression(Compression::ZSTD(ZstdLevel::try_new(3).unwrap()))
+            .set_max_row_group_size(usize::MAX) // only flush row groups explicitly
             .build();
 
         let writer = ArrowWriter::try_new(file, schema.clone(), Some(props))?;
         let columns: Vec<ColumnBuffer> = field_types.iter().map(|ft| ColumnBuffer::new(*ft)).collect();
+
+        let ly_col = field_names.iter().position(|n| n == "ly");
 
         Ok(Self {
             writer,
@@ -120,11 +131,30 @@ impl ParquetTraceWriter {
             columns,
             field_names,
             field_types,
+            ly_col,
+            prev_ly: None,
         })
     }
 
     /// Write a single trace entry. Entries are buffered and flushed in batches.
+    ///
+    /// When the trace includes `ly`, a new row group is started at each frame
+    /// boundary (ly wraps 153→0). Otherwise, row groups are flushed every
+    /// BATCH_SIZE entries.
     pub fn write_entry(&mut self, entry: &TraceEntry) -> Result<()> {
+        // Detect frame boundary before appending (so the new frame starts
+        // a fresh row group).
+        if let Some(ly_idx) = self.ly_col {
+            let cur_ly = parse_u8(entry.get(&self.field_names[ly_idx]));
+            if let Some(prev) = self.prev_ly {
+                if prev == 153 && cur_ly == 0 {
+                    self.flush_batch()?;
+                    self.writer.flush()?;
+                }
+            }
+            self.prev_ly = Some(cur_ly);
+        }
+
         for (i, (name, ft)) in self.field_names.iter().zip(&self.field_types).enumerate() {
             let val = entry.get(name);
             match (&mut self.columns[i], ft) {
@@ -152,7 +182,7 @@ impl ParquetTraceWriter {
     }
 
     fn flush_batch(&mut self) -> Result<()> {
-        if self.columns[0].len() == 0 {
+        if self.columns.is_empty() || self.columns[0].len() == 0 {
             return Ok(());
         }
 
