@@ -8,6 +8,7 @@ on:
       - 'web/**'
       - 'adapters/**'
       - 'Cargo.*'
+      - '.github/workflows/build.yml'
   workflow_dispatch:
 
 jobs:
