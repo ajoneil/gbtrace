@@ -33,16 +33,18 @@ MAX_FRAMES=1200
 TMP="/tmp/gbtrace_blargg_${NAME}_${ADAPTER}_$$"
 stderr_file="${TMP}.stderr"
 tmp_parquet="${TMP}.parquet"
-tmp_gbtrace="${TMP}.gbtrace"
+tmp_pipe="${TMP}.pipe"
 
-# --- Capture ---
-# Build adapter-specific args.
-# All adapters get --stop-on-serial for serial-based pass/fail.
-# If a .pix reference exists, pass --reference for screenshot-based early stop.
+cleanup() { rm -f "$tmp_pipe" "$stderr_file" "${TMP}_trimmed.parquet" "${ROM%.gb}.sav"; }
+trap cleanup EXIT
+
+# --- Capture + convert via named pipe (no intermediate file on disk) ---
 EXTRA_ARGS=()
 if [[ -f "$PIX_REF" ]]; then
     EXTRA_ARGS+=(--reference "$PIX_REF")
 fi
+
+mkfifo "$tmp_pipe"
 
 (
     set +eo pipefail
@@ -54,24 +56,19 @@ fi
         --extra-frames 2 \
         --frames "$MAX_FRAMES" \
         "${EXTRA_ARGS[@]}" \
-        --output "$tmp_gbtrace" \
+        --output "$tmp_pipe" \
         2>"$stderr_file" \
         < /dev/null
-) || true
+) &
+adapter_pid=$!
 
-if [[ ! -s "$tmp_gbtrace" ]]; then
-    err_msg=$(head -1 "$stderr_file" 2>/dev/null || echo "unknown")
-    printf "%-40s %-10s ERROR (%s)\n" "$NAME" "$ADAPTER" "$err_msg"
-    rm -f "$tmp_gbtrace" "$stderr_file" "${ROM%.gb}.sav"
-    exit 1
-fi
+"$CLI" convert "$tmp_pipe" -o "$tmp_parquet" >/dev/null 2>&1 || true
 
-# --- Convert to parquet ---
-"$CLI" convert "$tmp_gbtrace" -o "$tmp_parquet" >/dev/null 2>&1
+wait "$adapter_pid" || true
 
 if [[ ! -s "$tmp_parquet" ]]; then
-    printf "%-40s %-10s ERROR (convert)\n" "$NAME" "$ADAPTER"
-    rm -f "$tmp_gbtrace" "$tmp_parquet" "$stderr_file" "${ROM%.gb}.sav"
+    err_msg=$(head -1 "$stderr_file" 2>/dev/null || echo "unknown")
+    printf "%-40s %-10s ERROR (%s)\n" "$NAME" "$ADAPTER" "$err_msg"
     exit 1
 fi
 
@@ -102,5 +99,3 @@ mv "$tmp_parquet" "$out"
 
 entries=$("$CLI" info "$out" 2>/dev/null | grep Entries | awk '{print $2}')
 printf "%-40s %-10s %-4s %6s entries\n" "$NAME" "$ADAPTER" "${status^^}" "${entries:-?}"
-
-rm -f "$tmp_gbtrace" "${TMP}_trimmed.parquet" "$stderr_file" "${ROM%.gb}.sav"
