@@ -13,7 +13,7 @@ METROBOY_DIR ?= metroboy
 METROLIB_DIR ?= metrolib
 
 CXX      ?= g++
-CXXFLAGS  = -O2 -std=c++20 -Wall -Wextra -Wno-unused-parameter \
+CXXFLAGS  = -O3 -std=c++20 -Wall -Wextra -Wno-unused-parameter \
             -DCONFIG_RELEASE
 INCLUDES  = -I$(METROBOY_DIR)/src -I$(METROBOY_DIR)/symlinks \
             -I$(METROBOY_DIR)/symlinks/metrolib
