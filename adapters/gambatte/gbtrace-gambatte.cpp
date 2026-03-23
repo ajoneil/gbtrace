@@ -507,33 +507,10 @@ int main(int argc, char *argv[]) {
         if (result >= 0) {
             frames++;
             if (g_has_pix) {
-                // Emit a standalone entry with the full frame's pixel data.
-                // This entry has the current IO state and the complete frame.
+                // Capture frame pixels into g_pending_pix. The next
+                // trace_callback will emit them as part of a normal
+                // instruction entry (with valid CPU/IO state).
                 capture_frame_pixels();
-                bool first = true;
-                std::fprintf(g_output, "{");
-                for (const auto &em : g_emitters) {
-                    if (!first) std::fprintf(g_output, ",");
-                    first = false;
-                    std::fprintf(g_output, "\"%s\":", em.name.c_str());
-                    switch (em.source) {
-                    case FieldEmitter::CALLBACK_8:
-                    case FieldEmitter::CALLBACK_16:
-                        // Use cached IO values for CPU regs (not available here)
-                        std::fprintf(g_output, "0");
-                        break;
-                    case FieldEmitter::IO_READ:
-                        fput_u8(g_output, gb.externalRead(em.io_addr));
-                        break;
-                    case FieldEmitter::IME:
-                        break;
-                    case FieldEmitter::PIX:
-                        std::fprintf(g_output, "\"%s\"", g_pending_pix.c_str());
-                        g_pending_pix.clear();
-                        break;
-                    }
-                }
-                std::fprintf(g_output, "}\n");
             }
             for (const auto &cond : stop_conditions) {
                 if (gb.externalRead(cond.addr) == cond.value) {
