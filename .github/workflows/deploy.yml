@@ -16,7 +16,7 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       # ── System dependencies ──────────────────────────────────
       - name: Install system packages
@@ -46,7 +46,7 @@ jobs:
       # ── Adapter: gambatte ──────────────────────────────────
       - name: Cache gambatte adapter
         id: cache-gambatte
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: |
             adapters/gambatte/gbtrace-gambatte
@@ -64,7 +64,7 @@ jobs:
       # ── Adapter: sameboy ───────────────────────────────────
       - name: Cache sameboy adapter
         id: cache-sameboy
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: |
             adapters/sameboy/gbtrace-sameboy
@@ -82,7 +82,7 @@ jobs:
       # ── Adapter: mgba ──────────────────────────────────────
       - name: Cache mgba adapter
         id: cache-mgba
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: |
             adapters/mgba/gbtrace-mgba
@@ -103,7 +103,7 @@ jobs:
       # ── Adapter: gateboy ───────────────────────────────────
       - name: Cache gateboy adapter
         id: cache-gateboy
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: |
             adapters/gateboy/gbtrace-gateboy
@@ -126,7 +126,7 @@ jobs:
       # ── Traces: gbmicrotest ────────────────────────────────
       - name: Cache gbmicrotest traces
         id: cache-micro
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: build/traces/gbmicrotest
           key: traces-gbmicrotest-${{ hashFiles('adapters/gambatte/gbtrace-gambatte.cpp', 'adapters/sameboy/gbtrace-sameboy.cpp', 'adapters/mgba/gbtrace-mgba.c', 'adapters/gateboy/gbtrace-gateboy.cpp', 'adapters/gateboy/audio_stub.cpp', 'adapters/*/Makefile', 'test-suites/gbmicrotest/gbmicrotest.toml', 'test-suites/gbmicrotest/*.gb', 'scripts/trace-gbmicrotest.sh') }}
@@ -140,7 +140,7 @@ jobs:
       # ── Traces: blargg ─────────────────────────────────────
       - name: Cache blargg traces
         id: cache-blargg
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: build/traces/blargg
           key: traces-blargg-${{ hashFiles('adapters/gambatte/gbtrace-gambatte.cpp', 'adapters/sameboy/gbtrace-sameboy.cpp', 'adapters/mgba/gbtrace-mgba.c', 'adapters/*/Makefile', 'test-suites/blargg/blargg.toml', 'test-suites/blargg/**/*.gb', 'scripts/trace-blargg.sh') }}
