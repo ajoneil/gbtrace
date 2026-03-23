@@ -580,6 +580,7 @@ version = "0.1.0"
 dependencies = [
  "clap",
  "gbtrace",
+ "parquet",
  "serde_json",
 ]
 
