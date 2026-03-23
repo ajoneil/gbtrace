@@ -81,7 +81,6 @@ export class TraceChart extends LitElement {
     _viewStart: { state: true },
     _viewEnd: { state: true },
     _tooltip: { state: true },
-    _isDragging: { state: true },
   };
 
   constructor() {
@@ -96,10 +95,6 @@ export class TraceChart extends LitElement {
     this._viewStart = 0;
     this._viewEnd = 0;
     this._tooltip = null;
-    this._isDragging = false;
-    this._dragStartX = 0;
-    this._dragViewStart = 0;
-    this._dragViewEnd = 0;
     this._selStart = null;
     this._selEnd = null;
     this._resizeObserver = null;
@@ -141,18 +136,11 @@ export class TraceChart extends LitElement {
         <div class="chart-header">
           <span class="chart-title">${this.field}</span>
           <span class="chart-range">${rangeText}</span>
-          <div class="chart-actions">
-            ${this._viewEnd - this._viewStart < total ? html`
-              <button class="chart-btn" @click=${this._resetZoom}>Reset</button>
-            ` : ''}
-          </div>
         </div>
         <canvas
           height="${CHART_HEIGHT}"
-          @wheel=${this._onWheel}
-          @mousedown=${this._onMouseDown}
+          @click=${this._onClick}
           @mousemove=${this._onMouseMove}
-          @mouseup=${this._onMouseUp}
           @mouseleave=${this._onMouseLeave}
         ></canvas>
         ${this._tooltip ? html`
@@ -393,55 +381,18 @@ export class TraceChart extends LitElement {
     return Math.round(this._viewStart + frac * (this._viewEnd - this._viewStart));
   }
 
-  _onWheel(e) {
-    e.preventDefault();
-    const total = this.store.entryCount();
-    const range = this._viewEnd - this._viewStart;
+  _onClick(e) {
     const idx = this._pixelToIndex(e.clientX);
-    const frac = (idx - this._viewStart) / range;
-
-    const zoomFactor = e.deltaY > 0 ? 1.3 : 0.7;
-    let newRange = Math.round(range * zoomFactor);
-    newRange = Math.max(100, Math.min(total, newRange));
-
-    let newStart = Math.round(idx - frac * newRange);
-    newStart = Math.max(0, Math.min(total - newRange, newStart));
-
-    this._viewStart = newStart;
-    this._viewEnd = newStart + newRange;
-  }
-
-  _onMouseDown(e) {
-    if (e.button !== 0) return;
-    const canvas = this._getCanvas();
-    if (!canvas) return;
-    // Start drag — we'll decide if it's a zoom-select or a click on mouseup
-    this._isDragging = 'pending';
-    this._dragOriginX = e.clientX;
-    this._selStart = e.clientX - canvas.getBoundingClientRect().left;
-    this._selEnd = this._selStart;
+    this.dispatchEvent(new CustomEvent('jump-to-index', {
+      detail: { index: idx },
+      bubbles: true, composed: true,
+    }));
   }
 
   _onMouseMove(e) {
     const canvas = this._getCanvas();
     if (!canvas) return;
     const rect = canvas.getBoundingClientRect();
-
-    if (this._isDragging === 'pending') {
-      // Promote to drag-select once moved enough
-      if (Math.abs(e.clientX - this._dragOriginX) > 3) {
-        this._isDragging = 'select';
-      }
-    }
-
-    if (this._isDragging === 'select') {
-      this._selEnd = e.clientX - rect.left;
-      this._tooltip = null;
-      this._draw();
-      return;
-    }
-
-    // Tooltip
     const idx = this._pixelToIndex(e.clientX);
     if (idx >= this._viewStart && idx < this._viewEnd) {
       const val = this.store.entry(idx);
@@ -454,49 +405,8 @@ export class TraceChart extends LitElement {
     }
   }
 
-  _onMouseUp(e) {
-    if (this._isDragging === 'select' && this._selStart !== null && this._selEnd !== null) {
-      // Drag-to-zoom: zoom into the selected region
-      const x1 = Math.min(this._selStart, this._selEnd);
-      const x2 = Math.max(this._selStart, this._selEnd);
-      if (x2 - x1 > 5) {
-        const canvas = this._getCanvas();
-        const rect = canvas.getBoundingClientRect();
-        const plotW = rect.width - PADDING.left - PADDING.right;
-        const frac1 = Math.max(0, (x1 - PADDING.left) / plotW);
-        const frac2 = Math.min(1, (x2 - PADDING.left) / plotW);
-        const range = this._viewEnd - this._viewStart;
-        const newStart = Math.round(this._viewStart + frac1 * range);
-        const newEnd = Math.round(this._viewStart + frac2 * range);
-        this._viewStart = newStart;
-        this._viewEnd = Math.max(newEnd, newStart + 100);
-      }
-    } else if (this._isDragging === 'pending') {
-      // Was a click, not a drag — jump to that index in the trace table
-      const idx = this._pixelToIndex(e.clientX);
-      this.dispatchEvent(new CustomEvent('jump-to-index', {
-        detail: { index: idx },
-        bubbles: true, composed: true,
-      }));
-    }
-    this._isDragging = false;
-    this._selStart = null;
-    this._selEnd = null;
-  }
-
   _onMouseLeave() {
     this._tooltip = null;
-    if (this._isDragging === 'select') {
-      this._isDragging = false;
-      this._selStart = null;
-      this._selEnd = null;
-      this._draw();
-    }
-  }
-
-  _resetZoom() {
-    this._viewStart = this.viewStart ?? 0;
-    this._viewEnd = this.viewEnd ?? this.store.entryCount();
   }
 }
 
