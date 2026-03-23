@@ -188,6 +188,7 @@ export class TraceSelector extends LitElement {
     activeB: { type: String },
     allFields: { type: Array },
     hiddenFields: { type: Object },
+    excludedFields: { type: Object },
     triggerA: { type: String },
     triggerB: { type: String },
     downsampled: { type: Boolean },
@@ -207,6 +208,7 @@ export class TraceSelector extends LitElement {
     this.activeB = null;
     this.allFields = [];
     this.hiddenFields = new Set();
+    this.excludedFields = null;
     this.triggerA = null;
     this.triggerB = null;
     this.downsampled = false;
@@ -295,7 +297,8 @@ export class TraceSelector extends LitElement {
   }
 
   _renderFieldGroups() {
-    const allFields = this.allFields || [];
+    const excluded = this.excludedFields || new Set();
+    const allFields = (this.allFields || []).filter(f => !excluded.has(f));
     const hidden = this.hiddenFields || new Set();
     const grouped = new Set();
     const parts = [];

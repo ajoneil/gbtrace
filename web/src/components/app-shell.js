@@ -188,6 +188,7 @@ export class AppShell extends LitElement {
         .activeB=${this._nameB}
         .allFields=${this._allFields}
         .hiddenFields=${this._hiddenFields}
+        .excludedFields=${this._compareHiddenFields || null}
         .triggerA=${this._header?.trigger || null}
         .triggerB=${this._storeB?.header()?.trigger || null}
         .downsampled=${this._downsampled}
