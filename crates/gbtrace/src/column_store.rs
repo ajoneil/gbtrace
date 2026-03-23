@@ -263,7 +263,6 @@ impl ColumnStore {
         }
         new_store.finish_row();
 
-        let mut last_group_start = 0;
         for i in 1..count {
             let cur_pc = self.columns[pc_col].get_numeric(i);
             if cur_pc != prev_pc {
@@ -272,21 +271,10 @@ impl ColumnStore {
                     new_store.push_u64(col, self.columns[col].get_numeric(i));
                 }
                 new_store.finish_row();
-                last_group_start = i;
             }
             prev_pc = cur_pc;
         }
 
-        // If the final group has more than one T-cycle, also emit the
-        // last T-cycle to capture any writes the final instruction made
-        // (e.g. test_pass). This entry will have the same PC but with
-        // post-execution state.
-        if count - 1 > last_group_start {
-            for col in 0..ncols {
-                new_store.push_u64(col, self.columns[col].get_numeric(count - 1));
-            }
-            new_store.finish_row();
-        }
 
         Ok(new_store)
     }
