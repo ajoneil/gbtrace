@@ -158,11 +158,30 @@ static bool g_stop_serial_triggered = false;
 // Pre-computed list of what to emit per entry.
 struct FieldEmitter {
     std::string name;
-    enum Source { REGISTER_8, REGISTER_16, IO_READ, IME } source;
+    enum Source { REGISTER_8, REGISTER_16, IO_READ, IME, PIX } source;
     RegisterField::Reg reg; // for REGISTER_8/16
     unsigned short io_addr; // for IO_READ
 };
 static std::vector<FieldEmitter> g_emitters;
+static bool g_has_pix = false;
+static uint32_t g_pixel_buf[160 * 144];
+static std::string g_pending_pix;
+
+static inline char rgba_to_shade(uint32_t rgba) {
+    unsigned r = (rgba >> 0) & 0xFF;
+    if (r >= 0xC0) return '0';
+    if (r >= 0x70) return '1';
+    if (r >= 0x30) return '2';
+    return '3';
+}
+
+static void capture_sameboy_frame() {
+    g_pending_pix.clear();
+    g_pending_pix.reserve(160 * 144);
+    for (int i = 0; i < 160 * 144; i++) {
+        g_pending_pix += rgba_to_shade(g_pixel_buf[i]);
+    }
+}
 
 static void build_emitters(const Profile &prof) {
     g_emitters.clear();
@@ -172,7 +191,12 @@ static void build_emitters(const Profile &prof) {
         FieldEmitter em;
         em.name = field;
 
-        if (field == "ime") {
+        if (field == "pix") {
+            em.source = FieldEmitter::PIX;
+            g_has_pix = true;
+            g_emitters.push_back(em);
+            continue;
+        } else if (field == "ime") {
             em.source = FieldEmitter::IME;
         } else if (auto it = REGISTER_FIELDS.find(field); it != REGISTER_FIELDS.end()) {
             em.source = it->second.is_16bit ? FieldEmitter::REGISTER_16 : FieldEmitter::REGISTER_8;
@@ -250,6 +274,10 @@ static void exec_callback(GB_gameboy_t *gb, uint16_t address, uint8_t opcode) {
             break;
         case FieldEmitter::IME:
             std::fprintf(g_output, gb->ime ? "true" : "false");
+            break;
+        case FieldEmitter::PIX:
+            std::fprintf(g_output, "\"%s\"", g_pending_pix.c_str());
+            g_pending_pix.clear();
             break;
         }
     }
@@ -465,7 +493,11 @@ int main(int argc, char *argv[]) {
     }
 
     // Optimizations for trace generation
-    GB_set_rendering_disabled(g_gb, true);
+    if (!g_has_pix) {
+        GB_set_rendering_disabled(g_gb, true);
+    } else {
+        GB_set_pixels_output(g_gb, g_pixel_buf);
+    }
     GB_set_turbo_mode(g_gb, true, true);
 
     // Run boot ROM without tracing — advance until PC reaches 0x0100
@@ -504,6 +536,9 @@ int main(int argc, char *argv[]) {
         g_total_8mhz_ticks += ticks;
         if (g_gb->vblank_just_occured) {
             frames++;
+            if (g_has_pix) {
+                capture_sameboy_frame();
+            }
             for (const auto &cond : stop_conditions) {
                 if (GB_safe_read_memory(g_gb, cond.addr) == cond.value) {
                     stopped_early = true;

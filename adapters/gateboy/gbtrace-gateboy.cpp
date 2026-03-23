@@ -176,11 +176,50 @@ static Profile parse_profile(const std::string &path) {
 
 struct FieldEmitter {
     std::string name;
-    enum Source { CPU_REG8, CPU_REG16, CPU_IME, IO_READ } source;
+    enum Source { CPU_REG8, CPU_REG16, CPU_IME, IO_READ, PIX } source;
     unsigned short io_addr; // for IO_READ
 };
 
 static std::vector<FieldEmitter> g_emitters;
+static bool g_has_pix = false;
+
+// --- Pixel capture ---
+// Track pixels pushed by the PPU between trace entries.
+// GateBoy's update_framebuffer() writes one pixel per phase at
+// (pix_count-8, ly) when in mode 3. We track the framebuffer cursor
+// position and collect new pixels between emissions.
+static std::string g_pix_buf;
+static int g_prev_pix_count = -1;
+static int g_prev_pix_ly = -1;
+
+static void collect_gateboy_pixel(const GateBoy &gb) {
+    int pix_count = bit_pack(gb.gb_state.pix_count);
+    int lcd_y = bit_pack(gb.gb_state.reg_ly);
+    int lcd_x = pix_count - 8;
+
+    // Only emit when pix_count incremented on the same scanline.
+    // On ly change, reset tracking.
+    if (lcd_y != g_prev_pix_ly) {
+        g_prev_pix_count = -1;
+        g_prev_pix_ly = lcd_y;
+    }
+
+    // Pixel pushed if pix_count advanced by exactly 1
+    if (pix_count != g_prev_pix_count + 1 || pix_count == g_prev_pix_count) {
+        g_prev_pix_count = pix_count;
+        return;
+    }
+
+    g_prev_pix_count = pix_count;
+
+    if (lcd_y < 0 || lcd_y >= 144 || lcd_x < 0 || lcd_x >= 160) return;
+
+    // Read the shade from the framebuffer (already written by update_framebuffer)
+    uint8_t raw = gb.mem.framebuffer[lcd_x + lcd_y * 160];
+    // GateBoy stores 3-shade, undo inversion
+    uint8_t shade = (raw <= 3) ? (3 - raw) : 0;
+    g_pix_buf += ('0' + shade);
+}
 
 static uint8_t read_cpu_reg8(const CpuState &reg, const std::string &name) {
     if (name == "a") return reg.a;
@@ -221,6 +260,11 @@ static void build_emitters(const Profile &prof) {
         if (field == "sb" || field == "sc") {
             std::fprintf(stderr, "Note: skipping '%s' (serial not simulated in GateBoy)\n",
                          field.c_str());
+            continue;
+        } else if (field == "pix") {
+            em.source = FieldEmitter::PIX;
+            g_has_pix = true;
+            g_emitters.push_back(em);
             continue;
         } else if (field == "ime") {
             em.source = FieldEmitter::CPU_IME;
@@ -332,6 +376,10 @@ static void emit_entry(FILE *out, GateBoy &gb) {
             std::fprintf(out, "%d", val);
             break;
         }
+        case FieldEmitter::PIX:
+            std::fprintf(out, "\"%s\"", g_pix_buf.c_str());
+            g_pix_buf.clear();
+            break;
         }
     }
 
@@ -508,6 +556,11 @@ int main(int argc, char *argv[]) {
     while (phase_count < total_phases) {
         gb.next_phase(cart_blob);
         phase_count++;
+
+        // Collect pixel output from this phase (if PPU pushed one)
+        if (g_has_pix) {
+            collect_gateboy_pixel(gb);
+        }
 
         const CpuState &reg = gb.cpu.core.reg;
 

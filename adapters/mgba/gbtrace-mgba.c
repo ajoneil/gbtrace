@@ -162,7 +162,7 @@ static struct Profile parse_profile(const char *path) {
 
 // --- Emitter configuration ---
 
-enum EmitterSource { SRC_REG8, SRC_REG16, SRC_IO, SRC_IME };
+enum EmitterSource { SRC_REG8, SRC_REG16, SRC_IO, SRC_IME, SRC_PIX };
 
 struct FieldEmitter {
     char name[MAX_NAME];
@@ -172,6 +172,23 @@ struct FieldEmitter {
 
 static struct FieldEmitter g_emitters[MAX_FIELDS];
 static int g_nemitters = 0;
+static int g_has_pix = 0;
+static uint32_t g_video_buf[160 * 144];
+static char g_pending_pix[160 * 144 + 1];
+
+static void capture_mgba_frame(void) {
+    for (int i = 0; i < 160 * 144; i++) {
+        uint32_t rgba = g_video_buf[i];
+        unsigned r = (rgba >> 0) & 0xFF;
+        char shade;
+        if (r >= 0xC0) shade = '0';
+        else if (r >= 0x70) shade = '1';
+        else if (r >= 0x30) shade = '2';
+        else shade = '3';
+        g_pending_pix[i] = shade;
+    }
+    g_pending_pix[160 * 144] = '\0';
+}
 
 static void build_emitters(const struct Profile *prof) {
     g_nemitters = 0;
@@ -182,7 +199,12 @@ static void build_emitters(const struct Profile *prof) {
         struct FieldEmitter *em = &g_emitters[g_nemitters];
         strncpy(em->name, field, MAX_NAME - 1);
 
-        if (strcmp(field, "ime") == 0) {
+        if (strcmp(field, "pix") == 0) {
+            em->source = SRC_PIX;
+            g_has_pix = 1;
+            g_nemitters++;
+            continue;
+        } else if (strcmp(field, "ime") == 0) {
             em->source = SRC_IME;
         } else if (is_in_list(field, REG8_FIELDS)) {
             em->source = SRC_REG8;
@@ -280,6 +302,10 @@ static void emit_entry(struct mCore *core) {
             break;
         case SRC_IME:
             fprintf(g_output, cpu->irqPending ? "true" : "false");
+            break;
+        case SRC_PIX:
+            fprintf(g_output, "\"%s\"", g_pending_pix);
+            g_pending_pix[0] = '\0';
             break;
         }
     }
@@ -463,9 +489,8 @@ int main(int argc, char *argv[]) {
 
     g_core->init(g_core);
 
-    // Set up a dummy video buffer (required even headless)
-    static uint32_t video_buf[160 * 144];
-    g_core->setVideoBuffer(g_core, video_buf, 160);
+    // Set up video buffer (used for pixel capture when pix field is present)
+    g_core->setVideoBuffer(g_core, g_video_buf, 160);
 
     if (!mCoreLoadFile(g_core, rom_path)) {
         fprintf(stderr, "Error: failed to load ROM '%s'\n", rom_path);
@@ -536,6 +561,9 @@ int main(int argc, char *argv[]) {
     int stopped_early = 0;
     for (frames = 0; frames < max_frames; frames++) {
         mDebuggerRunFrame(&debugger);
+        if (g_has_pix) {
+            capture_mgba_frame();
+        }
         for (int sc = 0; sc < num_stop_conditions; sc++) {
             if (g_core->rawRead8(g_core, stop_conditions[sc].addr, -1) == stop_conditions[sc].value) {
                 stopped_early = 1;
