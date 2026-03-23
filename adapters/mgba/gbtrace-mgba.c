@@ -262,6 +262,8 @@ static int g_stop_serial_count = 1;
 static int g_stop_serial_seen = 0;
 static int g_stop_serial_active = 0;
 static int g_stop_serial_triggered = 0;
+static int g_stop_opcode = -1;
+static int g_stop_opcode_triggered = 0;
 
 // --- Formatting helpers ---
 
@@ -329,6 +331,14 @@ static void emit_entry(struct mCore *core) {
     }
 
     fprintf(g_output, "}\n");
+
+    /* Check opcode stop condition */
+    if (g_stop_opcode >= 0 && !g_stop_opcode_triggered) {
+        uint8_t op = core->rawRead8(core, cpu->pc, -1);
+        if (op == (uint8_t)g_stop_opcode) {
+            g_stop_opcode_triggered = 1;
+        }
+    }
 
     // Check serial stop condition: detect rising edge of SC bit 7
     if (g_stop_serial_active && !g_stop_serial_triggered) {
@@ -454,6 +464,8 @@ int main(int argc, char *argv[]) {
             reference_path = argv[++i];
         } else if (strcmp(argv[i], "--extra-frames") == 0 && i + 1 < argc) {
             extra_frames = atoi(argv[++i]);
+        } else if (strcmp(argv[i], "--stop-opcode") == 0 && i + 1 < argc) {
+            g_stop_opcode = (int)strtoul(argv[++i], NULL, 16);
         } else if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0) {
             print_usage(argv[0]);
             return 0;
@@ -636,6 +648,16 @@ int main(int argc, char *argv[]) {
         }
         if (g_stop_serial_triggered) {
             fprintf(stderr, "Serial stop at frame %d, running %d extra frame%s\n",
+                    frames + 1, extra_frames, extra_frames == 1 ? "" : "s");
+            remaining_extra = extra_frames;
+            if (remaining_extra == 0) {
+                stopped_early = 1;
+                frames++;
+                break;
+            }
+        }
+        if (g_stop_opcode_triggered) {
+            fprintf(stderr, "Opcode stop at frame %d, running %d extra frame%s\n",
                     frames + 1, extra_frames, extra_frames == 1 ? "" : "s");
             remaining_extra = extra_frames;
             if (remaining_extra == 0) {

@@ -146,6 +146,8 @@ struct FieldEmitter {
 };
 static std::vector<FieldEmitter> g_emitters;
 static bool g_has_pix = false;
+static int g_stop_opcode = -1;
+static bool g_stop_opcode_triggered = false;
 
 // --- Pixel capture ---
 // Gambatte fills video_buf as a 160x144 RGBA framebuffer during runFor().
@@ -288,6 +290,14 @@ static void trace_callback(void *data) {
     g_io_cache = io_now;
     g_io_cache_valid = true;
 
+    // Check opcode stop condition
+    if (g_stop_opcode >= 0 && !g_stop_opcode_triggered) {
+        unsigned pc = r[1];
+        if (g_gb->externalRead(pc) == static_cast<unsigned>(g_stop_opcode)) {
+            g_stop_opcode_triggered = true;
+        }
+    }
+
     // Check serial stop condition: detect rising edge of SC bit 7
     if (g_stop_serial_active && !g_stop_serial_triggered) {
         static bool prev_sc_high = false;
@@ -399,6 +409,7 @@ int main(int argc, char *argv[]) {
     std::string model = "DMG-B";
     std::string reference_path;
     int extra_frames = 0;
+    int stop_opcode = -1;  // -1 = disabled
     unsigned load_flags = gambatte::GB::LoadFlag::NO_BIOS;
     std::vector<StopCondition> stop_conditions;
 
@@ -432,6 +443,8 @@ int main(int argc, char *argv[]) {
             reference_path = argv[++i];
         } else if (arg == "--extra-frames" && i + 1 < argc) {
             extra_frames = std::atoi(argv[++i]);
+        } else if (arg == "--stop-opcode" && i + 1 < argc) {
+            stop_opcode = static_cast<int>(std::strtoul(argv[++i], nullptr, 16));
         } else if (arg == "--help" || arg == "-h") {
             print_usage(argv[0]);
             return 0;
@@ -514,6 +527,12 @@ int main(int argc, char *argv[]) {
                      g_stop_serial_count == 1 ? "" : "s");
     }
 
+    // Set up opcode stop
+    g_stop_opcode = stop_opcode;
+    if (stop_opcode >= 0) {
+        std::fprintf(stderr, "Stop on opcode: 0x%02X\n", stop_opcode);
+    }
+
     // Set up pixel capture
     g_video_buf_ptr = video_buf.data();
 
@@ -578,6 +597,15 @@ int main(int argc, char *argv[]) {
             }
             if (g_stop_serial_triggered) {
                 std::fprintf(stderr, "Serial stop at frame %d, running %d extra frame%s\n",
+                             frames, extra_frames, extra_frames == 1 ? "" : "s");
+                remaining_extra = extra_frames;
+                if (remaining_extra == 0) {
+                    stopped_early = true;
+                    break;
+                }
+            }
+            if (g_stop_opcode_triggered) {
+                std::fprintf(stderr, "Opcode stop at frame %d, running %d extra frame%s\n",
                              frames, extra_frames, extra_frames == 1 ? "" : "s");
                 remaining_extra = extra_frames;
                 if (remaining_extra == 0) {
