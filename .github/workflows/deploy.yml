@@ -1,0 +1,98 @@
+name: Build and Deploy
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # ── System dependencies ──────────────────────────────────
+      - name: Install system packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential cmake scons zlib1g-dev \
+            libz-dev python3
+
+      # ── Rust toolchain ───────────────────────────────────────
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Install wasm-pack
+        run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+
+      # ── Build CLI ────────────────────────────────────────────
+      - name: Build gbtrace-cli
+        run: make cli
+
+      # ── Build WASM ───────────────────────────────────────────
+      - name: Build WASM module
+        run: make wasm
+
+      # ── Clone and build adapter dependencies ─────────────────
+      - name: Clone gambatte-speedrun
+        run: |
+          cd adapters/gambatte
+          git clone --recursive --depth 1 \
+            https://github.com/pokemon-speedrunning/gambatte-speedrun.git
+
+      - name: Clone SameBoy
+        run: |
+          cd adapters/sameboy
+          git clone --depth 1 https://github.com/LIJI32/SameBoy.git
+          cd SameBoy && make lib CONF=release -j$(nproc)
+
+      - name: Clone mGBA
+        run: |
+          cd adapters/mgba
+          git clone --depth 1 https://github.com/mgba-emu/mgba.git
+          cd mgba && mkdir build && cd build
+          cmake .. -DLIBMGBA_ONLY=ON -DBUILD_STATIC=ON \
+            -DCMAKE_BUILD_TYPE=Release -DENABLE_DEBUGGERS=ON
+          make -j$(nproc)
+
+      # Gateboy clones automatically via its Makefile
+
+      # ── Build adapters ───────────────────────────────────────
+      - name: Build all adapters
+        run: make adapters
+
+      # ── Generate traces ──────────────────────────────────────
+      - name: Generate traces
+        run: make traces -j$(nproc)
+
+      # ── Assemble site ────────────────────────────────────────
+      - name: Assemble site
+        run: make site
+
+      # ── Deploy to Pages ──────────────────────────────────────
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: build/site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

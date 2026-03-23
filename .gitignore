@@ -1,5 +1,10 @@
 receipts/
 target/
+web/pkg/
+build/
+*.gbtrace
+*.gbtrace.parquet
+*.sav
 adapters/gambatte/gambatte-speedrun/
 adapters/gambatte/gbtrace-gambatte
 adapters/gateboy/metroboy/
