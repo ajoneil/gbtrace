@@ -11,4 +11,5 @@ path = "src/main.rs"
 [dependencies]
 gbtrace = { path = "../gbtrace", features = ["parquet"] }
 clap = { version = "4", features = ["derive"] }
+parquet = "54"
 serde_json = "1"
