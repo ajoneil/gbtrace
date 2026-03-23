@@ -35,6 +35,7 @@ EMUS ?= gambatte,sameboy,mgba,gateboy
 # Trace output dirs
 GBMICROTEST_TRACE_DIR := $(BUILD_DIR)/traces/gbmicrotest
 BLARGG_TRACE_DIR := $(BUILD_DIR)/traces/blargg
+MOONEYE_TRACE_DIR := $(BUILD_DIR)/traces/mooneye
 
 export LD_LIBRARY_PATH := $(PROJECT_DIR)/adapters/sameboy/SameBoy/build/lib:$(LD_LIBRARY_PATH)
 export CLI
@@ -68,7 +69,7 @@ pix-refs: scripts/png-to-pix.py
 DMG_ACID2_REF := test-suites/dmg-acid2/reference.pix
 
 .PHONY: all adapters cli wasm traces traces-gbmicrotest traces-blargg \
-        traces-dmg-acid2 manifests site serve clean
+        traces-mooneye traces-dmg-acid2 manifests site serve clean
 
 all: site
 
@@ -76,7 +77,7 @@ adapters: $(ADAPTER_BINS)
 
 cli: $(CLI)
 
-traces: traces-gbmicrotest traces-blargg traces-dmg-acid2
+traces: traces-gbmicrotest traces-blargg traces-mooneye traces-dmg-acid2
 
 traces-gbmicrotest: $(RULES_MK) $(GBMICROTEST_STAMPS)
 	@echo "Generating gbmicrotest manifest..."
@@ -87,6 +88,11 @@ traces-blargg: $(RULES_MK) pix-refs $(BLARGG_STAMPS)
 	@echo "Generating blargg manifest..."
 	@python3 scripts/manifest.py "$(BLARGG_TRACE_DIR)" "test-suites/blargg"
 	@echo "=== blargg complete ==="
+
+traces-mooneye: $(RULES_MK) $(MOONEYE_STAMPS)
+	@echo "Generating mooneye manifest..."
+	@python3 scripts/manifest.py "$(MOONEYE_TRACE_DIR)" "test-suites/mooneye"
+	@echo "=== mooneye complete ==="
 
 DMG_ACID2_TRACE_DIR := $(BUILD_DIR)/traces/dmg-acid2
 DMG_ACID2_ROM := test-suites/dmg-acid2/dmg-acid2.gb
@@ -120,6 +126,7 @@ site: wasm traces
 	@cp web/pkg/gbtrace_wasm.js web/pkg/gbtrace_wasm_bg.wasm $(BUILD_DIR)/site/pkg/
 	@cp -r $(GBMICROTEST_TRACE_DIR) $(BUILD_DIR)/site/tests/gbmicrotest
 	@cp -r $(BLARGG_TRACE_DIR) $(BUILD_DIR)/site/tests/blargg
+	@if [ -d "$(MOONEYE_TRACE_DIR)" ]; then cp -r $(MOONEYE_TRACE_DIR) $(BUILD_DIR)/site/tests/mooneye; fi
 	@if [ -d "$(DMG_ACID2_TRACE_DIR)" ]; then cp -r $(DMG_ACID2_TRACE_DIR) $(BUILD_DIR)/site/tests/dmg-acid2; fi
 	@# Copy ROMs so the viewer can load them for disassembly
 	@find test-suites/gbmicrotest -name '*.gb' -exec cp {} $(BUILD_DIR)/site/tests/gbmicrotest/ \;
@@ -139,6 +146,7 @@ serve: wasm
 	@cp web/pkg/gbtrace_wasm.js web/pkg/gbtrace_wasm_bg.wasm $(BUILD_DIR)/site/pkg/
 	@if [ -d "$(GBMICROTEST_TRACE_DIR)" ]; then cp -r $(GBMICROTEST_TRACE_DIR) $(BUILD_DIR)/site/tests/gbmicrotest; fi
 	@if [ -d "$(BLARGG_TRACE_DIR)" ]; then cp -r $(BLARGG_TRACE_DIR) $(BUILD_DIR)/site/tests/blargg; fi
+	@if [ -d "$(MOONEYE_TRACE_DIR)" ]; then cp -r $(MOONEYE_TRACE_DIR) $(BUILD_DIR)/site/tests/mooneye; fi
 	@if [ -d "$(DMG_ACID2_TRACE_DIR)" ]; then cp -r $(DMG_ACID2_TRACE_DIR) $(BUILD_DIR)/site/tests/dmg-acid2; fi
 	@if [ -d "$(BUILD_DIR)/site/tests/gbmicrotest" ]; then cp test-suites/gbmicrotest/gbmicrotest.toml $(BUILD_DIR)/site/tests/gbmicrotest/; fi
 	@if [ -d "$(BUILD_DIR)/site/tests/blargg" ]; then cp test-suites/blargg/blargg.toml $(BUILD_DIR)/site/tests/blargg/; fi

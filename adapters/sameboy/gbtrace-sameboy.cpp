@@ -154,6 +154,8 @@ static int g_stop_serial_count = 1;
 static int g_stop_serial_seen = 0;
 static bool g_stop_serial_active = false;
 static bool g_stop_serial_triggered = false;
+static int g_stop_opcode = -1;
+static bool g_stop_opcode_triggered = false;
 
 // Pre-computed list of what to emit per entry.
 struct FieldEmitter {
@@ -298,6 +300,13 @@ static void exec_callback(GB_gameboy_t *gb, uint16_t address, uint8_t opcode) {
 
     std::fprintf(g_output, "}\n");
 
+    // Check opcode stop condition
+    if (g_stop_opcode >= 0 && !g_stop_opcode_triggered) {
+        if (opcode == static_cast<uint8_t>(g_stop_opcode)) {
+            g_stop_opcode_triggered = true;
+        }
+    }
+
     // Check serial stop condition: detect rising edge of SC bit 7
     if (g_stop_serial_active && !g_stop_serial_triggered) {
         static bool prev_sc_high = false;
@@ -439,6 +448,8 @@ int main(int argc, char *argv[]) {
             reference_path = argv[++i];
         } else if (arg == "--extra-frames" && i + 1 < argc) {
             extra_frames = std::atoi(argv[++i]);
+        } else if (arg == "--stop-opcode" && i + 1 < argc) {
+            g_stop_opcode = static_cast<int>(std::strtoul(argv[++i], nullptr, 16));
         } else if (arg == "--help" || arg == "-h") {
             print_usage(argv[0]);
             return 0;
@@ -616,6 +627,15 @@ int main(int argc, char *argv[]) {
             }
             if (g_stop_serial_triggered) {
                 std::fprintf(stderr, "Serial stop at frame %d, running %d extra frame%s\n",
+                             frames, extra_frames, extra_frames == 1 ? "" : "s");
+                remaining_extra = extra_frames;
+                if (remaining_extra == 0) {
+                    stopped_early = true;
+                    break;
+                }
+            }
+            if (g_stop_opcode_triggered) {
+                std::fprintf(stderr, "Opcode stop at frame %d, running %d extra frame%s\n",
                              frames, extra_frames, extra_frames == 1 ? "" : "s");
                 remaining_extra = extra_frames;
                 if (remaining_extra == 0) {

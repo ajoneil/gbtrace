@@ -62,10 +62,21 @@ def main():
         'scripts/trace-blargg.sh',
     )
 
+    mooneye_stamps = gen_suite(
+        'mooneye',
+        'test-suites/mooneye',
+        'test-suites/mooneye/mooneye.toml',
+        '$(MOONEYE_TRACE_DIR)',
+        emus,
+        'scripts/trace-mooneye.sh',
+    )
+
     # Output stamp lists as Make variables
     print(f"GBMICROTEST_STAMPS := {' '.join(micro_stamps)}")
     print()
     print(f"BLARGG_STAMPS := {' '.join(blargg_stamps)}")
+    print()
+    print(f"MOONEYE_STAMPS := {' '.join(mooneye_stamps)}")
 
 
 if __name__ == '__main__':

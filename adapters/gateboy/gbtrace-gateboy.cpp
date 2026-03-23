@@ -454,6 +454,7 @@ int main(int argc, char *argv[]) {
     int stop_serial_count = 1;
     bool stop_serial_active = false;
     int extra_frames = 0;
+    int stop_opcode = -1;
     bool fastboot = true;
 
     for (int i = 1; i < argc; i++) {
@@ -478,6 +479,8 @@ int main(int argc, char *argv[]) {
             reference_path = argv[++i];
         } else if (arg == "--extra-frames" && i + 1 < argc) {
             extra_frames = std::atoi(argv[++i]);
+        } else if (arg == "--stop-opcode" && i + 1 < argc) {
+            stop_opcode = static_cast<int>(std::strtoul(argv[++i], nullptr, 16));
         } else if (arg == "--no-fastboot") {
             fastboot = false;
         } else if (arg == "--help" || arg == "-h") {
@@ -647,6 +650,17 @@ int main(int argc, char *argv[]) {
                         stop_triggered = true;
                         remaining_extra = extra_frames;
                         break;
+                    }
+                }
+
+                // Check opcode stop condition
+                if (!stop_triggered && stop_opcode >= 0) {
+                    GBResult r = gb.peek(reg.op_addr);
+                    if (r.is_ok() && r.unwrap() == static_cast<uint8_t>(stop_opcode)) {
+                        std::fprintf(stderr, "Opcode stop at frame %d, running %d extra frame%s\n",
+                                     frames, extra_frames, extra_frames == 1 ? "" : "s");
+                        stop_triggered = true;
+                        remaining_extra = extra_frames;
                     }
                 }
 

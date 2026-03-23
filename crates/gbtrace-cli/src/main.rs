@@ -48,6 +48,9 @@ enum Command {
         /// Show context entries around each match
         #[arg(long, default_value_t = 0)]
         context: usize,
+        /// Show the last N entries (no --where needed)
+        #[arg(long)]
+        last: Option<usize>,
     },
     /// Trim a trace: keep entries up to or after a condition
     Trim {
@@ -129,8 +132,12 @@ fn main() {
         Command::Info { input } => cmd_info(&input),
         Command::Convert { input, output } => cmd_convert(&input, output),
         Command::StripBoot { input, output } => cmd_strip_boot(&input, output),
-        Command::Query { input, r#where: conditions, max, context } => {
-            cmd_query(&input, &conditions, max, context)
+        Command::Query { input, r#where: conditions, max, context, last } => {
+            if let Some(n) = last {
+                cmd_query_last(&input, n)
+            } else {
+                cmd_query(&input, &conditions, max, context)
+            }
         }
         Command::Frames { input } => cmd_frames(&input),
         Command::Render { input, output, frames } => cmd_render(&input, output, frames),
@@ -670,6 +677,36 @@ fn print_entry_fields(entry: &TraceEntry, fields: &[String]) {
             print!(" {f}={}", display_val(v));
         }
     }
+}
+
+fn cmd_query_last(input: &PathBuf, n: usize) -> i32 {
+    let reader = match AnyTraceReader::open(input) {
+        Ok(r) => r,
+        Err(e) => { eprintln!("Error: {e}"); return 1; }
+    };
+
+    let fields = reader.header().fields.clone();
+
+    // Collect entries into a ring buffer of size n
+    let mut ring: Vec<TraceEntry> = Vec::with_capacity(n);
+    for result in reader {
+        let entry = match result {
+            Ok(e) => e,
+            Err(e) => { eprintln!("Error reading: {e}"); return 1; }
+        };
+        if ring.len() >= n {
+            ring.remove(0);
+        }
+        ring.push(entry);
+    }
+
+    for entry in &ring {
+        print!(" ");
+        print_entry_fields(entry, &fields);
+        println!();
+    }
+
+    0
 }
 
 // ---------------------------------------------------------------------------

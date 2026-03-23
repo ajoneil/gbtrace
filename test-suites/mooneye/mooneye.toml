@@ -1,0 +1,12 @@
+[profile]
+name = "mooneye"
+description = "Mooneye test suite with full state and pixel output."
+trigger = "tcycle"
+
+[fields]
+cpu = ["pc", "sp", "a", "f", "b", "c", "d", "e", "h", "l"]
+ppu = ["lcdc", "stat", "ly", "lyc", "scy", "scx", "wy", "wx", "bgp", "obp0", "obp1"]
+interrupt = ["if_", "ie", "ime"]
+timer = ["div", "tima", "tma", "tac"]
+serial = ["sb", "sc"]
+pixel = ["pix"]
