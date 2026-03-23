@@ -1,9 +1,10 @@
 [profile]
 name = "dmg-acid2"
-description = "PPU accuracy test with pixel output for frame comparison."
+description = "PPU accuracy test with full state and pixel output."
 trigger = "instruction"
 
 [fields]
-cpu = ["pc", "sp"]
-ppu = ["lcdc", "stat", "ly"]
+cpu = ["pc", "sp", "a", "f", "b", "c", "d", "e", "h", "l"]
+ppu = ["lcdc", "stat", "ly", "lyc", "scy", "scx", "wy", "wx", "bgp", "obp0", "obp1"]
+interrupt = ["if_", "ie", "ime"]
 pixel = ["pix"]
