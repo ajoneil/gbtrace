@@ -22,33 +22,45 @@ class DevHandler(SimpleHTTPRequestHandler):
         super().end_headers()
 
     def do_GET(self):
-        # Try serving locally first
-        path = self.translate_path(self.path)
         import os
+        path = self.translate_path(self.path)
+        is_manifest = self.path.endswith('manifest.json')
+
+        # Always proxy manifests from Pages so all emulators are visible,
+        # even when only some traces exist locally.
+        if PAGES_URL and is_manifest:
+            if self._proxy(self.path):
+                return
+
+        # Try serving locally first (non-manifest files)
         if os.path.exists(path) and not os.path.isdir(path):
             return super().do_GET()
 
-        # If local file doesn't exist and we have a Pages URL, proxy it
+        # Proxy missing files from Pages
         if PAGES_URL and not os.path.exists(path):
-            remote_url = PAGES_URL.rstrip('/') + self.path
-            try:
-                req = urllib.request.Request(remote_url)
-                with urllib.request.urlopen(req, timeout=30) as resp:
-                    data = resp.read()
-                    self.send_response(200)
-                    # Forward content type
-                    ct = resp.headers.get('Content-Type', 'application/octet-stream')
-                    self.send_header('Content-Type', ct)
-                    self.send_header('Content-Length', len(data))
-                    self.send_header('X-Proxied-From', remote_url)
-                    self.end_headers()
-                    self.wfile.write(data)
-                    return
-            except Exception:
-                pass  # fall through to normal 404
+            if self._proxy(self.path):
+                return
 
-        # Normal handling (serves directory listings or 404)
+        # Normal handling (directory listings or 404)
         return super().do_GET()
+
+    def _proxy(self, url_path):
+        """Proxy a request to the Pages site. Returns True on success."""
+        remote_url = PAGES_URL.rstrip('/') + url_path
+        try:
+            req = urllib.request.Request(remote_url)
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                data = resp.read()
+                self.send_response(200)
+                ct = resp.headers.get('Content-Type', 'application/octet-stream')
+                self.send_header('Content-Type', ct)
+                self.send_header('Content-Length', len(data))
+                self.send_header('X-Proxied-From', remote_url)
+                self.end_headers()
+                self.wfile.write(data)
+                return True
+        except Exception:
+            return False
 
     def log_message(self, format, *args):
         # Tag proxied requests
