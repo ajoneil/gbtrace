@@ -62,6 +62,9 @@ enum Command {
         /// Keep entries starting from the first match of this condition
         #[arg(long, conflicts_with = "until")]
         after: Option<String>,
+        /// Trim to the frame whose rendered pixels match this .pix reference file
+        #[arg(long, conflicts_with_all = ["until", "after"])]
+        reference: Option<PathBuf>,
     },
     /// Show frame boundaries detected from ly scanline counter
     Frames {
@@ -131,8 +134,12 @@ fn main() {
         }
         Command::Frames { input } => cmd_frames(&input),
         Command::Render { input, output, frames } => cmd_render(&input, output, frames),
-        Command::Trim { input, output, until, after } => {
-            cmd_trim(&input, output, until, after)
+        Command::Trim { input, output, until, after, reference } => {
+            if reference.is_some() {
+                cmd_trim_reference(&input, output, reference.unwrap())
+            } else {
+                cmd_trim(&input, output, until, after)
+            }
         }
         Command::Diff {
             trace_a,
@@ -750,6 +757,92 @@ fn cmd_trim(input: &PathBuf, output: Option<PathBuf>, until: Option<String>, aft
     println!("Wrote {written} of {total} entries to {}", output.display());
 
     0
+}
+
+fn cmd_trim_reference(input: &PathBuf, output: Option<PathBuf>, reference: PathBuf) -> i32 {
+    use gbtrace::framebuffer::{self, LCD_WIDTH, LCD_HEIGHT};
+
+    // Load reference .pix file and convert to pixel values (0-3)
+    let ref_str = match std::fs::read_to_string(&reference) {
+        Ok(d) => d,
+        Err(e) => { eprintln!("Error reading reference: {e}"); return 1; }
+    };
+    if ref_str.len() != LCD_WIDTH * LCD_HEIGHT {
+        eprintln!("Error: reference file should be {} bytes, got {}", LCD_WIDTH * LCD_HEIGHT, ref_str.len());
+        return 1;
+    }
+    let ref_pixels: Vec<u8> = ref_str.bytes().map(|b| b.wrapping_sub(b'0').min(3)).collect();
+
+    // Load column store and reconstruct frames
+    let store = match gbtrace::column_store::load_column_store(input) {
+        Ok(s) => s,
+        Err(e) => { eprintln!("Error: {e}"); return 1; }
+    };
+
+    // Compare rendered frames against reference using the same palette
+    // normalization as the PNG pipeline (to_rgba → shade thresholds).
+    let frames = framebuffer::reconstruct_frames(&store);
+    let mut end_entry = None;
+    for frame in &frames {
+        let rgba = frame.to_rgba();
+        let rendered_pix: Vec<u8> = (0..LCD_WIDTH * LCD_HEIGHT)
+            .map(|i| {
+                let r = rgba[i * 4];
+                if r >= 192 { 0 } else if r >= 112 { 1 } else if r >= 48 { 2 } else { 3 }
+            })
+            .collect();
+        if rendered_pix == ref_pixels {
+            eprintln!("Reference matches frame {} (entries 0..{})", frame.index + 1, frame.end_entry);
+            end_entry = Some(frame.end_entry);
+            break;
+        }
+    }
+
+    let total = store.entry_count();
+    let cut = match end_entry {
+        // Include one extra entry so the frame boundary (ly wrap) is captured,
+        // allowing the rendered output to detect the matching frame properly.
+        Some(e) => (e + 1).min(total),
+        None => {
+            eprintln!("WARNING: no frame matches reference, writing all entries");
+            total
+        }
+    };
+
+    // Re-read trace and write entries up to cut point
+    let reader = match AnyTraceReader::open(input) {
+        Ok(r) => r,
+        Err(e) => { eprintln!("Error: {e}"); return 1; }
+    };
+    let header = reader.header().clone();
+    let output = output.unwrap_or_else(|| default_output(input, "_trimmed"));
+
+    let mut writer = match AnyWriter::create(&output, &header) {
+        Ok(w) => w,
+        Err(e) => { eprintln!("Error creating output: {e}"); return 1; }
+    };
+
+    let mut written: u64 = 0;
+    for result in reader {
+        if written as usize >= cut { break; }
+        let entry = match result {
+            Ok(e) => e,
+            Err(e) => { eprintln!("Error reading: {e}"); return 1; }
+        };
+        if let Err(e) = writer.write_entry(&entry) {
+            eprintln!("Error writing: {e}");
+            return 1;
+        }
+        written += 1;
+    }
+
+    if let Err(e) = writer.finish() {
+        eprintln!("Error finalizing: {e}");
+        return 1;
+    }
+
+    println!("Wrote {written} of {total} entries to {}", output.display());
+    if end_entry.is_some() { 0 } else { 1 }
 }
 
 fn format_boot_rom(boot_rom: &gbtrace::BootRom) -> String {

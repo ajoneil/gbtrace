@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Generate a trace for a screenshot test: adapter + ROM → parquet + rendered frame
-# Stops when rendered frame matches reference, or after max frames.
+# Captures a small number of frames, then uses the CLI to trim the trace to the
+# frame matching the reference and verify the match.
 #
 # Usage: trace-screenshot.sh <adapter-binary> <rom> <profile> <reference.pix> <output-dir> [max-frames]
 set -euo pipefail
@@ -10,7 +11,7 @@ ROM="$2"
 PROFILE="$3"
 REFERENCE="$4"
 OUT_DIR="$5"
-MAX_FRAMES="${6:-200}"
+MAX_FRAMES="${6:-5}"
 CLI="${CLI:-target/release/gbtrace-cli}"
 
 NAME="$(basename "$ROM" .gb)"
@@ -30,47 +31,48 @@ fi
 # Convert to parquet
 "$CLI" convert "${TMP}.gbtrace" --output "${TMP}.parquet" >/dev/null 2>&1
 
-# Render all frames and find the one matching the reference
-mkdir -p "${TMP}_frames"
-"$CLI" render "${TMP}.parquet" --output "${TMP}_frames/" >/dev/null 2>&1
+# Trim to the frame matching the reference
+if "$CLI" trim "${TMP}.parquet" --reference "$REFERENCE" \
+    --output "${TMP}_trimmed.parquet" >/dev/null 2>&1; then
+    # Trim succeeded — reference matched
+    mv "${TMP}_trimmed.parquet" "${TMP}.parquet"
 
-# Check each rendered frame's pixels against reference
-MATCH_FRAME=""
-TOTAL_FRAMES=0
-for png in "${TMP}_frames/"*.png; do
-    TOTAL_FRAMES=$((TOTAL_FRAMES + 1))
-    # Convert frame to pix format and compare
-    FRAME_PIX="${png%.png}.pix"
-    python3 scripts/png-to-pix.py "$png" "$FRAME_PIX" >/dev/null 2>&1
-    if diff -q "$FRAME_PIX" "$REFERENCE" >/dev/null 2>&1; then
-        MATCH_FRAME="$TOTAL_FRAMES"
-        break
-    fi
-done
+    # Render frames to find which one matched (for the status message)
+    mkdir -p "${TMP}_frames"
+    "$CLI" render "${TMP}.parquet" --output "${TMP}_frames/" >/dev/null 2>&1
+    TOTAL_FRAMES=$(ls "${TMP}_frames/"*.png 2>/dev/null | wc -l)
 
-if [ -n "$MATCH_FRAME" ]; then
     status="pass"
-    printf "%-30s %-10s PASS  (frame %s/%s)\n" "$NAME" "$ADAPTER" "$MATCH_FRAME" "$TOTAL_FRAMES"
+    printf "%-30s %-10s PASS  (frame %s)\n" "$NAME" "$ADAPTER" "$TOTAL_FRAMES"
+
+    # Save the last rendered frame
+    LAST=$(ls "${TMP}_frames/"*.png 2>/dev/null | tail -1)
+    if [ -n "$LAST" ]; then
+        mkdir -p "$OUT_DIR"
+        cp "$LAST" "${OUT_DIR}/${NAME}_${ADAPTER}_${status}.png" 2>/dev/null || true
+    fi
 else
+    # Trim failed — no matching frame
     status="fail"
+
+    # Render frames for debugging
+    mkdir -p "${TMP}_frames"
+    "$CLI" render "${TMP}.parquet" --output "${TMP}_frames/" >/dev/null 2>&1
+    TOTAL_FRAMES=$(ls "${TMP}_frames/"*.png 2>/dev/null | wc -l)
+
     printf "%-30s %-10s FAIL  (%s frames, no match)\n" "$NAME" "$ADAPTER" "$TOTAL_FRAMES"
+
+    # Save last frame for debugging
+    LAST=$(ls "${TMP}_frames/"*.png 2>/dev/null | tail -1)
+    if [ -n "$LAST" ]; then
+        mkdir -p "$OUT_DIR"
+        cp "$LAST" "${OUT_DIR}/${NAME}_${ADAPTER}_${status}.png" 2>/dev/null || true
+    fi
 fi
 
 # Move parquet to final location
 mkdir -p "$OUT_DIR"
-out="${OUT_DIR}/${NAME}_${ADAPTER}_${status}.gbtrace.parquet"
-mv "${TMP}.parquet" "$out"
+mv "${TMP}.parquet" "${OUT_DIR}/${NAME}_${ADAPTER}_${status}.gbtrace.parquet"
 
-# Also save the last rendered frame for visual inspection
-if [ -n "$MATCH_FRAME" ]; then
-    cp "${TMP}_frames/${NAME}_frame$(printf '%03d' "$MATCH_FRAME").png" \
-       "${OUT_DIR}/${NAME}_${ADAPTER}_${status}.png" 2>/dev/null || true
-else
-    # Save the last frame for debugging
-    ls "${TMP}_frames/"*.png 2>/dev/null | tail -1 | while read f; do
-        cp "$f" "${OUT_DIR}/${NAME}_${ADAPTER}_${status}.png" 2>/dev/null || true
-    done
-fi
-
-rm -f "${TMP}.gbtrace" "${TMP}.parquet"
+rm -f "${TMP}.gbtrace" "${TMP}_trimmed.parquet"
 rm -rf "${TMP}_frames"
