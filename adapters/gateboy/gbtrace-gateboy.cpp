@@ -190,6 +190,13 @@ static bool g_has_pix = false;
 // pix_count only advances once per real pixel push.
 static std::string g_pix_buf;
 
+// Separate frame buffer for reference comparison.
+// Accumulates pixels by (x, y) position so we can compare the complete
+// frame against a .pix reference without reconstructing from the trace.
+static const int FRAME_PIXELS = 160 * 144;  // 23040
+static std::string g_frame_ref_buf(FRAME_PIXELS, '0');
+static std::string g_reference_pix;  // loaded from --reference file
+
 // Pixel capture: detect pix_count changes between phases.
 // When pix_count increments by 1, the pixel at the OLD position
 // has been shifted to the LCD and its framebuffer value is final.
@@ -212,7 +219,9 @@ static void collect_pixel(GateBoy &gb) {
         int lcd_x = old_pix_count - 8;
         if (lcd_x >= 0 && lcd_x < 160) {
             uint8_t fb_val = gb.mem.framebuffer[lcd_x + lcd_y * 160];
-            g_pix_buf += ('0' + (fb_val & 3));
+            char shade = '0' + (fb_val & 3);
+            g_pix_buf += shade;
+            g_frame_ref_buf[lcd_x + lcd_y * 160] = shade;
         }
         g_captured_last_pixel = false;
     }
@@ -221,9 +230,33 @@ static void collect_pixel(GateBoy &gb) {
     // The framebuffer has been written by update_framebuffer() at this point.
     if (pix_count == 167 && !g_captured_last_pixel) {
         uint8_t fb_val = gb.mem.framebuffer[159 + lcd_y * 160];
-        g_pix_buf += ('0' + (fb_val & 3));
+        char shade = '0' + (fb_val & 3);
+        g_pix_buf += shade;
+        g_frame_ref_buf[159 + lcd_y * 160] = shade;
         g_captured_last_pixel = true;
     }
+}
+
+static bool load_reference(const std::string &path) {
+    std::ifstream f(path, std::ios::binary);
+    if (!f.is_open()) return false;
+    g_reference_pix.assign(std::istreambuf_iterator<char>(f),
+                           std::istreambuf_iterator<char>());
+    // Strip trailing newline if present
+    while (!g_reference_pix.empty() &&
+           (g_reference_pix.back() == '\n' || g_reference_pix.back() == '\r'))
+        g_reference_pix.pop_back();
+    if ((int)g_reference_pix.size() != FRAME_PIXELS) {
+        std::fprintf(stderr, "Warning: reference has %zu pixels, expected %d\n",
+                     g_reference_pix.size(), FRAME_PIXELS);
+        return false;
+    }
+    return true;
+}
+
+static bool check_frame_matches_reference() {
+    if (g_reference_pix.empty()) return false;
+    return g_frame_ref_buf == g_reference_pix;
 }
 
 static uint8_t read_cpu_reg8(const CpuState &reg, const std::string &name) {
@@ -405,6 +438,7 @@ static void print_usage(const char *argv0) {
         "  --stop-when <A=V>       Stop when memory ADDR equals VAL (hex)\n"
         "  --stop-on-serial <B>    Stop when byte B (hex) is sent via serial\n"
         "  --stop-serial-count <N> Stop on Nth occurrence (default: 1)\n"
+        "  --reference <path>      Stop when framebuffer matches .pix reference\n"
         "  --no-fastboot           Run the built-in boot ROM instead of fastbooting\n",
         argv0);
 }
@@ -413,11 +447,13 @@ int main(int argc, char *argv[]) {
     std::string rom_path;
     std::string profile_path;
     std::string output_path;
+    std::string reference_path;
     int max_frames = 3000;
     std::vector<StopCondition> stop_conditions;
     unsigned char stop_serial_byte = 0;
     int stop_serial_count = 1;
     bool stop_serial_active = false;
+    int extra_frames = 0;
     bool fastboot = true;
 
     for (int i = 1; i < argc; i++) {
@@ -438,6 +474,10 @@ int main(int argc, char *argv[]) {
             stop_serial_active = true;
         } else if (arg == "--stop-serial-count" && i + 1 < argc) {
             stop_serial_count = std::atoi(argv[++i]);
+        } else if (arg == "--reference" && i + 1 < argc) {
+            reference_path = argv[++i];
+        } else if (arg == "--extra-frames" && i + 1 < argc) {
+            extra_frames = std::atoi(argv[++i]);
         } else if (arg == "--no-fastboot") {
             fastboot = false;
         } else if (arg == "--help" || arg == "-h") {
@@ -457,6 +497,19 @@ int main(int argc, char *argv[]) {
 
     std::fprintf(stderr, "Profile: %s (%zu fields)\n",
                  profile.name.c_str(), profile.fields.size());
+
+    // Load reference image if provided
+    bool has_reference = false;
+    if (!reference_path.empty()) {
+        if (load_reference(reference_path)) {
+            has_reference = true;
+            std::fprintf(stderr, "Reference: %s (%d pixels)\n",
+                         reference_path.c_str(), FRAME_PIXELS);
+        } else {
+            std::fprintf(stderr, "Warning: could not load reference '%s'\n",
+                         reference_path.c_str());
+        }
+    }
 
     // Open output
     FILE *output = nullptr;
@@ -554,6 +607,8 @@ int main(int argc, char *argv[]) {
     uint16_t prev_op_addr = gb.cpu.core.reg.op_addr;
     int prev_op_state = gb.cpu.core.reg.op_state;
     bool stopped_early = false;
+    bool stop_triggered = false;
+    int remaining_extra = -1;  // -1 = not triggered yet
     int stop_serial_seen = 0;
     bool prev_sc_high = false;
     int frames = 0;
@@ -572,10 +627,8 @@ int main(int argc, char *argv[]) {
 
         bool should_emit;
         if (tcycle_mode) {
-            // Emit every T-cycle (every 8 phases)
             should_emit = (phase_count % PHASES_PER_TCYCLE) == 0;
         } else {
-            // Emit at instruction boundaries
             should_emit = (reg.op_state == 0 && prev_op_state != 0)
                        || (reg.op_state == 0 && reg.op_addr != prev_op_addr);
         }
@@ -583,31 +636,38 @@ int main(int argc, char *argv[]) {
         if (should_emit) {
             emit_entry(output, gb);
 
-            // Check stop-when conditions
-            for (const auto &cond : stop_conditions) {
-                uint8_t val = read_reg(gb, cond.addr);
-                if (val == cond.value) {
-                    stopped_early = true;
-                    break;
-                }
-            }
-            if (stopped_early) break;
-
-            // Check serial stop condition
-            if (stop_serial_active) {
-                uint8_t sc_val = read_reg(gb, 0xFF02);
-                bool sc_high = (sc_val & 0x80) != 0;
-                if (sc_high && !prev_sc_high) {
-                    uint8_t sb_val = read_reg(gb, 0xFF01);
-                    if (sb_val == stop_serial_byte) {
-                        stop_serial_seen++;
-                        if (stop_serial_seen >= stop_serial_count) {
-                            stopped_early = true;
-                            break;
-                        }
+            // Only check stop conditions if not already in countdown
+            if (!stop_triggered) {
+                // Check stop-when conditions
+                for (const auto &cond : stop_conditions) {
+                    uint8_t val = read_reg(gb, cond.addr);
+                    if (val == cond.value) {
+                        std::fprintf(stderr, "Stop condition met at frame %d, running %d extra frame%s\n",
+                                     frames, extra_frames, extra_frames == 1 ? "" : "s");
+                        stop_triggered = true;
+                        remaining_extra = extra_frames;
+                        break;
                     }
                 }
-                prev_sc_high = sc_high;
+
+                // Check serial stop condition
+                if (!stop_triggered && stop_serial_active) {
+                    uint8_t sc_val = read_reg(gb, 0xFF02);
+                    bool sc_high = (sc_val & 0x80) != 0;
+                    if (sc_high && !prev_sc_high) {
+                        uint8_t sb_val = read_reg(gb, 0xFF01);
+                        if (sb_val == stop_serial_byte) {
+                            stop_serial_seen++;
+                            if (stop_serial_seen >= stop_serial_count) {
+                                std::fprintf(stderr, "Serial stop at frame %d, running %d extra frame%s\n",
+                                             frames, extra_frames, extra_frames == 1 ? "" : "s");
+                                stop_triggered = true;
+                                remaining_extra = extra_frames;
+                            }
+                        }
+                    }
+                    prev_sc_high = sc_high;
+                }
             }
         }
 
@@ -617,6 +677,22 @@ int main(int argc, char *argv[]) {
         // Track frame boundaries for --frames limit
         if ((phase_count % PHASES_PER_FRAME) == 0) {
             frames++;
+
+            // Check reference match at frame boundary (always immediate)
+            if (has_reference && check_frame_matches_reference()) {
+                std::fprintf(stderr, "Reference match at frame %d\n", frames);
+                stopped_early = true;
+                break;
+            }
+
+            // Extra-frames countdown at frame boundaries
+            if (remaining_extra >= 0) {
+                if (remaining_extra == 0) {
+                    stopped_early = true;
+                    break;
+                }
+                remaining_extra--;
+            }
         }
     }
 

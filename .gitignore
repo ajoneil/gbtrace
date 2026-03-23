@@ -5,6 +5,7 @@ build/
 *.gbtrace
 *.gbtrace.parquet
 *.sav
+*.pix
 adapters/gambatte/gambatte-speedrun/
 adapters/gambatte/gbtrace-gambatte
 adapters/gateboy/metroboy/

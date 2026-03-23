@@ -183,6 +183,20 @@ static void capture_sameboy_frame() {
     }
 }
 
+// --- Reference matching ---
+static std::string g_reference_pix;
+
+static bool load_reference(const std::string &path) {
+    std::ifstream f(path, std::ios::binary);
+    if (!f.is_open()) return false;
+    g_reference_pix.assign(std::istreambuf_iterator<char>(f),
+                           std::istreambuf_iterator<char>());
+    while (!g_reference_pix.empty() &&
+           (g_reference_pix.back() == '\n' || g_reference_pix.back() == '\r'))
+        g_reference_pix.pop_back();
+    return (int)g_reference_pix.size() == 160 * 144;
+}
+
 static void build_emitters(const Profile &prof) {
     g_emitters.clear();
     for (const auto &field : prof.fields) {
@@ -390,6 +404,8 @@ int main(int argc, char *argv[]) {
     std::string boot_rom_path;
     int max_frames = 3000;
     std::string model = "DMG-B";
+    std::string reference_path;
+    int extra_frames = 0;
     GB_model_t gb_model = GB_MODEL_DMG_B;
     std::vector<StopCondition> stop_conditions;
 
@@ -419,6 +435,10 @@ int main(int argc, char *argv[]) {
                 model = "CGB-E";
                 gb_model = GB_MODEL_CGB_E;
             }
+        } else if (arg == "--reference" && i + 1 < argc) {
+            reference_path = argv[++i];
+        } else if (arg == "--extra-frames" && i + 1 < argc) {
+            extra_frames = std::atoi(argv[++i]);
         } else if (arg == "--help" || arg == "-h") {
             print_usage(argv[0]);
             return 0;
@@ -493,7 +513,8 @@ int main(int argc, char *argv[]) {
     }
 
     // Optimizations for trace generation
-    if (!g_has_pix) {
+    bool need_pixels = g_has_pix || !reference_path.empty();
+    if (!need_pixels) {
         GB_set_rendering_disabled(g_gb, true);
     } else {
         GB_set_pixels_output(g_gb, g_pixel_buf);
@@ -534,26 +555,73 @@ int main(int argc, char *argv[]) {
                      g_stop_serial_byte, g_stop_serial_count);
     }
 
+    // Load reference image
+    bool has_reference = false;
+    if (!reference_path.empty()) {
+        if (load_reference(reference_path)) {
+            has_reference = true;
+            std::fprintf(stderr, "Reference: %s (%d pixels)\n",
+                         reference_path.c_str(), 160 * 144);
+        } else {
+            std::fprintf(stderr, "Warning: could not load reference '%s'\n",
+                         reference_path.c_str());
+        }
+    }
+
     int frames = 0;
     bool stopped_early = false;
+    int remaining_extra = -1;  // -1 = not triggered yet
     while (frames < max_frames) {
         unsigned ticks = GB_run(g_gb);
         g_total_8mhz_ticks += ticks;
         if (g_gb->vblank_just_occured) {
             frames++;
-            if (g_has_pix) {
+            if (g_has_pix || has_reference) {
                 capture_sameboy_frame();
             }
-            for (const auto &cond : stop_conditions) {
-                if (GB_safe_read_memory(g_gb, cond.addr) == cond.value) {
+
+            // Check reference match (immediate stop)
+            if (has_reference && g_pending_pix == g_reference_pix) {
+                std::fprintf(stderr, "Reference match at frame %d\n", frames);
+                while (true) {
+                    GB_run(g_gb);
+                    if (g_gb->vblank_just_occured) break;
+                }
+                stopped_early = true;
+                break;
+            }
+
+            // If in extra-frames countdown, just decrement
+            if (remaining_extra >= 0) {
+                if (remaining_extra == 0) {
                     stopped_early = true;
                     break;
                 }
+                remaining_extra--;
+                continue;
             }
-            if (stopped_early) break;
-            if (g_stop_serial_triggered) {
+
+            // Check stop conditions — start countdown
+            for (const auto &cond : stop_conditions) {
+                if (GB_safe_read_memory(g_gb, cond.addr) == cond.value) {
+                    std::fprintf(stderr, "Stop condition met at frame %d, running %d extra frame%s\n",
+                                 frames, extra_frames, extra_frames == 1 ? "" : "s");
+                    remaining_extra = extra_frames;
+                    break;
+                }
+            }
+            if (remaining_extra >= 0 && remaining_extra == 0) {
                 stopped_early = true;
                 break;
+            }
+            if (g_stop_serial_triggered) {
+                std::fprintf(stderr, "Serial stop at frame %d, running %d extra frame%s\n",
+                             frames, extra_frames, extra_frames == 1 ? "" : "s");
+                remaining_extra = extra_frames;
+                if (remaining_extra == 0) {
+                    stopped_early = true;
+                    break;
+                }
             }
         }
     }

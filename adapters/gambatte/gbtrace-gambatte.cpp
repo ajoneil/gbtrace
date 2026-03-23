@@ -172,6 +172,20 @@ static void capture_frame_pixels() {
     }
 }
 
+// --- Reference matching ---
+static std::string g_reference_pix;
+
+static bool load_reference(const std::string &path) {
+    std::ifstream f(path, std::ios::binary);
+    if (!f.is_open()) return false;
+    g_reference_pix.assign(std::istreambuf_iterator<char>(f),
+                           std::istreambuf_iterator<char>());
+    while (!g_reference_pix.empty() &&
+           (g_reference_pix.back() == '\n' || g_reference_pix.back() == '\r'))
+        g_reference_pix.pop_back();
+    return (int)g_reference_pix.size() == 160 * 144;
+}
+
 static void build_emitters(const Profile &prof) {
     g_emitters.clear();
     for (const auto &field : prof.fields) {
@@ -383,6 +397,8 @@ int main(int argc, char *argv[]) {
     std::string boot_rom_path;
     int max_frames = 3000;
     std::string model = "DMG-B";
+    std::string reference_path;
+    int extra_frames = 0;
     unsigned load_flags = gambatte::GB::LoadFlag::NO_BIOS;
     std::vector<StopCondition> stop_conditions;
 
@@ -412,6 +428,10 @@ int main(int argc, char *argv[]) {
                 model = "CGB-E";
                 load_flags |= gambatte::GB::LoadFlag::CGB_MODE;
             }
+        } else if (arg == "--reference" && i + 1 < argc) {
+            reference_path = argv[++i];
+        } else if (arg == "--extra-frames" && i + 1 < argc) {
+            extra_frames = std::atoi(argv[++i]);
         } else if (arg == "--help" || arg == "-h") {
             print_usage(argv[0]);
             return 0;
@@ -497,8 +517,22 @@ int main(int argc, char *argv[]) {
     // Set up pixel capture
     g_video_buf_ptr = video_buf.data();
 
+    // Load reference image
+    bool has_reference = false;
+    if (!reference_path.empty()) {
+        if (load_reference(reference_path)) {
+            has_reference = true;
+            std::fprintf(stderr, "Reference: %s (%d pixels)\n",
+                         reference_path.c_str(), 160 * 144);
+        } else {
+            std::fprintf(stderr, "Warning: could not load reference '%s'\n",
+                         reference_path.c_str());
+        }
+    }
+
     int frames = 0;
     bool stopped_early = false;
+    int remaining_extra = -1;  // -1 = not triggered yet
     while (frames < max_frames) {
         std::size_t samples = SAMPLES_PER_FRAME;
         std::ptrdiff_t result = gb.runFor(
@@ -506,22 +540,50 @@ int main(int argc, char *argv[]) {
             audio_buf.data(), samples);
         if (result >= 0) {
             frames++;
-            if (g_has_pix) {
-                // Capture frame pixels into g_pending_pix. The next
-                // trace_callback will emit them as part of a normal
-                // instruction entry (with valid CPU/IO state).
+            if (g_has_pix || has_reference) {
                 capture_frame_pixels();
             }
-            for (const auto &cond : stop_conditions) {
-                if (gb.externalRead(cond.addr) == cond.value) {
+
+            // Check reference match (always immediate stop — the frame we want is captured)
+            if (has_reference && g_pending_pix == g_reference_pix) {
+                std::fprintf(stderr, "Reference match at frame %d\n", frames);
+                std::size_t s2 = SAMPLES_PER_FRAME;
+                gb.runFor(video_buf.data(), 160, audio_buf.data(), s2);
+                stopped_early = true;
+                break;
+            }
+
+            // If we're in extra-frames countdown, just decrement
+            if (remaining_extra >= 0) {
+                if (remaining_extra == 0) {
                     stopped_early = true;
                     break;
                 }
+                remaining_extra--;
+                continue;
             }
-            if (stopped_early) break;
-            if (g_stop_serial_triggered) {
+
+            // Check stop conditions — start countdown instead of breaking
+            for (const auto &cond : stop_conditions) {
+                if (gb.externalRead(cond.addr) == cond.value) {
+                    std::fprintf(stderr, "Stop condition met at frame %d, running %d extra frame%s\n",
+                                 frames, extra_frames, extra_frames == 1 ? "" : "s");
+                    remaining_extra = extra_frames;
+                    break;
+                }
+            }
+            if (remaining_extra >= 0 && remaining_extra == 0) {
                 stopped_early = true;
                 break;
+            }
+            if (g_stop_serial_triggered) {
+                std::fprintf(stderr, "Serial stop at frame %d, running %d extra frame%s\n",
+                             frames, extra_frames, extra_frames == 1 ? "" : "s");
+                remaining_extra = extra_frames;
+                if (remaining_extra == 0) {
+                    stopped_early = true;
+                    break;
+                }
             }
         }
     }
