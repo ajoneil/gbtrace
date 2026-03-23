@@ -9,6 +9,7 @@ const FIELD_GROUPS = [
   { name: 'interrupt', fields: ['if_', 'ie', 'ime'] },
   { name: 'timer',     fields: ['div', 'tima', 'tma', 'tac'] },
   { name: 'serial',    fields: ['sb', 'sc'] },
+  { name: 'test',      fields: ['test_result', 'test_expect', 'test_pass'] },
 ];
 
 export class TraceSelector extends LitElement {
@@ -126,25 +127,25 @@ export class TraceSelector extends LitElement {
       color: var(--accent);
     }
     .ft-group {
-      padding: 1px 7px;
-      background: var(--bg);
+      padding: 1px 8px;
+      background: var(--bg-surface);
       border: 1px solid var(--border);
-      border-radius: 8px;
+      border-radius: 4px;
       color: var(--text-muted);
       cursor: pointer;
-      font-size: 0.7rem;
+      font-size: 0.68rem;
       font-family: var(--sans);
-      font-weight: 600;
+      font-weight: 700;
       user-select: none;
       transition: all 0.1s;
       text-transform: uppercase;
-      letter-spacing: 0.03em;
+      letter-spacing: 0.05em;
     }
     .ft-group:hover { border-color: var(--accent); color: var(--accent); }
     .ft-group.on {
-      background: var(--accent-subtle);
-      border-color: var(--accent);
-      color: var(--accent);
+      background: var(--bg-hover);
+      border-color: var(--text-muted);
+      color: var(--text);
     }
     .ft-sep {
       width: 1px;
