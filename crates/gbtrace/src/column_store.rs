@@ -444,10 +444,29 @@ impl ColumnStore {
 
     // --- Frame boundaries ---
 
-    /// Detect frame boundaries by scanning `ly` for vblank→active transitions.
-    /// Returns entry indices where each frame starts. Handles instruction-level
-    /// traces where the exact 153→0 may not be sampled.
+    /// Detect frame boundaries.
+    ///
+    /// Strategy:
+    /// 1. If the trace has full-frame `pix` entries (23040 chars = 160×144),
+    ///    each one marks a frame boundary.
+    /// 2. Otherwise, scan `ly` for vblank→active transitions.
     pub fn frame_boundaries(&self) -> Vec<u32> {
+        // Strategy 1: full-frame pix dumps as boundaries
+        if let Some(pix_col) = self.field_col("pix") {
+            let expected = 160 * 144;
+            let mut boundaries = Vec::new();
+            for i in 0..self.len {
+                let pix = self.columns[pix_col].get_str(i);
+                if pix.len() == expected {
+                    boundaries.push(i as u32);
+                }
+            }
+            if !boundaries.is_empty() {
+                return boundaries;
+            }
+        }
+
+        // Strategy 2: ly wraps
         let ly_col = match self.field_col("ly") {
             Some(c) => c,
             None => return Vec::new(),
