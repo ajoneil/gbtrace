@@ -497,6 +497,11 @@ int main(int argc, char *argv[]) {
         GB_set_rendering_disabled(g_gb, true);
     } else {
         GB_set_pixels_output(g_gb, g_pixel_buf);
+        GB_set_color_correction_mode(g_gb, GB_COLOR_CORRECTION_DISABLED);
+        // Set RGB encode callback so pixel buffer gets standard 0xRRGGBB values
+        GB_set_rgb_encode_callback(g_gb, [](GB_gameboy_t *, uint8_t r, uint8_t g, uint8_t b) -> uint32_t {
+            return (uint32_t)r | ((uint32_t)g << 8) | ((uint32_t)b << 16) | 0xFF000000u;
+        });
     }
     GB_set_turbo_mode(g_gb, true, true);
 
