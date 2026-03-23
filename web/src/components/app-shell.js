@@ -9,6 +9,7 @@ import './trace-query.js';
 import './trace-chart.js';
 import './trace-diff-table.js';
 import './trace-timeline.js';
+import './pixel-display.js';
 
 export class AppShell extends LitElement {
   static styles = css`
@@ -195,6 +196,8 @@ export class AppShell extends LitElement {
         .triggerA=${this._header?.trigger || null}
         .triggerB=${this._storeB?.header()?.trigger || null}
         .downsampled=${this._downsampled}
+        .hasPixels=${this._store?.hasPixels() || false}
+        .pixelsActive=${this._chartField === '__pixels__'}
       ></trace-selector>
 
       ${this._store ? html`
@@ -225,7 +228,13 @@ export class AppShell extends LitElement {
           .viewStart=${this._viewStart} .viewEnd=${this._viewEnd}
         ></trace-query>
 
-        ${this._chartField ? html`
+        ${this._chartField === '__pixels__' ? html`
+          <pixel-display
+            .store=${this._store}
+            .frameBoundaries=${this._frameBoundaries}
+            .viewStart=${this._viewStart}
+          ></pixel-display>
+        ` : this._chartField ? html`
           <trace-chart
             .store=${this._store}
             .field=${this._chartField}

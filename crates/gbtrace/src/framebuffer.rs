@@ -33,9 +33,8 @@ impl Frame {
         }
     }
 
-    /// Encode as a 160×144 RGBA PNG. DMG palette: 0=white, 3=black.
-    #[cfg(feature = "png")]
-    pub fn to_png(&self) -> Vec<u8> {
+    /// Return raw RGBA pixel data (160×144×4 bytes). DMG palette: 0=white, 3=black.
+    pub fn to_rgba(&self) -> Vec<u8> {
         const PALETTE: [u8; 4] = [0xFF, 0xAA, 0x55, 0x00]; // DMG shades
 
         let mut rgba = vec![0u8; LCD_WIDTH * LCD_HEIGHT * 4];
@@ -46,6 +45,13 @@ impl Frame {
             rgba[i * 4 + 2] = shade;
             rgba[i * 4 + 3] = 0xFF;
         }
+        rgba
+    }
+
+    /// Encode as a 160×144 RGBA PNG. DMG palette: 0=white, 3=black.
+    #[cfg(feature = "png")]
+    pub fn to_png(&self) -> Vec<u8> {
+        let rgba = self.to_rgba();
 
         let mut buf = Vec::new();
         {
