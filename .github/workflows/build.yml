@@ -66,15 +66,8 @@ jobs:
         id: cache
         uses: actions/cache@v5
         with:
-          path: |
-            adapters/${{ matrix.emulator }}/gbtrace-${{ matrix.emulator }}
-            adapters/${{ matrix.emulator }}/gambatte-speedrun
-            adapters/${{ matrix.emulator }}/SameBoy
-            adapters/${{ matrix.emulator }}/mgba
-            adapters/${{ matrix.emulator }}/metroboy
-            adapters/${{ matrix.emulator }}/metrolib
-            adapters/${{ matrix.emulator }}/build
-          key: adapter-${{ matrix.emulator }}-${{ hashFiles(format('adapters/{0}/**', matrix.emulator)) }}
+          path: adapters/${{ matrix.emulator }}
+          key: adapter-${{ matrix.emulator }}-${{ hashFiles(format('adapters/{0}/gbtrace-*', matrix.emulator), format('adapters/{0}/Makefile', matrix.emulator), format('adapters/{0}/audio_stub*', matrix.emulator)) }}
 
       - name: Clone and build gambatte
         if: matrix.emulator == 'gambatte' && steps.cache.outputs.cache-hit != 'true'
