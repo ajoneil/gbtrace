@@ -654,9 +654,17 @@ int main(int argc, char *argv[]) {
                 }
 
                 // Check opcode stop condition
+                // Read from cart_blob for ROM addresses to avoid peek() errors
                 if (!stop_triggered && stop_opcode >= 0) {
-                    GBResult r = gb.peek(reg.op_addr);
-                    if (r.is_ok() && r.unwrap() == static_cast<uint8_t>(stop_opcode)) {
+                    uint16_t addr = reg.op_addr;
+                    int opval = -1;
+                    if (addr < (int)cart_blob.size()) {
+                        opval = cart_blob.data()[addr];
+                    } else {
+                        GBResult r = gb.peek(addr);
+                        if (r.is_ok()) opval = r.unwrap();
+                    }
+                    if (opval == stop_opcode) {
                         std::fprintf(stderr, "Opcode stop at frame %d, running %d extra frame%s\n",
                                      frames, extra_frames, extra_frames == 1 ? "" : "s");
                         stop_triggered = true;
