@@ -45,6 +45,8 @@ export class TraceTable extends LitElement {
     fields: { type: Array },
     highlightIndices: { type: Object },
     hiddenFields: { type: Object },
+    viewStart: { type: Number },
+    viewEnd: { type: Number },
   };
 
   constructor() {
@@ -53,6 +55,8 @@ export class TraceTable extends LitElement {
     this.fields = [];
     this.highlightIndices = null;
     this.hiddenFields = new Set();
+    this.viewStart = 0;
+    this.viewEnd = 0;
     this._renderedStart = -1;
     this._renderedCount = 0;
     this._rafId = null;
@@ -63,7 +67,7 @@ export class TraceTable extends LitElement {
   }
 
   updated(changed) {
-    if (changed.has('store') || changed.has('fields') || changed.has('highlightIndices') || changed.has('hiddenFields')) {
+    if (changed.has('store') || changed.has('fields') || changed.has('highlightIndices') || changed.has('hiddenFields') || changed.has('viewStart') || changed.has('viewEnd')) {
       this._renderedStart = -1;
       this.updateComplete.then(() => this._renderRows());
     }
@@ -97,13 +101,20 @@ export class TraceTable extends LitElement {
     `;
   }
 
+  /** Number of entries in the current view range. */
+  get _viewCount() {
+    if (!this.store) return 0;
+    const end = this.viewEnd || this.store.entryCount();
+    return end - (this.viewStart || 0);
+  }
+
   _spacerHeight() {
     if (!this.store) return 0;
-    return Math.min(this.store.entryCount() * ROW_HEIGHT + HEADER_HEIGHT, MAX_SPACER);
+    return Math.min(this._viewCount * ROW_HEIGHT + HEADER_HEIGHT, MAX_SPACER);
   }
 
   _isRemapped() {
-    return this.store && this.store.entryCount() * ROW_HEIGHT > MAX_SPACER;
+    return this.store && this._viewCount * ROW_HEIGHT > MAX_SPACER;
   }
 
   _scrollToEntry(scrollTop, scrollEl) {
@@ -111,15 +122,16 @@ export class TraceTable extends LitElement {
     if (!this._isRemapped()) return Math.floor(adjusted / ROW_HEIGHT);
     const maxScroll = scrollEl.scrollHeight - scrollEl.clientHeight;
     if (maxScroll <= 0) return 0;
-    const maxStart = this.store.entryCount() - Math.ceil(scrollEl.clientHeight / ROW_HEIGHT);
+    const maxStart = this._viewCount - Math.ceil(scrollEl.clientHeight / ROW_HEIGHT);
     return Math.round((scrollTop / maxScroll) * Math.max(0, maxStart));
   }
 
   _entryToScroll(index, scrollEl) {
+    // index here is relative to the view (0 = first entry in view)
     if (!this._isRemapped()) return index * ROW_HEIGHT + HEADER_HEIGHT;
     const maxScroll = scrollEl.scrollHeight - scrollEl.clientHeight;
     if (maxScroll <= 0) return 0;
-    const maxStart = this.store.entryCount() - Math.ceil(scrollEl.clientHeight / ROW_HEIGHT);
+    const maxStart = this._viewCount - Math.ceil(scrollEl.clientHeight / ROW_HEIGHT);
     if (maxStart <= 0) return 0;
     return Math.round((index / maxStart) * maxScroll);
   }
@@ -138,12 +150,16 @@ export class TraceTable extends LitElement {
     if (!scrollEl || !rowsEl || !this.store || !this.fields?.length) return;
 
     const vf = this._visibleFields;
+    const vs = this.viewStart || 0;
+    const ve = this.viewEnd || this.store.entryCount();
     const firstVisible = this._scrollToEntry(scrollEl.scrollTop, scrollEl);
     const containerHeight = scrollEl.clientHeight || 500;
     const visibleCount = Math.ceil(containerHeight / ROW_HEIGHT) + OVERSCAN * 2;
     const startIdx = Math.max(0, firstVisible - OVERSCAN);
-    const endIdx = Math.min(this.store.entryCount(), startIdx + visibleCount);
+    const endIdx = Math.min(ve - vs, startIdx + visibleCount);
     const count = endIdx - startIdx;
+    // Global index = vs + startIdx
+    const globalStart = vs + startIdx;
 
     if (startIdx === this._renderedStart && count === this._renderedCount) return;
     this._renderedStart = startIdx;
@@ -152,12 +168,12 @@ export class TraceTable extends LitElement {
     if (count <= 0) { rowsEl.innerHTML = ''; rowsEl.style.top = `${HEADER_HEIGHT}px`; return; }
 
     let entries;
-    try { entries = this.store.entriesRange(startIdx, count); }
+    try { entries = this.store.entriesRange(globalStart, count); }
     catch (err) { console.error(err); return; }
 
     if (this._isRemapped()) {
       const maxScroll = scrollEl.scrollHeight - scrollEl.clientHeight;
-      const maxStart = this.store.entryCount() - Math.ceil(containerHeight / ROW_HEIGHT);
+      const maxStart = this._viewCount - Math.ceil(containerHeight / ROW_HEIGHT);
       rowsEl.style.top = `${Math.round((maxStart > 0 ? startIdx / maxStart : 0) * maxScroll) + HEADER_HEIGHT}px`;
     } else {
       rowsEl.style.top = `${startIdx * ROW_HEIGHT + HEADER_HEIGHT}px`;
@@ -166,18 +182,18 @@ export class TraceTable extends LitElement {
     const hasRom = this.store.hasRom?.() ?? false;
     let disasmArr = null;
     if (hasRom) {
-      try { disasmArr = this.store.disassembleRange(startIdx, count); } catch (_) {}
+      try { disasmArr = this.store.disassembleRange(globalStart, count); } catch (_) {}
     }
 
     const cs = this._cellStyle.bind(this);
     const hl = this.highlightIndices;
     const parts = [];
     for (let i = 0; i < entries.length; i++) {
-      const idx = startIdx + i;
+      const globalIdx = globalStart + i;
       const data = entries[i];
-      const bg = hl?.has(idx) ? 'background:var(--accent-subtle);' : '';
-      parts.push(`<div style="display:flex;height:${ROW_HEIGHT}px;align-items:center;border-bottom:1px solid var(--bg);${bg}" data-idx="${idx}">`);
-      parts.push(`<span style="${cs(IDX_WIDTH, 'color:var(--text-muted);')}">${idx}</span>`);
+      const bg = hl?.has(globalIdx) ? 'background:var(--accent-subtle);' : '';
+      parts.push(`<div style="display:flex;height:${ROW_HEIGHT}px;align-items:center;border-bottom:1px solid var(--bg);${bg}" data-idx="${globalIdx}">`);
+      parts.push(`<span style="${cs(IDX_WIDTH, 'color:var(--text-muted);')}">${globalIdx}</span>`);
       for (const f of vf) {
         parts.push(`<span style="${cs(COL_WIDTH)}">${displayVal(data[f], f)}</span>`);
         if (disasmArr && f === 'pc') {
@@ -205,7 +221,10 @@ export class TraceTable extends LitElement {
     const scrollEl = this.renderRoot?.querySelector('.container');
     if (!scrollEl) return;
     this._renderedStart = -1;
-    scrollEl.scrollTop = this._entryToScroll(index, scrollEl);
+    // Convert global index to view-relative
+    const vs = this.viewStart || 0;
+    const relIndex = Math.max(0, index - vs);
+    scrollEl.scrollTop = this._entryToScroll(relIndex, scrollEl);
     this._renderRows();
   }
 }
