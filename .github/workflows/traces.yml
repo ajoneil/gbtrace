@@ -4,13 +4,13 @@ on:
   workflow_dispatch:
     inputs:
       suite:
-        description: 'Test suite (all, gbmicrotest, blargg, mooneye, dmg-acid2)'
-        default: 'all'
+        description: "Test suite (all, gbmicrotest, blargg, mooneye, dmg-acid2)"
+        default: "all"
         type: choice
         options: [all, gbmicrotest, blargg, mooneye, dmg-acid2]
       emulator:
-        description: 'Emulator (all, gambatte, sameboy, mgba, gateboy)'
-        default: 'all'
+        description: "Emulator (all, gambatte, sameboy, mgba, gateboy)"
+        default: "all"
         type: choice
         options: [all, gambatte, sameboy, mgba, gateboy]
 
@@ -101,7 +101,7 @@ jobs:
           python3 scripts/manifest.py "build/traces/${{ matrix.suite }}" "test-suites/${{ matrix.suite }}"
 
       - name: Upload traces
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: traces-${{ matrix.suite }}-${{ matrix.emulator }}
           path: build/traces/${{ matrix.suite }}

@@ -4,11 +4,11 @@ on:
   push:
     branches: [main]
     paths:
-      - 'crates/**'
-      - 'web/**'
-      - 'adapters/**'
-      - 'Cargo.*'
-      - '.github/workflows/build.yml'
+      - "crates/**"
+      - "web/**"
+      - "adapters/**"
+      - "Cargo.*"
+      - ".github/workflows/build.yml"
   workflow_dispatch:
 
 jobs:
@@ -33,14 +33,14 @@ jobs:
         run: make wasm
 
       - name: Upload CLI
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: gbtrace-cli
           path: target/release/gbtrace-cli
           retention-days: 90
 
       - name: Upload WASM
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: wasm-pkg
           path: |
@@ -107,7 +107,7 @@ jobs:
           make -j$(nproc)
 
       - name: Upload adapter
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: adapter-${{ matrix.emulator }}
           path: |
