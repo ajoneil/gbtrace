@@ -636,11 +636,16 @@ int main(int argc, char *argv[]) {
                        || (reg.op_state == 0 && reg.op_addr != prev_op_addr);
         }
 
+        // Detect instruction boundaries (regardless of emit mode)
+        bool at_instr_boundary = (reg.op_state == 0 && prev_op_state != 0)
+                              || (reg.op_state == 0 && reg.op_addr != prev_op_addr);
+
         if (should_emit) {
             emit_entry(output, gb);
+        }
 
-            // Only check stop conditions if not already in countdown
-            if (!stop_triggered) {
+        // Check stop conditions at instruction boundaries only
+        if (at_instr_boundary && !stop_triggered) {
                 // Check stop-when conditions
                 for (const auto &cond : stop_conditions) {
                     uint8_t val = read_reg(gb, cond.addr);
@@ -690,7 +695,6 @@ int main(int argc, char *argv[]) {
                     }
                     prev_sc_high = sc_high;
                 }
-            }
         }
 
         prev_op_state = reg.op_state;
