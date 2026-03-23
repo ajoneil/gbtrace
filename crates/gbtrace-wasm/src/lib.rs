@@ -215,10 +215,14 @@ impl TraceStore {
         Ok(arr)
     }
 
-    /// Per-field diff statistics.
-    #[wasm_bindgen(js_name = diffStats)]
-    pub fn diff_stats(&self, other: &TraceStore) -> Result<JsValue, JsError> {
-        let len = self.entry_count().min(other.entry_count());
+    /// Per-field diff statistics, optionally scoped to a range.
+    #[wasm_bindgen(js_name = diffStatsRange)]
+    pub fn diff_stats_range(&self, other: &TraceStore, start: usize, end: usize) -> Result<JsValue, JsError> {
+        let max_len = self.entry_count().min(other.entry_count());
+        let start = start.min(max_len);
+        let end = end.min(max_len);
+        let len = if end > start { end - start } else { 0 };
+
         let fields = match &self.store {
             StoreKind::Lazy(s) => s.header().fields.clone(),
             StoreKind::Eager(s) => s.header().fields.clone(),
@@ -234,10 +238,11 @@ impl TraceStore {
             if !has_a || !has_b { continue; }
 
             let mut count = 0u64;
-            for row in 0..len {
+            for i in 0..len {
+                let row = start + i;
                 if self.get_numeric_named(name, row) != other.get_numeric_named(name, row) {
                     count += 1;
-                    any_diff_flags[row] = true;
+                    any_diff_flags[i] = true;
                 }
             }
             if count > 0 {
