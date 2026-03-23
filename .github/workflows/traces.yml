@@ -1,10 +1,6 @@
 name: Generate Traces
 
 on:
-  workflow_run:
-    workflows: [Build]
-    types: [completed]
-    branches: [main]
   workflow_dispatch:
     inputs:
       suite:
@@ -21,7 +17,6 @@ on:
 jobs:
   matrix-setup:
     runs-on: ubuntu-latest
-    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
     outputs:
       matrix: ${{ steps.set.outputs.matrix }}
     steps:
@@ -55,16 +50,6 @@ jobs:
 
       # Download CLI from latest build
       - name: Download CLI
-        uses: actions/download-artifact@v4
-        with:
-          name: gbtrace-cli
-          path: target/release
-          run-id: ${{ github.event.workflow_run.id || '' }}
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-        continue-on-error: true
-
-      - name: Fallback - find latest CLI artifact
-        if: steps.download-cli.outcome == 'failure' || !hashFiles('target/release/gbtrace-cli')
         uses: dawidd6/action-download-artifact@v6
         with:
           workflow: build.yml
@@ -75,18 +60,8 @@ jobs:
       - name: Make CLI executable
         run: chmod +x target/release/gbtrace-cli
 
-      # Download adapter
+      # Download adapter from latest build
       - name: Download adapter
-        uses: actions/download-artifact@v4
-        with:
-          name: adapter-${{ matrix.emulator }}
-          path: adapters/${{ matrix.emulator }}
-          run-id: ${{ github.event.workflow_run.id || '' }}
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-        continue-on-error: true
-
-      - name: Fallback - find latest adapter artifact
-        if: steps.download-adapter.outcome == 'failure'
         uses: dawidd6/action-download-artifact@v6
         with:
           workflow: build.yml
