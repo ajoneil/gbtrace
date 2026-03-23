@@ -3,6 +3,10 @@
 //! Stores trace data as one typed vector per field, avoiding the
 //! per-row `BTreeMap<String, serde_json::Value>` overhead of `TraceEntry`.
 //! A 7M-row trace with 14 fields uses ~100MB instead of ~2GB.
+//!
+//! `LazyColumnStore` (parquet feature) wraps a compressed parquet file and
+//! decodes row groups on demand with an LRU cache. This keeps memory
+//! proportional to a few decoded row groups rather than the entire trace.
 
 use std::collections::HashMap;
 
@@ -430,7 +434,7 @@ impl ColumnStore {
         indices
     }
 
-    fn eval_condition(&self, cond: &Condition, row: usize) -> bool {
+    pub fn eval_condition(&self, cond: &Condition, row: usize) -> bool {
         match cond {
             Condition::FieldEquals { field, value } => {
                 if let Some(target) = query::parse_number(value) {
@@ -796,4 +800,428 @@ pub fn load_column_store_from_bytes(data: &[u8]) -> Result<ColumnStore> {
     }
 
     Ok(store)
+}
+
+// ---------------------------------------------------------------------------
+// LazyColumnStore — on-demand row group decoding
+// ---------------------------------------------------------------------------
+
+#[cfg(feature = "parquet")]
+mod lazy {
+    use super::*;
+    use std::cell::RefCell;
+
+    use arrow::array::{BooleanArray, UInt16Array, UInt64Array, UInt8Array};
+
+    const LRU_CAPACITY: usize = 3;
+
+    /// Index mapping global row indices to row groups.
+    struct RowGroupIndex {
+        /// Cumulative row count at the END of each row group.
+        cumulative: Vec<usize>,
+    }
+
+    impl RowGroupIndex {
+        fn total_rows(&self) -> usize {
+            self.cumulative.last().copied().unwrap_or(0)
+        }
+
+        fn num_row_groups(&self) -> usize {
+            self.cumulative.len()
+        }
+
+        /// Map a global row index to (row_group_index, local_offset).
+        fn locate(&self, global: usize) -> (usize, usize) {
+            let rg = self.cumulative.partition_point(|&end| end <= global);
+            let start = if rg == 0 { 0 } else { self.cumulative[rg - 1] };
+            (rg, global - start)
+        }
+
+        /// Global start index of a row group.
+        fn row_group_start(&self, rg: usize) -> usize {
+            if rg == 0 { 0 } else { self.cumulative[rg - 1] }
+        }
+
+        /// Number of rows in a row group.
+        fn row_group_len(&self, rg: usize) -> usize {
+            let start = self.row_group_start(rg);
+            self.cumulative[rg] - start
+        }
+    }
+
+    /// Simple LRU cache for decoded row groups.
+    struct LruCache {
+        entries: Vec<(usize, ColumnStore)>,
+    }
+
+    impl LruCache {
+        fn new() -> Self {
+            Self { entries: Vec::with_capacity(LRU_CAPACITY) }
+        }
+
+        fn get(&mut self, rg: usize) -> Option<&ColumnStore> {
+            if let Some(pos) = self.entries.iter().position(|(k, _)| *k == rg) {
+                if pos > 0 {
+                    let entry = self.entries.remove(pos);
+                    self.entries.insert(0, entry);
+                }
+                Some(&self.entries[0].1)
+            } else {
+                None
+            }
+        }
+
+        fn insert(&mut self, rg: usize, store: ColumnStore) {
+            self.entries.retain(|(k, _)| *k != rg);
+            if self.entries.len() >= LRU_CAPACITY {
+                self.entries.pop();
+            }
+            self.entries.insert(0, (rg, store));
+        }
+    }
+
+    /// A column store that decodes parquet row groups on demand.
+    ///
+    /// Holds the full compressed file in memory but only decodes a few row
+    /// groups at a time via an LRU cache. Working memory is proportional to
+    /// `LRU_CAPACITY × rows_per_row_group` rather than the total entry count.
+    pub struct LazyColumnStore {
+        header: TraceHeader,
+        field_types: Vec<FieldType>,
+        field_index: HashMap<String, usize>,
+        index: RowGroupIndex,
+        data: bytes::Bytes,
+        cache: RefCell<LruCache>,
+    }
+
+    impl LazyColumnStore {
+        /// Create from in-memory parquet bytes.
+        pub fn from_bytes(data: &[u8]) -> Result<Self> {
+            let data = bytes::Bytes::from(data.to_vec());
+
+            let builder =
+                parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder::try_new(data.clone())
+                    .map_err(|e| Error::Arrow(e.into()))?;
+
+            let schema = builder.schema();
+            let kv = schema
+                .metadata()
+                .get("gbtrace_header")
+                .ok_or_else(|| Error::MissingHeader)?;
+            let header: TraceHeader = serde_json::from_str(kv)?;
+            header.validate()?;
+
+            let metadata = builder.metadata();
+            let mut cumulative = Vec::with_capacity(metadata.num_row_groups());
+            let mut total = 0usize;
+            for i in 0..metadata.num_row_groups() {
+                total += metadata.row_group(i).num_rows() as usize;
+                cumulative.push(total);
+            }
+
+            let field_types: Vec<FieldType> = header.fields.iter().map(|n| field_type(n)).collect();
+            let field_index: HashMap<String, usize> = header
+                .fields
+                .iter()
+                .enumerate()
+                .map(|(i, f)| (f.clone(), i))
+                .collect();
+
+            Ok(Self {
+                header,
+                field_types,
+                field_index,
+                index: RowGroupIndex { cumulative },
+                data,
+                cache: RefCell::new(LruCache::new()),
+            })
+        }
+
+        pub fn header(&self) -> &TraceHeader { &self.header }
+
+        pub fn entry_count(&self) -> usize { self.index.total_rows() }
+
+        pub fn num_row_groups(&self) -> usize { self.index.num_row_groups() }
+
+        pub fn field_col(&self, name: &str) -> Option<usize> {
+            self.field_index.get(name).copied()
+        }
+
+        /// Ensure a row group is in the cache, decoding if necessary.
+        fn ensure_loaded(&self, rg: usize) {
+            let mut cache = self.cache.borrow_mut();
+            if cache.get(rg).is_some() {
+                return;
+            }
+            let store = self.decode_row_group(rg).expect("failed to decode row group");
+            cache.insert(rg, store);
+        }
+
+        fn decode_row_group(&self, rg: usize) -> Result<ColumnStore> {
+            let builder =
+                parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder::try_new(
+                    self.data.clone(),
+                ).map_err(|e| Error::Arrow(e.into()))?;
+
+            let batch_reader = builder
+                .with_row_groups(vec![rg])
+                .with_batch_size(self.index.row_group_len(rg))
+                .build()
+                .map_err(|e| Error::Arrow(e.into()))?;
+
+            let mut store = ColumnStore::new(self.header.clone());
+
+            for batch_result in batch_reader {
+                let batch = batch_result.map_err(Error::Arrow)?;
+                let num_rows = batch.num_rows();
+
+                for (col_idx, ft) in self.field_types.iter().enumerate() {
+                    let col = batch.column(col_idx);
+                    match ft {
+                        FieldType::UInt64 => {
+                            let arr = col.as_any().downcast_ref::<UInt64Array>().unwrap();
+                            if let ColumnData::U64(v) = &mut store.columns[col_idx] {
+                                v.extend_from_slice(arr.values());
+                            }
+                        }
+                        FieldType::UInt16 => {
+                            let arr = col.as_any().downcast_ref::<UInt16Array>().unwrap();
+                            if let ColumnData::U16(v) = &mut store.columns[col_idx] {
+                                v.extend_from_slice(arr.values());
+                            }
+                        }
+                        FieldType::UInt8 => {
+                            let arr = col.as_any().downcast_ref::<UInt8Array>().unwrap();
+                            if let ColumnData::U8(v) = &mut store.columns[col_idx] {
+                                v.extend_from_slice(arr.values());
+                            }
+                        }
+                        FieldType::Bool => {
+                            let arr = col.as_any().downcast_ref::<BooleanArray>().unwrap();
+                            if let ColumnData::Bool(v) = &mut store.columns[col_idx] {
+                                for i in 0..num_rows {
+                                    v.push(arr.value(i));
+                                }
+                            }
+                        }
+                    }
+                }
+                store.len += num_rows;
+            }
+
+            Ok(store)
+        }
+
+        // --- Access (triggers lazy loading) ---
+
+        pub fn get_numeric_named(&self, name: &str, row: usize) -> Option<u64> {
+            let col_idx = *self.field_index.get(name)?;
+            Some(self.get_numeric(col_idx, row))
+        }
+
+        pub fn get_u8_named(&self, name: &str, row: usize) -> Option<u8> {
+            self.get_numeric_named(name, row).map(|v| v as u8)
+        }
+
+        pub fn get_u16_named(&self, name: &str, row: usize) -> Option<u16> {
+            self.get_numeric_named(name, row).map(|v| v as u16)
+        }
+
+        pub fn get_bool_named(&self, name: &str, row: usize) -> Option<bool> {
+            let col_idx = *self.field_index.get(name)?;
+            let (rg, local) = self.index.locate(row);
+            self.ensure_loaded(rg);
+            let cache = self.cache.borrow();
+            Some(cache.entries.iter().find(|(k, _)| *k == rg)?.1.column(col_idx).get_bool(local))
+        }
+
+        /// Get a column value as numeric by column index and global row.
+        pub fn get_numeric(&self, col_idx: usize, row: usize) -> u64 {
+            let (rg, local) = self.index.locate(row);
+            self.ensure_loaded(rg);
+            let cache = self.cache.borrow();
+            cache.entries.iter()
+                .find(|(k, _)| *k == rg)
+                .map(|(_, s)| s.column(col_idx).get_numeric(local))
+                .unwrap_or(0)
+        }
+
+        /// Get the ColumnData type for a column (for serialization dispatch).
+        pub fn column_type(&self, col_idx: usize) -> &FieldType {
+            &self.field_types[col_idx]
+        }
+
+        /// Reconstruct a `TraceEntry` from a global row index.
+        pub fn to_entry(&self, index: usize) -> TraceEntry {
+            let (rg, local) = self.index.locate(index);
+            self.ensure_loaded(rg);
+            let cache = self.cache.borrow();
+            cache.entries.iter().find(|(k, _)| *k == rg).unwrap().1.to_entry(local)
+        }
+
+        // --- Query (one row group at a time) ---
+
+        pub fn query(&self, condition_str: &str) -> std::result::Result<Vec<u32>, String> {
+            let condition = crate::query::parse_condition(condition_str)?;
+            let stateful = Self::is_stateful(&condition);
+            let mut results = Vec::new();
+
+            for rg in 0..self.index.num_row_groups() {
+                self.ensure_loaded(rg);
+                let global_start = self.index.row_group_start(rg) as u32;
+                let rg_len = self.index.row_group_len(rg);
+
+                // Handle row 0: may need cross-boundary check for stateful conditions
+                if rg_len > 0 && stateful && rg > 0 {
+                    if self.eval_cross_boundary(&condition, rg) {
+                        results.push(global_start);
+                    }
+                } else if rg_len > 0 {
+                    let cache = self.cache.borrow();
+                    let store = &cache.entries.iter().find(|(k, _)| *k == rg).unwrap().1;
+                    if store.eval_condition(&condition, 0) {
+                        results.push(global_start);
+                    }
+                }
+
+                // Handle rows 1..end normally (within-group, no boundary issues)
+                if rg_len > 1 {
+                    let cache = self.cache.borrow();
+                    let store = &cache.entries.iter().find(|(k, _)| *k == rg).unwrap().1;
+                    for local in 1..store.entry_count() {
+                        if store.eval_condition(&condition, local) {
+                            results.push(global_start + local as u32);
+                        }
+                    }
+                }
+            }
+
+            Ok(results)
+        }
+
+        fn is_stateful(cond: &Condition) -> bool {
+            match cond {
+                Condition::FieldChanges { .. }
+                | Condition::FieldChangesTo { .. }
+                | Condition::FieldChangesFrom { .. }
+                | Condition::PpuEntersMode(_)
+                | Condition::LcdTurnsOn
+                | Condition::LcdTurnsOff
+                | Condition::TimerOverflow
+                | Condition::InterruptFires(_)
+                | Condition::FlagBecomesSet(_)
+                | Condition::FlagBecomesClear(_) => true,
+                Condition::FieldEquals { .. }
+                | Condition::FlagSet(_)
+                | Condition::FlagClear(_) => false,
+                Condition::All(cs) | Condition::Any(cs) => cs.iter().any(Self::is_stateful),
+            }
+        }
+
+        fn eval_cross_boundary(&self, cond: &Condition, rg: usize) -> bool {
+            if rg == 0 { return false; }
+
+            let prev_rg = rg - 1;
+            self.ensure_loaded(prev_rg);
+            self.ensure_loaded(rg);
+            let cache = self.cache.borrow();
+            let prev_store = &cache.entries.iter().find(|(k, _)| *k == prev_rg).unwrap().1;
+            let cur_store = &cache.entries.iter().find(|(k, _)| *k == rg).unwrap().1;
+
+            if prev_store.entry_count() == 0 || cur_store.entry_count() == 0 {
+                return false;
+            }
+
+            // Build a 2-row temp store for boundary evaluation
+            let prev_last = prev_store.entry_count() - 1;
+            let mut boundary = ColumnStore::with_capacity(self.header.clone(), 2);
+            let ncols = self.header.fields.len();
+            for col in 0..ncols {
+                boundary.push_u64(col, prev_store.column(col).get_numeric(prev_last));
+            }
+            boundary.finish_row();
+            for col in 0..ncols {
+                boundary.push_u64(col, cur_store.column(col).get_numeric(0));
+            }
+            boundary.finish_row();
+
+            boundary.eval_condition(cond, 1)
+        }
+
+        /// Downsample a field for chart display.
+        pub fn field_summary(
+            &self,
+            field: &str,
+            start: usize,
+            end: usize,
+            buckets: usize,
+        ) -> std::result::Result<Vec<f64>, String> {
+            let col_idx = *self.field_index.get(field)
+                .ok_or_else(|| format!("unknown field: {field}"))?;
+            let total = self.entry_count();
+            let end = end.min(total);
+            let start = start.min(end);
+            let range = end - start;
+
+            if range == 0 || buckets == 0 {
+                return Ok(Vec::new());
+            }
+
+            let mut out = Vec::with_capacity(buckets * 2);
+            for b in 0..buckets {
+                let b_start = start + (b * range) / buckets;
+                let b_end = start + ((b + 1) * range) / buckets;
+                if b_start >= b_end {
+                    let v = if b_start > 0 {
+                        self.get_numeric(col_idx, b_start.min(total - 1)) as f64
+                    } else { 0.0 };
+                    out.push(v);
+                    out.push(v);
+                    continue;
+                }
+                let mut min = f64::MAX;
+                let mut max = f64::MIN;
+                for i in b_start..b_end {
+                    let v = self.get_numeric(col_idx, i) as f64;
+                    if v < min { min = v; }
+                    if v > max { max = v; }
+                }
+                out.push(min);
+                out.push(max);
+            }
+
+            Ok(out)
+        }
+
+        /// Eagerly decode all row groups into a single ColumnStore.
+        /// Used for operations that need the full data (e.g. prepare_for_diff).
+        pub fn to_eager(&self) -> Result<ColumnStore> {
+            let mut store = ColumnStore::with_capacity(self.header.clone(), self.entry_count());
+            let ncols = self.header.fields.len();
+
+            for rg in 0..self.index.num_row_groups() {
+                self.ensure_loaded(rg);
+                let cache = self.cache.borrow();
+                let rg_store = &cache.entries.iter().find(|(k, _)| *k == rg).unwrap().1;
+
+                for row in 0..rg_store.entry_count() {
+                    for col in 0..ncols {
+                        store.push_u64(col, rg_store.column(col).get_numeric(row));
+                    }
+                    store.finish_row();
+                }
+            }
+
+            Ok(store)
+        }
+    }
+}
+
+#[cfg(feature = "parquet")]
+pub use lazy::LazyColumnStore;
+
+/// Load a lazy column store from in-memory parquet bytes (for WASM).
+#[cfg(feature = "parquet")]
+pub fn load_lazy_column_store_from_bytes(data: &[u8]) -> Result<LazyColumnStore> {
+    LazyColumnStore::from_bytes(data)
 }
