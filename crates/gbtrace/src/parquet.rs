@@ -9,8 +9,9 @@ use std::path::Path;
 use std::sync::Arc;
 
 use arrow::array::{
-    ArrayBuilder, ArrayRef, BooleanArray, BooleanBuilder, RecordBatch, UInt16Array,
-    UInt16Builder, UInt64Array, UInt64Builder, UInt8Array, UInt8Builder,
+    ArrayBuilder, ArrayRef, BooleanArray, BooleanBuilder, RecordBatch, StringArray,
+    StringBuilder, UInt16Array, UInt16Builder, UInt64Array, UInt64Builder, UInt8Array,
+    UInt8Builder,
 };
 use arrow::datatypes::{DataType, Field, Schema};
 use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
@@ -35,6 +36,7 @@ enum ColumnBuffer {
     UInt16(UInt16Builder),
     UInt8(UInt8Builder),
     Bool(BooleanBuilder),
+    Str(StringBuilder),
 }
 
 impl ColumnBuffer {
@@ -44,6 +46,7 @@ impl ColumnBuffer {
             FieldType::UInt16 => Self::UInt16(UInt16Builder::with_capacity(BATCH_SIZE)),
             FieldType::UInt8 => Self::UInt8(UInt8Builder::with_capacity(BATCH_SIZE)),
             FieldType::Bool => Self::Bool(BooleanBuilder::with_capacity(BATCH_SIZE)),
+            FieldType::Str => Self::Str(StringBuilder::with_capacity(BATCH_SIZE, BATCH_SIZE * 4)),
         }
     }
 
@@ -53,6 +56,7 @@ impl ColumnBuffer {
             Self::UInt16(b) => b.len(),
             Self::UInt8(b) => b.len(),
             Self::Bool(b) => b.len(),
+            Self::Str(b) => b.len(),
         }
     }
 
@@ -62,6 +66,7 @@ impl ColumnBuffer {
             Self::UInt16(b) => Arc::new(b.finish()),
             Self::UInt8(b) => Arc::new(b.finish()),
             Self::Bool(b) => Arc::new(b.finish()),
+            Self::Str(b) => Arc::new(b.finish()),
         }
     }
 }
@@ -101,6 +106,7 @@ impl ParquetTraceWriter {
                     FieldType::UInt16 => DataType::UInt16,
                     FieldType::UInt8 => DataType::UInt8,
                     FieldType::Bool => DataType::Boolean,
+                    FieldType::Str => DataType::Utf8,
                 };
                 Field::new(name, dt, false)
             })
@@ -169,6 +175,9 @@ impl ParquetTraceWriter {
                 }
                 (ColumnBuffer::Bool(b), FieldType::Bool) => {
                     b.append_value(val.and_then(|v| v.as_bool()).unwrap_or(false));
+                }
+                (ColumnBuffer::Str(b), FieldType::Str) => {
+                    b.append_value(val.and_then(|v| v.as_str()).unwrap_or(""));
                 }
                 _ => unreachable!(),
             }
@@ -338,6 +347,12 @@ fn batch_to_entries(
                 let arr = col.as_any().downcast_ref::<BooleanArray>().unwrap();
                 for (row, entry) in entries.iter_mut().enumerate() {
                     entry.set_bool(name, arr.value(row));
+                }
+            }
+            FieldType::Str => {
+                let arr = col.as_any().downcast_ref::<StringArray>().unwrap();
+                for (row, entry) in entries.iter_mut().enumerate() {
+                    entry.set_str(name, arr.value(row));
                 }
             }
         }

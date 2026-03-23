@@ -44,6 +44,8 @@ struct FieldGroups {
     interrupt: Vec<String>,
     #[serde(default)]
     serial: Vec<String>,
+    #[serde(default)]
+    pixel: Vec<String>,
     /// Arbitrary memory reads: name = "hex_address"
     #[serde(default)]
     memory: BTreeMap<String, String>,
@@ -57,6 +59,8 @@ const KNOWN_FIELDS: &[&str] = &[
     "a", "f", "b", "c", "d", "e", "h", "l", "sp", "pc", "op", "ime",
     // ppu
     "lcdc", "stat", "ly", "lyc", "scy", "scx", "wy", "wx", "bgp", "obp0", "obp1", "dma",
+    // pixel output
+    "pix",
     // timer
     "div", "tima", "tma", "tac",
     // interrupt
@@ -72,6 +76,7 @@ pub enum FieldType {
     UInt16,
     UInt8,
     Bool,
+    Str,
 }
 
 /// Return the native type for a known field name.
@@ -80,6 +85,7 @@ pub fn field_type(name: &str) -> FieldType {
         "cy" => FieldType::UInt64,
         "pc" | "sp" => FieldType::UInt16,
         "ime" => FieldType::Bool,
+        "pix" => FieldType::Str,
         _ => FieldType::UInt8,
     }
 }
@@ -108,6 +114,7 @@ impl Profile {
             &raw.fields.timer,
             &raw.fields.interrupt,
             &raw.fields.serial,
+            &raw.fields.pixel,
         ];
 
         for group in groups {

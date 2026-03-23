@@ -2,6 +2,7 @@ pub mod column_store;
 pub mod diff;
 pub mod disasm;
 pub mod entry;
+pub mod framebuffer;
 pub mod error;
 pub mod header;
 pub mod profile;

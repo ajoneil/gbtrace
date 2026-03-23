@@ -68,6 +68,17 @@ enum Command {
         /// Trace file to inspect
         input: PathBuf,
     },
+    /// Render LCD frames from pixel trace data to PNG files
+    Render {
+        /// Trace file with pix field
+        input: PathBuf,
+        /// Output directory (default: current directory)
+        #[arg(short, long)]
+        output: Option<PathBuf>,
+        /// Only render specific frame numbers (1-based, comma-separated)
+        #[arg(long)]
+        frames: Option<String>,
+    },
     /// Compare two or more trace files and report divergences
     Diff {
         /// First trace file (reference)
@@ -119,6 +130,7 @@ fn main() {
             cmd_query(&input, &conditions, max, context)
         }
         Command::Frames { input } => cmd_frames(&input),
+        Command::Render { input, output, frames } => cmd_render(&input, output, frames),
         Command::Trim { input, output, until, after } => {
             cmd_trim(&input, output, until, after)
         }
@@ -235,6 +247,66 @@ fn cmd_frames(path: &PathBuf) -> i32 {
         println!("  Frame {:>3}  entries {:>8}..{:<8}  ({} entries)", i + 1, start, end, size);
     }
 
+    0
+}
+
+// ---------------------------------------------------------------------------
+// render
+// ---------------------------------------------------------------------------
+
+fn cmd_render(path: &PathBuf, output_dir: Option<PathBuf>, frame_filter: Option<String>) -> i32 {
+    let store = match gbtrace::column_store::load_column_store(path) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("Error: {e}");
+            return 1;
+        }
+    };
+
+    let frames = gbtrace::framebuffer::reconstruct_frames(&store);
+    if frames.is_empty() {
+        eprintln!("No frames with pixel data found (trace needs a 'pix' field)");
+        return 1;
+    }
+
+    let out_dir = output_dir.unwrap_or_else(|| PathBuf::from("."));
+    if !out_dir.exists() {
+        if let Err(e) = std::fs::create_dir_all(&out_dir) {
+            eprintln!("Failed to create output directory: {e}");
+            return 1;
+        }
+    }
+
+    // Parse frame filter
+    let selected: Option<Vec<usize>> = frame_filter.map(|s| {
+        s.split(',')
+            .filter_map(|n| n.trim().parse::<usize>().ok())
+            .collect()
+    });
+
+    let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("frame");
+
+    for frame in &frames {
+        let frame_num = frame.index + 1; // 1-based for display
+        if let Some(ref sel) = selected {
+            if !sel.contains(&frame_num) { continue; }
+        }
+
+        let png_data = frame.to_png();
+        let out_path = out_dir.join(format!("{stem}_frame{frame_num:03}.png"));
+        match std::fs::write(&out_path, &png_data) {
+            Ok(_) => {
+                let pix_count: usize = frame.pixels.iter().filter(|&&p| p > 0).count();
+                println!("  Frame {:>3}  {} ({} non-zero pixels)",
+                    frame_num, out_path.display(), pix_count);
+            }
+            Err(e) => {
+                eprintln!("  Frame {:>3}  ERROR: {e}", frame_num);
+            }
+        }
+    }
+
+    println!("Rendered {} frame(s)", frames.len());
     0
 }
 
