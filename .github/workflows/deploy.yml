@@ -43,27 +43,54 @@ jobs:
       - name: Build WASM module
         run: make wasm
 
-      # ── Clone adapter dependencies ───────────────────────────
-      # Clone all repos first so $(wildcard) in Makefiles resolves correctly.
-      - name: Clone gambatte-speedrun
+      # ── Adapter: gambatte ──────────────────────────────────
+      - name: Cache gambatte adapter
+        id: cache-gambatte
+        uses: actions/cache@v4
+        with:
+          path: |
+            adapters/gambatte/gbtrace-gambatte
+            adapters/gambatte/gambatte-speedrun
+          key: adapter-gambatte-${{ hashFiles('adapters/gambatte/gbtrace-gambatte.cpp', 'adapters/gambatte/Makefile') }}
+
+      - name: Build gambatte adapter
+        if: steps.cache-gambatte.outputs.cache-hit != 'true'
         run: |
           cd adapters/gambatte
           git clone --recursive --depth 1 \
             https://github.com/pokemon-speedrunning/gambatte-speedrun.git
+          make -j$(nproc)
 
-      - name: Clone SameBoy
+      # ── Adapter: sameboy ───────────────────────────────────
+      - name: Cache sameboy adapter
+        id: cache-sameboy
+        uses: actions/cache@v4
+        with:
+          path: |
+            adapters/sameboy/gbtrace-sameboy
+            adapters/sameboy/SameBoy
+          key: adapter-sameboy-${{ hashFiles('adapters/sameboy/gbtrace-sameboy.cpp', 'adapters/sameboy/Makefile') }}
+
+      - name: Build sameboy adapter
+        if: steps.cache-sameboy.outputs.cache-hit != 'true'
         run: |
           cd adapters/sameboy
           git clone --depth 1 https://github.com/LIJI32/SameBoy.git
+          cd SameBoy && make build/lib/libsameboy.a build/lib/libsameboy.so CONF=release -j$(nproc)
+          cd .. && make -j$(nproc)
 
-      - name: Build SameBoy lib
-        run: |
-          cd adapters/sameboy/SameBoy
-          # Build the static + shared lib directly, skipping boot ROMs
-          # (rgbds) and public headers (cppp) which we don't need
-          make build/lib/libsameboy.a build/lib/libsameboy.so CONF=release -j$(nproc)
+      # ── Adapter: mgba ──────────────────────────────────────
+      - name: Cache mgba adapter
+        id: cache-mgba
+        uses: actions/cache@v4
+        with:
+          path: |
+            adapters/mgba/gbtrace-mgba
+            adapters/mgba/mgba
+          key: adapter-mgba-${{ hashFiles('adapters/mgba/gbtrace-mgba.c', 'adapters/mgba/Makefile') }}
 
-      - name: Clone mGBA
+      - name: Build mgba adapter
+        if: steps.cache-mgba.outputs.cache-hit != 'true'
         run: |
           cd adapters/mgba
           git clone --depth 1 https://github.com/mgba-emu/mgba.git
@@ -71,8 +98,22 @@ jobs:
           cmake .. -DLIBMGBA_ONLY=ON -DBUILD_STATIC=ON \
             -DCMAKE_BUILD_TYPE=Release -DENABLE_DEBUGGERS=ON && \
           make -j$(nproc)
+          cd ../.. && make -j$(nproc)
 
-      - name: Clone metroboy/metrolib (for GateBoy)
+      # ── Adapter: gateboy ───────────────────────────────────
+      - name: Cache gateboy adapter
+        id: cache-gateboy
+        uses: actions/cache@v4
+        with:
+          path: |
+            adapters/gateboy/gbtrace-gateboy
+            adapters/gateboy/metroboy
+            adapters/gateboy/metrolib
+            adapters/gateboy/build
+          key: adapter-gateboy-${{ hashFiles('adapters/gateboy/gbtrace-gateboy.cpp', 'adapters/gateboy/audio_stub.cpp', 'adapters/gateboy/Makefile') }}
+
+      - name: Build gateboy adapter
+        if: steps.cache-gateboy.outputs.cache-hit != 'true'
         run: |
           cd adapters/gateboy
           git clone --depth 1 https://github.com/aappleby/metroboy.git
@@ -80,18 +121,41 @@ jobs:
           mkdir -p metroboy/symlinks
           rm -rf metroboy/symlinks/metrolib
           ln -sf "$(pwd)/metrolib" metroboy/symlinks/metrolib
+          make -j$(nproc)
 
-      # ── Build adapters ───────────────────────────────────────
-      - name: Build all adapters
-        run: make adapters
+      # ── Traces: gbmicrotest ────────────────────────────────
+      - name: Cache gbmicrotest traces
+        id: cache-micro
+        uses: actions/cache@v4
+        with:
+          path: build/traces/gbmicrotest
+          key: traces-gbmicrotest-${{ hashFiles('adapters/gambatte/gbtrace-gambatte.cpp', 'adapters/sameboy/gbtrace-sameboy.cpp', 'adapters/mgba/gbtrace-mgba.c', 'adapters/gateboy/gbtrace-gateboy.cpp', 'adapters/gateboy/audio_stub.cpp', 'adapters/*/Makefile', 'test-suites/gbmicrotest/gbmicrotest.toml', 'test-suites/gbmicrotest/*.gb', 'scripts/trace-gbmicrotest.sh') }}
 
-      # ── Generate traces ──────────────────────────────────────
-      - name: Generate traces
-        run: make traces -j$(nproc)
+      - name: Generate gbmicrotest traces
+        if: steps.cache-micro.outputs.cache-hit != 'true'
+        run: make traces-gbmicrotest -j$(nproc)
+        env:
+          LD_LIBRARY_PATH: ${{ github.workspace }}/adapters/sameboy/SameBoy/build/lib
+
+      # ── Traces: blargg ─────────────────────────────────────
+      - name: Cache blargg traces
+        id: cache-blargg
+        uses: actions/cache@v4
+        with:
+          path: build/traces/blargg
+          key: traces-blargg-${{ hashFiles('adapters/gambatte/gbtrace-gambatte.cpp', 'adapters/sameboy/gbtrace-sameboy.cpp', 'adapters/mgba/gbtrace-mgba.c', 'adapters/*/Makefile', 'test-suites/blargg/blargg.toml', 'test-suites/blargg/**/*.gb', 'scripts/trace-blargg.sh') }}
+
+      - name: Generate blargg traces
+        if: steps.cache-blargg.outputs.cache-hit != 'true'
+        run: make traces-blargg -j$(nproc)
+        env:
+          LD_LIBRARY_PATH: ${{ github.workspace }}/adapters/sameboy/SameBoy/build/lib
 
       # ── Assemble site ────────────────────────────────────────
       - name: Assemble site
         run: make site
+        env:
+          LD_LIBRARY_PATH: ${{ github.workspace }}/adapters/sameboy/SameBoy/build/lib
 
       # ── Deploy to Pages ──────────────────────────────────────
       - name: Upload Pages artifact
