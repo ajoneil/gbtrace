@@ -23,6 +23,7 @@ SHELL := /bin/bash
 PROJECT_DIR := $(shell pwd)
 CLI := $(PROJECT_DIR)/target/release/gbtrace-cli
 BUILD_DIR := $(PROJECT_DIR)/build
+PAGES_URL ?= https://ajoneil.github.io/gbtrace
 
 # Adapters
 ADAPTERS := gambatte sameboy mgba gateboy
@@ -96,13 +97,8 @@ serve: wasm
 	@if [ -d "$(GBMICROTEST_TRACE_DIR)" ]; then cp -r $(GBMICROTEST_TRACE_DIR) $(BUILD_DIR)/site/tests/gbmicrotest; fi
 	@if [ -d "$(BLARGG_TRACE_DIR)" ]; then cp -r $(BLARGG_TRACE_DIR) $(BUILD_DIR)/site/tests/blargg; fi
 	@echo "Serving on http://localhost:3080"
-	@cd $(BUILD_DIR)/site && python3 -c "\
-	from http.server import HTTPServer, SimpleHTTPRequestHandler; \
-	class H(SimpleHTTPRequestHandler): \
-	    def end_headers(self): \
-	        self.send_header('Cache-Control', 'no-cache'); \
-	        super().end_headers() \
-	; HTTPServer(('', 3080), H).serve_forever()"
+	@echo "  Local files from web/, traces from local build or $(PAGES_URL)"
+	@cd $(BUILD_DIR)/site && python3 $(PROJECT_DIR)/scripts/devserver.py $(PAGES_URL)
 
 clean:
 	rm -rf $(BUILD_DIR)
