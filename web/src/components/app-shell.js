@@ -108,6 +108,7 @@ export class AppShell extends LitElement {
     _viewEnd: { state: true },
     _frameBoundaries: { state: true },
     _frameBoundariesB: { state: true },
+    _syncMode: { state: true },
   };
 
   constructor() {
@@ -131,6 +132,7 @@ export class AppShell extends LitElement {
     this._viewEnd = 0;
     this._frameBoundaries = [];
     this._frameBoundariesB = [];
+    this._syncMode = 'pc';
   }
 
   /** All fields from the trace header. */
@@ -151,6 +153,7 @@ export class AppShell extends LitElement {
         @trace-deselect-b=${this._exitCompare}
         @change-rom=${this._reset}
         @view-range-changed=${this._onViewRangeChanged}
+        @sync-changed=${this._onSyncChanged}
         @highlight-changed=${this._onHighlightChanged}
         @jump-to-index=${this._onJumpToIndex}
         @field-selected=${this._onFieldSelected}
@@ -203,6 +206,7 @@ export class AppShell extends LitElement {
           .viewStart=${this._viewStart}
           .viewEnd=${this._viewEnd}
           .compareMode=${!!this._storeB}
+          .syncMode=${this._syncMode}
         ></trace-timeline>
       ` : ''}
 
@@ -387,7 +391,7 @@ export class AppShell extends LitElement {
     this._downsampled = false;
 
     try {
-      const [prepA, prepB] = prepareForDiffSync(this._store, store);
+      const [prepA, prepB] = prepareForDiffSync(this._store, store, this._syncMode);
       this._store = prepA;
       this._header = prepA.header();
       store = prepB;
@@ -504,6 +508,76 @@ export class AppShell extends LitElement {
 
   _onHiddenFieldsChanged(e) {
     this._hiddenFields = e.detail.hiddenFields;
+  }
+
+  async _onSyncChanged(e) {
+    const newSync = e.detail.sync;
+    this._syncMode = newSync;
+
+    if (!this._store || !this._storeB) return;
+
+    const bytesA = this._store.originalBytes();
+    const bytesB = this._storeB.originalBytes();
+    if (!bytesA || !bytesB) {
+      console.error('Cannot re-sync: original bytes not available');
+      return;
+    }
+
+    const { createTraceStore, prepareForDiff } = await import('../lib/wasm-bridge.js');
+
+    try {
+      const storeA = await createTraceStore(bytesA);
+      const storeB = await createTraceStore(bytesB);
+
+      // Reload ROM if we have a test ROM URL
+      if (this._suite && this._testRom) {
+        try {
+          const { romUrl } = await import('./test-picker.js');
+          const resp = await fetch(romUrl(this._suite, this._testRom));
+          if (resp.ok) {
+            const rom = new Uint8Array(await resp.arrayBuffer());
+            storeA.loadRom(rom);
+            storeB.loadRom(rom);
+          }
+        } catch (_) {}
+      }
+
+      if (this._store) this._store.free();
+      if (this._storeB) this._storeB.free();
+
+      const trigA = storeA.header()?.trigger;
+      const trigB = storeB.header()?.trigger;
+
+      const [prepA, prepB] = await prepareForDiff(storeA, storeB, newSync);
+      this._store = prepA;
+      this._storeB = prepB;
+      this._header = prepA.header();
+      this._downsampled = (trigA !== trigB);
+
+      this._frameBoundaries = Array.from(this._store.frameBoundaries());
+      this._frameBoundariesB = Array.from(this._storeB.frameBoundaries());
+      this._viewStart = 0;
+      this._viewEnd = this._store.entryCount();
+
+      // Re-apply field exclusions
+      const fieldsA = new Set(this._store.header()?.fields || []);
+      const fieldsB = new Set(this._storeB.header()?.fields || []);
+      const newHidden = new Set(this._hiddenFields);
+      if (this._compareHiddenFields) {
+        for (const f of this._compareHiddenFields) newHidden.delete(f);
+      }
+      this._compareHiddenFields = new Set();
+      for (const f of fieldsA) {
+        if (!fieldsB.has(f)) { newHidden.add(f); this._compareHiddenFields.add(f); }
+      }
+      for (const f of fieldsB) {
+        if (!fieldsA.has(f)) { newHidden.add(f); this._compareHiddenFields.add(f); }
+      }
+      this._hiddenFields = newHidden;
+      this._recomputeDiffStats();
+    } catch (err) {
+      console.error('Failed to re-sync traces:', err);
+    }
   }
 
   _onViewRangeChanged(e) {

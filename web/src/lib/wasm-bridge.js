@@ -23,13 +23,13 @@ export async function createTraceStore(bytes) {
   return new mod.TraceStore(bytes);
 }
 
-export async function prepareForDiff(storeA, storeB) {
+export async function prepareForDiff(storeA, storeB, sync = undefined) {
   const mod = await loadWasm();
-  return mod.prepareForDiff(storeA, storeB);
+  return mod.prepareForDiff(storeA, storeB, sync);
 }
 
 /** Synchronous version — only works after WASM is already loaded. */
-export function prepareForDiffSync(storeA, storeB) {
+export function prepareForDiffSync(storeA, storeB, sync = undefined) {
   if (!wasmModule) throw new Error('WASM not loaded');
-  return wasmModule.prepareForDiff(storeA, storeB);
+  return wasmModule.prepareForDiff(storeA, storeB, sync);
 }

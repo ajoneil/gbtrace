@@ -33,6 +33,8 @@ enum StoreKind {
 pub struct TraceStore {
     store: StoreKind,
     rom: Option<Vec<u8>>,
+    /// Original bytes for re-loading when sync changes.
+    original_bytes: Option<Vec<u8>>,
 }
 
 #[wasm_bindgen]
@@ -53,7 +55,7 @@ impl TraceStore {
                     .map_err(|e| JsError::new(&format!("{e}")))?
             )
         };
-        Ok(TraceStore { store, rom: None })
+        Ok(TraceStore { store, rom: None, original_bytes: Some(data.to_vec()) })
     }
 
     /// Return the trace header as a JS object.
@@ -307,6 +309,16 @@ impl TraceStore {
         Ok(arr)
     }
 
+    /// Get the original trace bytes for re-loading (e.g. when changing sync mode).
+    #[wasm_bindgen(js_name = originalBytes)]
+    pub fn original_bytes(&self) -> Option<js_sys::Uint8Array> {
+        self.original_bytes.as_ref().map(|b| {
+            let arr = js_sys::Uint8Array::new_with_length(b.len() as u32);
+            arr.copy_from(b);
+            arr
+        })
+    }
+
     /// Load ROM bytes for disassembly.
     #[wasm_bindgen(js_name = loadRom)]
     pub fn load_rom(&mut self, data: &[u8]) {
@@ -416,11 +428,15 @@ impl TraceStore {
     }
 }
 
-/// Prepare two TraceStores for comparison.
+/// Prepare two TraceStores for comparison with a sync condition.
+///
+/// Sync modes: "pc" (default), "none", or any condition string like "ly=0", "lcdc&80".
 #[wasm_bindgen(js_name = prepareForDiff)]
-pub fn prepare_for_diff(a: TraceStore, b: TraceStore) -> Result<js_sys::Array, JsError> {
+pub fn prepare_for_diff(a: TraceStore, b: TraceStore, sync: Option<String>) -> Result<js_sys::Array, JsError> {
     let rom_a = a.rom;
     let rom_b = b.rom;
+    let bytes_a = a.original_bytes;
+    let bytes_b = b.original_bytes;
 
     // Convert to eager stores for diff preparation
     let store_a = match a.store {
@@ -432,11 +448,12 @@ pub fn prepare_for_diff(a: TraceStore, b: TraceStore) -> Result<js_sys::Array, J
         StoreKind::Lazy(s) => s.to_eager().map_err(|e| JsError::new(&format!("{e}")))?,
     };
 
-    let (new_a, new_b) = ColumnStore::prepare_for_diff(store_a, store_b)
+    let sync_str = sync.as_deref();
+    let (new_a, new_b) = ColumnStore::prepare_for_diff_with_sync(store_a, store_b, sync_str)
         .map_err(|e| JsError::new(&format!("{e}")))?;
 
     let arr = js_sys::Array::new();
-    arr.push(&JsValue::from(TraceStore { store: StoreKind::Eager(new_a), rom: rom_a }));
-    arr.push(&JsValue::from(TraceStore { store: StoreKind::Eager(new_b), rom: rom_b }));
+    arr.push(&JsValue::from(TraceStore { store: StoreKind::Eager(new_a), rom: rom_a, original_bytes: bytes_a }));
+    arr.push(&JsValue::from(TraceStore { store: StoreKind::Eager(new_b), rom: rom_b, original_bytes: bytes_b }));
     Ok(arr)
 }

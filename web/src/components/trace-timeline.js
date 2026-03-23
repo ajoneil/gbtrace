@@ -21,6 +21,7 @@ export class TraceTimeline extends LitElement {
     viewEnd: { type: Number },
     compareMode: { type: Boolean },
     entryCountB: { type: Number },
+    syncMode: { type: String },
     _dragging: { state: true },
   };
 
@@ -89,6 +90,36 @@ export class TraceTimeline extends LitElement {
       margin-left: auto;
     }
 
+    .sync-controls {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      margin-left: 8px;
+      padding-left: 8px;
+      border-left: 1px solid var(--border);
+    }
+    .sync-label {
+      color: var(--text-muted);
+      font-size: 0.7rem;
+      font-family: var(--sans);
+    }
+    .sync-btn {
+      padding: 1px 6px;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      color: var(--text-muted);
+      cursor: pointer;
+      font-family: var(--mono);
+      font-size: 0.7rem;
+    }
+    .sync-btn:hover { border-color: var(--accent); color: var(--accent); }
+    .sync-btn.active {
+      background: var(--accent-subtle);
+      border-color: var(--accent);
+      color: var(--accent);
+    }
+
     .bar-container {
       position: relative;
       height: 28px;
@@ -137,6 +168,7 @@ export class TraceTimeline extends LitElement {
     this.viewStart = 0;
     this.viewEnd = 0;
     this.compareMode = false;
+    this.syncMode = 'pc';
     this._dragging = false;
     this._dragStart = 0;
     this._dragEnd = 0;
@@ -203,6 +235,22 @@ export class TraceTimeline extends LitElement {
               </span>
               <button @click=${() => this._stepFrame(1)}
                 ?disabled=${curFrame >= frames.length - 1 && !this._isAll}>&#9654;</button>
+            </div>
+          ` : ''}
+
+          ${this.compareMode ? html`
+            <div class="sync-controls">
+              <span class="sync-label">sync</span>
+              ${[
+                ['pc', 'PC'],
+                ['ly=0', 'ly=0'],
+                ['lcdc&80', 'LCD on'],
+                ['none', 'none'],
+              ].map(([mode, label]) => html`
+                <button class="sync-btn ${this.syncMode === mode ? 'active' : ''}"
+                  @click=${() => this._changeSync(mode)}
+                >${label}</button>
+              `)}
             </div>
           ` : ''}
 
@@ -333,6 +381,13 @@ export class TraceTimeline extends LitElement {
 
   _onDoubleClick() {
     this._selectAll();
+  }
+
+  _changeSync(mode) {
+    this.dispatchEvent(new CustomEvent('sync-changed', {
+      detail: { sync: mode },
+      bubbles: true, composed: true,
+    }));
   }
 
   _emitRange(start, end) {
