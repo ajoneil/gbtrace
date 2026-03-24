@@ -159,11 +159,28 @@ export class TraceTimeline extends LitElement {
       pointer-events: none;
     }
 
-    .scrubber {
-      width: 100%;
+    .scrubber-row {
+      display: flex;
+      align-items: center;
+      gap: 4px;
       margin: 6px 0 0 0;
+    }
+    .scrubber {
+      flex: 1;
       accent-color: var(--accent);
     }
+    .scrub-step {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      color: var(--text-muted);
+      cursor: pointer;
+      font-size: 0.75rem;
+      padding: 1px 6px;
+      font-family: var(--mono);
+      line-height: 1.2;
+    }
+    .scrub-step:hover { border-color: var(--accent); color: var(--accent); }
   `;
 
   constructor() {
@@ -292,10 +309,14 @@ export class TraceTimeline extends LitElement {
           ` : ''}
         </div>
 
-        <input type="range" class="scrubber"
-          min=${this.viewStart} max=${Math.max(this.viewStart, this.viewEnd - 1)}
-          .value=${String(this.currentIndex ?? this.viewStart)}
-          @input=${this._onScrub}>
+        <div class="scrubber-row">
+          <button class="scrub-step" @click=${() => this._step(-1)}>&#9664;</button>
+          <input type="range" class="scrubber"
+            min=${this.viewStart} max=${Math.max(this.viewStart, this.viewEnd - 1)}
+            .value=${String(this.currentIndex ?? this.viewStart)}
+            @input=${this._onScrub}>
+          <button class="scrub-step" @click=${() => this._step(1)}>&#9654;</button>
+        </div>
       </div>
     `;
   }
@@ -397,6 +418,15 @@ export class TraceTimeline extends LitElement {
 
   _onScrub(e) {
     const index = parseInt(e.target.value, 10);
+    this.dispatchEvent(new CustomEvent('current-index', {
+      detail: { index },
+      bubbles: true, composed: true,
+    }));
+  }
+
+  _step(delta) {
+    const cur = this.currentIndex ?? this.viewStart;
+    const index = Math.max(this.viewStart, Math.min(this.viewEnd - 1, cur + delta));
     this.dispatchEvent(new CustomEvent('current-index', {
       detail: { index },
       bubbles: true, composed: true,
