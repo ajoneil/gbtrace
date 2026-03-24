@@ -444,17 +444,31 @@ export class TraceTimeline extends LitElement {
   _startRepeat(delta) {
     this._step(delta);
     this._repeatDelta = delta;
-    // Initial delay before repeat starts
-    this._repeatTimeout = setTimeout(() => {
-      this._repeatInterval = setInterval(() => this._step(this._repeatDelta), 50);
-    }, 300);
+    this._repeatCount = 0;
+    // Initial delay before repeat starts, then accelerate
+    this._repeatTimeout = setTimeout(() => this._repeatTick(), 300);
+  }
+
+  _repeatTick() {
+    this._repeatCount++;
+    // Accelerate: start at step 1, ramp up based on how long held
+    const step = this._repeatCount < 10 ? 1
+      : this._repeatCount < 30 ? 5
+      : this._repeatCount < 60 ? 25
+      : 100;
+    const cur = this.currentIndex ?? this.viewStart;
+    const index = Math.max(this.viewStart, Math.min(this.viewEnd - 1, cur + this._repeatDelta * step));
+    this.dispatchEvent(new CustomEvent('current-index', {
+      detail: { index },
+      bubbles: true, composed: true,
+    }));
+    this._repeatTimeout = setTimeout(() => this._repeatTick(), 50);
   }
 
   _stopRepeat() {
     clearTimeout(this._repeatTimeout);
-    clearInterval(this._repeatInterval);
     this._repeatTimeout = null;
-    this._repeatInterval = null;
+    this._repeatCount = 0;
   }
 
   _changeSync(mode) {
