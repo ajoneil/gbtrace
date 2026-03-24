@@ -9,6 +9,17 @@ const FIELD_GROUPS = [
   { name: 'interrupt', fields: ['if_', 'ie', 'ime'] },
   { name: 'timer',     fields: ['div', 'tima', 'tma', 'tac'] },
   { name: 'serial',    fields: ['sb', 'sc'] },
+  { name: 'ppu_int',   fields: [
+    'oam0_x', 'oam0_id', 'oam0_attr', 'oam1_x', 'oam1_id', 'oam1_attr',
+    'oam2_x', 'oam2_id', 'oam2_attr', 'oam3_x', 'oam3_id', 'oam3_attr',
+    'oam4_x', 'oam4_id', 'oam4_attr', 'oam5_x', 'oam5_id', 'oam5_attr',
+    'oam6_x', 'oam6_id', 'oam6_attr', 'oam7_x', 'oam7_id', 'oam7_attr',
+    'oam8_x', 'oam8_id', 'oam8_attr', 'oam9_x', 'oam9_id', 'oam9_attr',
+    'bgw_fifo_a', 'bgw_fifo_b', 'spr_fifo_a', 'spr_fifo_b',
+    'mask_pipe', 'pal_pipe',
+    'tfetch_state', 'sfetch_state', 'tile_temp_a', 'tile_temp_b',
+    'pix_count', 'sprite_count', 'scan_count', 'rendering', 'win_mode',
+  ]},
   { name: 'test',      fields: ['test_result', 'test_expect', 'test_pass'] },
 ];
 
