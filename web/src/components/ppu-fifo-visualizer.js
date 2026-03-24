@@ -236,7 +236,7 @@ export class PpuFifoVisualizer extends LitElement {
             <div class="output-pixel" id="output-px"></div>
             <div class="counter">
               <span class="counter-label">pix:</span>
-              <span class="counter-val">${e.pix_count}</span>
+              <span class="counter-val" style="display:inline-block;min-width:3ch;text-align:right;">${e.pix_count}</span>
             </div>
           </div>
         </div>
