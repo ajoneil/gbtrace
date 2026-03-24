@@ -9,8 +9,8 @@ const SCALE = 2;
  *
  * Single mode: one canvas showing the current frame.
  * Compare mode (storeB set): three canvases — A | diff | B.
- * T-cycle mode (tcyclePixels): adds a scrubber for progressive rendering
- * and supports pixel hover highlighting.
+ * T-cycle mode (tcyclePixels): renders partial frames at the given
+ * currentIndex and supports pixel crosshair highlighting.
  */
 export class PixelDisplay extends LitElement {
   static properties = {
@@ -21,11 +21,9 @@ export class PixelDisplay extends LitElement {
     frameBoundaries: { type: Array },
     viewStart: { type: Number },
     tcyclePixels: { type: Boolean },
-    hoverIndex: { type: Number },
     currentIndex: { type: Number },
     _frameIndex: { state: true },
     _frameCountA: { state: true },
-    _scrubEntry: { state: true },
     _highlightPixel: { state: true },
     _pixMap: { state: true },
     _pixMapFrame: { state: true },
@@ -66,17 +64,6 @@ export class PixelDisplay extends LitElement {
       pointer-events: none;
       image-rendering: pixelated;
     }
-    .scrubber {
-      width: 100%;
-      max-width: 320px;
-      margin-top: 4px;
-    }
-    .scrub-info {
-      font-size: 0.65rem;
-      color: var(--text-muted);
-      font-family: var(--mono);
-      margin-top: 2px;
-    }
     .compare-row {
       display: flex;
       gap: 8px;
@@ -111,14 +98,12 @@ export class PixelDisplay extends LitElement {
     this.frameBoundaries = [];
     this.viewStart = 0;
     this.tcyclePixels = false;
-    this.hoverIndex = null;
+    this.currentIndex = null;
     this._frameIndex = 0;
     this._frameCountA = 0;
-    this._scrubEntry = null;
     this._highlightPixel = null;
     this._pixMap = null;
     this._pixMapFrame = -1;
-    this._rafPending = false;
   }
 
   updated(changed) {
@@ -132,8 +117,8 @@ export class PixelDisplay extends LitElement {
       this._syncFrameIndex();
       this._draw();
     }
-    if (changed.has('hoverIndex') && this.tcyclePixels && this.hoverIndex != null) {
-      this._updateHighlight();
+    if (changed.has('currentIndex') && this.tcyclePixels && this.currentIndex != null) {
+      this._updateForCurrentIndex();
     }
   }
 
@@ -146,7 +131,6 @@ export class PixelDisplay extends LitElement {
     }
     if (frame !== this._frameIndex) {
       this._frameIndex = frame;
-      this._scrubEntry = null; // reset scrubber on frame change
       this._pixMap = null;
       this._pixMapFrame = -1;
     }
@@ -170,41 +154,42 @@ export class PixelDisplay extends LitElement {
     }
   }
 
-  _updateHighlight() {
-    if (!this.tcyclePixels || this.hoverIndex == null) {
+  _updateForCurrentIndex() {
+    if (!this.tcyclePixels || this.currentIndex == null) {
       if (this._highlightPixel) {
         this._highlightPixel = null;
         this._drawHighlight();
       }
-      // Restore full frame or scrubbed position when hover ends
       this._draw();
       return;
     }
     this._ensurePixMap();
-    if (!this._pixMap) return;
 
     const { start } = this._getFrameRange();
-    const mapIdx = this.hoverIndex - start;
-    if (mapIdx < 0 || mapIdx >= this._pixMap.length) {
-      this._highlightPixel = null;
-      this._drawHighlight();
-      return;
-    }
-    const packed = this._pixMap[mapIdx];
-    if (packed === 0xFFFFFFFF) {
-      this._highlightPixel = null;
-    } else {
-      this._highlightPixel = { x: packed >> 16, y: packed & 0xFFFF };
-    }
-    this._drawHighlight();
 
-    // Draw partial frame at hover position (temporary, doesn't change scrubber)
-    if (this.hoverIndex >= start) {
-      this._drawPartialAt(this.hoverIndex);
+    // Update pixel highlight from position map
+    if (this._pixMap) {
+      const mapIdx = this.currentIndex - start;
+      if (mapIdx < 0 || mapIdx >= this._pixMap.length) {
+        this._highlightPixel = null;
+      } else {
+        const packed = this._pixMap[mapIdx];
+        if (packed === 0xFFFFFFFF) {
+          this._highlightPixel = null;
+        } else {
+          this._highlightPixel = { x: packed >> 16, y: packed & 0xFFFF };
+        }
+      }
+      this._drawHighlight();
+    }
+
+    // Draw partial frame at current index
+    if (this.currentIndex >= start) {
+      this._drawPartialAt(this.currentIndex);
     }
   }
 
-  /** Draw a partial frame at a specific entry without changing _scrubEntry. */
+  /** Draw a partial frame at a specific entry index. */
   _drawPartialAt(entry) {
     if (!this.store || !this.tcyclePixels) return;
     const canvas = this.renderRoot?.querySelector('#canvasA');
@@ -245,51 +230,6 @@ export class PixelDisplay extends LitElement {
     // Draw pixel highlight
     ctx.fillStyle = 'rgba(255,68,68,0.5)';
     ctx.fillRect(x, y, 1, 1);
-  }
-
-  _onScrub(e) {
-    this._scrubEntry = parseInt(e.target.value, 10);
-    // Scrubbing sets the current index
-    this.dispatchEvent(new CustomEvent('current-index', {
-      detail: { index: this._scrubEntry },
-      bubbles: true, composed: true,
-    }));
-    if (!this._rafPending) {
-      this._rafPending = true;
-      requestAnimationFrame(() => {
-        this._rafPending = false;
-        this._drawPartial();
-      });
-    }
-  }
-
-  _drawPartial() {
-    if (!this.store || !this.tcyclePixels || this._scrubEntry == null) return;
-    const canvas = this.renderRoot?.querySelector('#canvasA');
-    if (!canvas) return;
-    try {
-      const rgba = this.store.renderPartialFrame(this._frameIndex, this._scrubEntry);
-      if (!rgba) return;
-      const ctx = canvas.getContext('2d');
-      const arr = new Uint8ClampedArray(rgba.buffer || rgba);
-      // Draw checkerboard background for unrendered pixels (alpha=0)
-      this._drawCheckerboard(ctx);
-      const imgData = new ImageData(arr, LCD_WIDTH, LCD_HEIGHT);
-      ctx.putImageData(imgData, 0, 0, 0, 0, LCD_WIDTH, LCD_HEIGHT);
-      // putImageData replaces pixels — we need to composite instead.
-      // Use a temp canvas to composite over the checkerboard.
-      if (!this._tmpCanvas) {
-        this._tmpCanvas = document.createElement('canvas');
-        this._tmpCanvas.width = LCD_WIDTH;
-        this._tmpCanvas.height = LCD_HEIGHT;
-      }
-      const tmp = this._tmpCanvas.getContext('2d');
-      tmp.putImageData(imgData, 0, 0);
-      this._drawCheckerboard(ctx);
-      ctx.drawImage(this._tmpCanvas, 0, 0);
-    } catch (err) {
-      console.error('Failed to render partial frame:', err);
-    }
   }
 
   _drawCheckerboard(ctx) {
@@ -350,8 +290,8 @@ export class PixelDisplay extends LitElement {
       const rgbaA = this._renderToCanvas('canvasA', this.store, fi);
       const rgbaB = this._renderToCanvas('canvasB', this.storeB, fi);
       this._renderDiff(rgbaA, rgbaB);
-    } else if (this._scrubEntry != null && this.tcyclePixels) {
-      this._drawPartial();
+    } else if (this.currentIndex != null && this.tcyclePixels) {
+      this._drawPartialAt(this.currentIndex);
     } else {
       this._renderToCanvas('canvasA', this.store, fi);
     }
@@ -359,7 +299,6 @@ export class PixelDisplay extends LitElement {
 
   render() {
     const total = this._frameCountA;
-    const { start, end } = this._getFrameRange();
 
     if (this.storeB) {
       return html`
@@ -403,12 +342,6 @@ export class PixelDisplay extends LitElement {
               style="width: ${LCD_WIDTH * SCALE}px; height: ${LCD_HEIGHT * SCALE}px;"></canvas>
           ` : ''}
         </div>
-        ${this.tcyclePixels ? html`
-          <input type="range" class="scrubber"
-            min=${start} max=${end} .value=${String(this._scrubEntry ?? end)}
-            @input=${this._onScrub}>
-          <div class="scrub-info">entry ${this._scrubEntry ?? end} / ${end}</div>
-        ` : ''}
       </div>
     `;
   }

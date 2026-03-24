@@ -75,6 +75,10 @@ export class TraceTable extends LitElement {
     if (changed.has('store') || changed.has('fields') || changed.has('highlightIndices') || changed.has('hiddenFields') || changed.has('viewStart') || changed.has('viewEnd')) {
       this._renderedStart = -1;
       this.updateComplete.then(() => this._renderRows());
+    } else if (changed.has('currentIndex')) {
+      // Force re-render of visible rows to update highlight
+      this._renderedStart = -1;
+      this._renderRows();
     }
   }
 
@@ -204,9 +208,10 @@ export class TraceTable extends LitElement {
       const globalIdx = globalStart + i;
       const data = entries[i];
       const isCurrent = this.currentIndex != null && globalIdx === this.currentIndex;
-      const bg = isCurrent ? 'background:var(--accent-subtle);border-left:3px solid var(--accent);'
-        : hl?.has(globalIdx) ? 'background:var(--accent-subtle);' : '';
-      parts.push(`<div style="display:flex;height:${ROW_HEIGHT}px;align-items:center;border-bottom:1px solid var(--bg);cursor:pointer;${bg}" data-idx="${globalIdx}">`);
+      const bg = isCurrent
+        ? 'background:rgba(88,166,255,0.09);border-left:3px solid var(--accent);'
+        : hl?.has(globalIdx) ? 'background:var(--accent-subtle);' : 'border-left:3px solid transparent;';
+      parts.push(`<div style="display:flex;height:${ROW_HEIGHT}px;align-items:center;border-bottom:1px solid var(--bg);${bg}" data-idx="${globalIdx}">`);
       parts.push(`<span style="${cs(IDX_WIDTH, 'color:var(--text-muted);')}">${globalIdx}</span>`);
       if (pixArr) {
         const pv = pixArr[i];
