@@ -242,6 +242,13 @@ export class AppShell extends LitElement {
           .compareMode=${!!this._storeB}
           .syncMode=${this._syncMode}
         ></trace-timeline>
+        <div class="scrubber-row">
+          <input type="range"
+            min=${this._viewStart} max=${this._viewEnd - 1}
+            .value=${String(this._currentIndex ?? this._viewStart)}
+            @input=${this._onScrub}>
+          <span class="scrub-info">${this._currentIndex ?? this._viewStart} / ${this._viewEnd}</span>
+        </div>
       ` : ''}
 
       ${this._store
@@ -273,14 +280,6 @@ export class AppShell extends LitElement {
         <trace-query .store=${this._store} .fields=${vf}
           .viewStart=${this._viewStart} .viewEnd=${this._viewEnd}
         ></trace-query>
-
-        <div class="scrubber-row">
-          <input type="range"
-            min=${this._viewStart} max=${this._viewEnd - 1}
-            .value=${String(this._currentIndex ?? this._viewStart)}
-            @input=${this._onScrub}>
-          <span class="scrub-info">entry ${this._currentIndex ?? this._viewStart} / ${this._viewEnd}</span>
-        </div>
 
         ${this._chartField === '__pixels__' ? html`
           <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-start;">
