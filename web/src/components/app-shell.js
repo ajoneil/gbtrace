@@ -89,6 +89,22 @@ export class AppShell extends LitElement {
     }
     .compare-stats .diff-field { color: var(--red); }
     .compare-stats .entries { color: var(--text-muted); margin-left: auto; }
+    .scrubber-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 4px 0;
+    }
+    .scrubber-row input[type="range"] {
+      flex: 1;
+      max-width: 400px;
+    }
+    .scrubber-row .scrub-info {
+      font-size: 0.7rem;
+      color: var(--text-muted);
+      font-family: var(--mono);
+      white-space: nowrap;
+    }
   `;
 
   static properties = {
@@ -147,7 +163,7 @@ export class AppShell extends LitElement {
 
   /** The effective cursor index: hover takes priority, falls back to current. */
   get _effectiveIndex() {
-    return this._hoverIndex ?? this._currentIndex ?? null;
+    return this._hoverIndex ?? this._currentIndex;
   }
 
   /** True if the trace includes PPU internal fields. */
@@ -235,13 +251,38 @@ export class AppShell extends LitElement {
     `;
   }
 
+  /** Get the frame range for the current view. */
+  _getCurrentFrameRange() {
+    const bounds = this._frameBoundaries || [];
+    let frameIdx = 0;
+    for (let i = 0; i < bounds.length; i++) {
+      if (bounds[i] <= this._viewStart) frameIdx = i;
+      else break;
+    }
+    const start = bounds[frameIdx] || 0;
+    const end = frameIdx + 1 < bounds.length ? bounds[frameIdx + 1] : (this._store?.entryCount() || 0);
+    return { start, end };
+  }
+
   _renderSingle() {
     const vf = this._visibleFields;
+    const isTcycle = this._store?.isTcyclePixels() || false;
+    const { start: frameStart, end: frameEnd } = this._getCurrentFrameRange();
     return html`
       <div class="sections">
         <trace-query .store=${this._store} .fields=${vf}
           .viewStart=${this._viewStart} .viewEnd=${this._viewEnd}
         ></trace-query>
+
+        ${this._chartField === '__pixels__' && isTcycle ? html`
+          <div class="scrubber-row">
+            <input type="range"
+              min=${frameStart} max=${frameEnd}
+              .value=${String(this._currentIndex ?? frameStart)}
+              @input=${this._onScrub}>
+            <span class="scrub-info">entry ${this._currentIndex ?? frameStart} / ${frameEnd}</span>
+          </div>
+        ` : ''}
 
         ${this._chartField === '__pixels__' ? html`
           <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-start;">
@@ -249,9 +290,8 @@ export class AppShell extends LitElement {
               .store=${this._store}
               .frameBoundaries=${this._frameBoundaries}
               .viewStart=${this._viewStart}
-              .tcyclePixels=${this._store?.isTcyclePixels() || false}
-              .hoverIndex=${this._hoverIndex}
-              .currentIndex=${this._currentIndex}
+              .tcyclePixels=${isTcycle}
+              .currentIndex=${this._effectiveIndex}
             ></pixel-display>
             ${this._hasPpuInternals ? html`
               <div style="display:flex;flex-direction:column;gap:8px;min-width:200px;">
@@ -418,7 +458,7 @@ export class AppShell extends LitElement {
     this._highlightIndices = null;
     this._chartField = null;
     this._hoverIndex = null;
-    this._currentIndex = null;
+    this._currentIndex = 0;
     this._diffStats = null;
     this._downsampled = false;
     this._frameBoundaries = Array.from(store.frameBoundaries());
@@ -565,9 +605,7 @@ export class AppShell extends LitElement {
 
   _onJumpToIndex(e) {
     this._currentIndex = e.detail.index;
-    const table = this.renderRoot?.querySelector('trace-table') ||
-                  this.renderRoot?.querySelector('trace-diff-table');
-    if (table) table.scrollToIndex(e.detail.index);
+    this._scrollTableToCurrent();
   }
 
   _onFieldSelected(e) {
@@ -587,6 +625,25 @@ export class AppShell extends LitElement {
 
   _onCurrentIndex(e) {
     this._currentIndex = e.detail.index;
+    // If this came from the table itself (click on row), don't scroll the table
+    const fromTable = e.composedPath?.().some(el => el.tagName === 'TRACE-TABLE');
+    if (!fromTable) {
+      this._scrollTableToCurrent();
+    }
+  }
+
+  _onScrub(e) {
+    this._currentIndex = parseInt(e.target.value, 10);
+    this._scrollTableToCurrent();
+  }
+
+  _scrollTableToCurrent() {
+    if (this._currentIndex == null) return;
+    this.updateComplete.then(() => {
+      const table = this.renderRoot?.querySelector('trace-table') ||
+                    this.renderRoot?.querySelector('trace-diff-table');
+      if (table) table.scrollToIndex(this._currentIndex);
+    });
   }
 
   _onHiddenFieldsChanged(e) {
@@ -666,7 +723,9 @@ export class AppShell extends LitElement {
   _onViewRangeChanged(e) {
     this._viewStart = e.detail.start;
     this._viewEnd = e.detail.end;
+    this._currentIndex = e.detail.start;
     this._recomputeDiffStats();
+    this._scrollTableToCurrent();
   }
 
 }
