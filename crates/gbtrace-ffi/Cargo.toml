@@ -1,0 +1,12 @@
+[package]
+name = "gbtrace-ffi"
+version = "0.1.0"
+edition = "2021"
+description = "C FFI bindings for gbtrace parquet writer"
+
+[lib]
+crate-type = ["staticlib"]
+
+[dependencies]
+gbtrace = { path = "../gbtrace", features = ["parquet"] }
+serde_json = "1"
