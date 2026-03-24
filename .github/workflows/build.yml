@@ -29,6 +29,9 @@ jobs:
       - name: Build CLI
         run: make cli
 
+      - name: Build FFI library
+        run: make ffi
+
       - name: Build WASM
         run: make wasm
 
@@ -37,6 +40,15 @@ jobs:
         with:
           name: gbtrace-cli
           path: target/release/gbtrace-cli
+          retention-days: 90
+
+      - name: Upload FFI library
+        uses: actions/upload-artifact@v6
+        with:
+          name: gbtrace-ffi
+          path: |
+            target/release/libgbtrace_ffi.a
+            crates/gbtrace-ffi/gbtrace.h
           retention-days: 90
 
       - name: Upload WASM
@@ -49,6 +61,7 @@ jobs:
           retention-days: 90
 
   adapter:
+    needs: cli-and-wasm
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -61,6 +74,22 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y build-essential cmake scons zlib1g-dev
+
+      # Download FFI library built by cli-and-wasm job
+      - name: Download FFI library
+        uses: actions/download-artifact@v4
+        with:
+          name: gbtrace-ffi
+          path: _ffi
+
+      - name: Install FFI library
+        run: |
+          mkdir -p target/release
+          cp _ffi/target/release/libgbtrace_ffi.a target/release/ 2>/dev/null || \
+            cp _ffi/libgbtrace_ffi.a target/release/
+          cp _ffi/crates/gbtrace-ffi/gbtrace.h crates/gbtrace-ffi/ 2>/dev/null || \
+            cp _ffi/gbtrace.h crates/gbtrace-ffi/
+          ls -la target/release/libgbtrace_ffi.a crates/gbtrace-ffi/gbtrace.h
 
       # Cache upstream repos only (the expensive clones), not the built binary
       - name: Cache upstream repos
