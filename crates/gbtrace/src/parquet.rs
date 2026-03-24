@@ -208,6 +208,86 @@ impl ParquetTraceWriter {
         Ok(())
     }
 
+    // --- Direct typed access for FFI (bypasses TraceEntry) ---
+
+    /// Signal a frame boundary check with the given ly and pix_len values.
+    /// Call this BEFORE appending column values for the entry.
+    /// If a boundary is detected, the current batch is flushed.
+    pub fn check_boundary(&mut self, ly: Option<u8>, pix_len: usize) -> Result<()> {
+        let mut boundary = false;
+        if self.ly_col.is_some() {
+            if let Some(cur_ly) = ly {
+                if let Some(prev) = self.prev_ly {
+                    if prev == 153 && cur_ly == 0 {
+                        boundary = true;
+                    }
+                }
+                self.prev_ly = Some(cur_ly);
+            }
+        }
+        if self.pix_col.is_some() && pix_len == 160 * 144 {
+            boundary = true;
+        }
+        if boundary {
+            self.flush_batch()?;
+            self.writer.flush()?;
+        }
+        Ok(())
+    }
+
+    /// Append a u8 value to the given column index.
+    pub fn append_u8(&mut self, col: usize, val: u8) {
+        if let ColumnBuffer::UInt8(b) = &mut self.columns[col] {
+            b.append_value(val);
+        }
+    }
+
+    /// Append a u16 value to the given column index.
+    pub fn append_u16(&mut self, col: usize, val: u16) {
+        if let ColumnBuffer::UInt16(b) = &mut self.columns[col] {
+            b.append_value(val);
+        }
+    }
+
+    /// Append a u64 value to the given column index.
+    pub fn append_u64(&mut self, col: usize, val: u64) {
+        if let ColumnBuffer::UInt64(b) = &mut self.columns[col] {
+            b.append_value(val);
+        }
+    }
+
+    /// Append a bool value to the given column index.
+    pub fn append_bool(&mut self, col: usize, val: bool) {
+        if let ColumnBuffer::Bool(b) = &mut self.columns[col] {
+            b.append_value(val);
+        }
+    }
+
+    /// Append a string value to the given column index.
+    pub fn append_str(&mut self, col: usize, val: &str) {
+        if let ColumnBuffer::Str(b) = &mut self.columns[col] {
+            b.append_value(val);
+        }
+    }
+
+    /// Call after appending all columns for one entry. Flushes batch if full.
+    pub fn finish_row(&mut self) -> Result<()> {
+        if self.columns[0].len() >= BATCH_SIZE {
+            self.flush_batch()?;
+        }
+        Ok(())
+    }
+
+    /// Get field types (for FFI to know which setter to call per column).
+    pub fn field_types(&self) -> &[FieldType] {
+        &self.field_types
+    }
+
+    /// Get field names.
+    pub fn field_names(&self) -> &[String] {
+        &self.field_names
+    }
+
     fn flush_batch(&mut self) -> Result<()> {
         if self.columns.is_empty() || self.columns[0].len() == 0 {
             return Ok(());

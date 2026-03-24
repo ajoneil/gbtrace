@@ -595,6 +595,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "gbtrace-ffi"
+version = "0.1.0"
+dependencies = [
+ "gbtrace",
+ "serde_json",
+]
+
+[[package]]
 name = "gbtrace-wasm"
 version = "0.1.0"
 dependencies = [

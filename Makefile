@@ -176,9 +176,18 @@ adapters/gateboy/gbtrace-gateboy:
 	@echo "Building gateboy adapter..."
 	@$(MAKE) -C adapters/gateboy -j$$(nproc)
 
+FFI_LIB := $(PROJECT_DIR)/target/release/libgbtrace_ffi.a
+FFI_HEADER := $(PROJECT_DIR)/crates/gbtrace-ffi/gbtrace.h
+
 $(CLI): $(wildcard crates/gbtrace-cli/src/*.rs crates/gbtrace/src/*.rs)
 	@echo "Building gbtrace-cli..."
 	@cargo build --release -p gbtrace-cli 2>&1 | tail -1
+
+$(FFI_LIB): $(wildcard crates/gbtrace-ffi/src/*.rs crates/gbtrace/src/*.rs)
+	@echo "Building gbtrace-ffi..."
+	@cargo build --release -p gbtrace-ffi 2>&1 | tail -1
+
+ffi: $(FFI_LIB)
 
 wasm: web/pkg/gbtrace_wasm_bg.wasm
 
