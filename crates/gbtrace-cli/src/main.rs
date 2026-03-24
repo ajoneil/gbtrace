@@ -810,25 +810,16 @@ fn cmd_trim_reference(input: &PathBuf, output: Option<PathBuf>, reference: PathB
     }
     let ref_pixels: Vec<u8> = ref_str.bytes().map(|b| b.wrapping_sub(b'0').min(3)).collect();
 
-    // Load column store and reconstruct frames
-    let store = match gbtrace::column_store::load_column_store(input) {
+    // Load store and reconstruct frames — same logic as the viewer uses.
+    let store = match gbtrace::column_store::open_trace_store(input) {
         Ok(s) => s,
         Err(e) => { eprintln!("Error: {e}"); return 1; }
     };
 
-    // Compare rendered frames against reference using the same palette
-    // normalization as the PNG pipeline (to_rgba → shade thresholds).
-    let frames = framebuffer::reconstruct_frames(&store);
+    let frames = framebuffer::reconstruct_frames(store.as_ref());
     let mut end_entry = None;
     for frame in &frames {
-        let rgba = frame.to_rgba();
-        let rendered_pix: Vec<u8> = (0..LCD_WIDTH * LCD_HEIGHT)
-            .map(|i| {
-                let r = rgba[i * 4];
-                if r >= 192 { 0 } else if r >= 112 { 1 } else if r >= 48 { 2 } else { 3 }
-            })
-            .collect();
-        if rendered_pix == ref_pixels {
+        if frame.pixels[..] == ref_pixels[..] {
             eprintln!("Reference matches frame {} (entries 0..{})", frame.index + 1, frame.end_entry);
             end_entry = Some(frame.end_entry);
             break;
