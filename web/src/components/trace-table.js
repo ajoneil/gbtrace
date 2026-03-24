@@ -255,10 +255,13 @@ export class TraceTable extends LitElement {
     const scrollEl = this.renderRoot?.querySelector('.container');
     if (!scrollEl) return;
     this._renderedStart = -1;
-    // Convert global index to view-relative
+    // Convert global index to view-relative, offset by a few rows
+    // so the target isn't hidden under the sticky header
     const vs = this.viewStart || 0;
     const relIndex = Math.max(0, index - vs);
-    scrollEl.scrollTop = this._entryToScroll(relIndex, scrollEl);
+    const offsetRows = 3;
+    const targetIndex = Math.max(0, relIndex - offsetRows);
+    scrollEl.scrollTop = this._entryToScroll(targetIndex, scrollEl);
     this._renderRows();
   }
 }
