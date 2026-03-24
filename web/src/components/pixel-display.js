@@ -22,6 +22,7 @@ export class PixelDisplay extends LitElement {
     viewStart: { type: Number },
     tcyclePixels: { type: Boolean },
     hoverIndex: { type: Number },
+    currentIndex: { type: Number },
     _frameIndex: { state: true },
     _frameCountA: { state: true },
     _scrubEntry: { state: true },
@@ -131,8 +132,16 @@ export class PixelDisplay extends LitElement {
       this._syncFrameIndex();
       this._draw();
     }
-    if (changed.has('hoverIndex') && this.tcyclePixels) {
+    if (changed.has('hoverIndex') && this.tcyclePixels && this.hoverIndex != null) {
       this._updateHighlight();
+    }
+    if (changed.has('currentIndex') && this.tcyclePixels && this.hoverIndex == null) {
+      // When nothing is hovered, sync scrubber to current
+      const { start } = this._getFrameRange();
+      if (this.currentIndex != null && this.currentIndex >= start) {
+        this._scrubEntry = this.currentIndex;
+        this._drawPartial();
+      }
     }
   }
 

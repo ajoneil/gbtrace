@@ -250,7 +250,8 @@ export class AppShell extends LitElement {
               .frameBoundaries=${this._frameBoundaries}
               .viewStart=${this._viewStart}
               .tcyclePixels=${this._store?.isTcyclePixels() || false}
-              .hoverIndex=${this._effectiveIndex}
+              .hoverIndex=${this._hoverIndex}
+              .currentIndex=${this._currentIndex}
             ></pixel-display>
             ${this._hasPpuInternals ? html`
               <div style="display:flex;flex-direction:column;gap:8px;min-width:200px;">
