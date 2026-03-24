@@ -253,7 +253,7 @@ export class PpuFifoVisualizer extends LitElement {
     const ctx = canvas.getContext('2d');
 
     for (let i = 0; i < FIFO_LEN; i++) {
-      const bitPos = 7 - i; // bit 7 = leftmost (next to shift out)
+      const bitPos = i; // bit 0 on left (input), bit 7 on right (output)
       const lo = (fifoA >> bitPos) & 1;
       const hi = (fifoB >> bitPos) & 1;
       const colorIdx = (hi << 1) | lo;
@@ -263,7 +263,7 @@ export class PpuFifoVisualizer extends LitElement {
 
       // If mask is provided (OBJ FIFO), dim pixels where mask bit is 0
       const hasMask = mask !== undefined;
-      const masked = hasMask && !((mask >> bitPos) & 1);
+      const masked = hasMask && !((mask >> i) & 1);
 
       ctx.fillStyle = masked ? '#1a1a2e' : SHADES[shade];
       ctx.fillRect(i * PIXEL_SIZE, 0, PIXEL_SIZE, PIXEL_SIZE);
@@ -301,7 +301,7 @@ export class PpuFifoVisualizer extends LitElement {
     if (tileA === undefined) return html``;
     const pixels = [];
     for (let i = 0; i < 8; i++) {
-      const bitPos = 7 - i;
+      const bitPos = i; // match FIFO direction: bit 0 left, bit 7 right
       const lo = (tileA >> bitPos) & 1;
       const hi = (tileB >> bitPos) & 1;
       const colorIdx = (hi << 1) | lo;
