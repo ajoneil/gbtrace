@@ -581,35 +581,32 @@ impl TraceStore {
     }
 
     fn row_to_map(&self, index: usize) -> BTreeMap<String, JsField> {
-        let fields = match &self.store {
-            StoreKind::Lazy(s) => s.header().fields.clone(),
-            StoreKind::Eager(s) => s.header().fields.clone(),
+        let store: &dyn gbtrace::column_store::TraceStore = match &self.store {
+            StoreKind::Lazy(s) => s,
+            StoreKind::Eager(s) => s,
         };
+        let fields = store.header().fields.clone();
         let mut map = BTreeMap::new();
 
         for (col_idx, field_name) in fields.iter().enumerate() {
-            let val = match &self.store {
-                StoreKind::Eager(s) => {
-                    let col = s.column(col_idx);
-                    match col {
-                        ColumnData::U64(_) | ColumnData::U16(_) | ColumnData::U8(_) => {
-                            JsField::Num(col.get_numeric(index) as f64)
+            let ft = gbtrace::profile::field_type(field_name);
+            let val = match ft {
+                FieldType::Bool => JsField::Bool(store.get_bool(col_idx, index)),
+                FieldType::Str => {
+                    // For pix: expose single-char pixel values as numbers
+                    let s = store.get_str(col_idx, index);
+                    if s.len() == 1 {
+                        let ch = s.as_bytes()[0];
+                        if ch >= b'0' && ch <= b'3' {
+                            JsField::Num((ch - b'0') as f64)
+                        } else {
+                            continue;
                         }
-                        ColumnData::Bool(_) => JsField::Bool(col.get_bool(index)),
-                        ColumnData::Str(_) => continue,
+                    } else {
+                        continue; // skip multi-char strings (full-frame dumps)
                     }
                 }
-                StoreKind::Lazy(s) => {
-                    match s.column_type(col_idx) {
-                        FieldType::Bool => {
-                            JsField::Bool(s.get_bool_named(field_name, index).unwrap_or(false))
-                        }
-                        FieldType::Str => continue,
-                        _ => {
-                            JsField::Num(s.get_numeric(col_idx, index) as f64)
-                        }
-                    }
-                }
+                _ => JsField::Num(store.get_numeric(col_idx, index) as f64),
             };
             map.insert(field_name.clone(), val);
         }

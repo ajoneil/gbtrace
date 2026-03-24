@@ -278,14 +278,9 @@ export class PpuFifoVisualizer extends LitElement {
     const el = this.shadowRoot?.getElementById('output-px');
     if (!el) return;
 
-    // Derive output pixel from the FIFO head (bit 7 = output position)
-    // after applying the BGP palette register
-    if (e.bgw_fifo_a !== undefined && e.bgp !== undefined) {
-      const lo = (e.bgw_fifo_a >> 7) & 1;
-      const hi = (e.bgw_fifo_b >> 7) & 1;
-      const colorIdx = (hi << 1) | lo;
-      const shade = (e.bgp >> (colorIdx * 2)) & 3;
-      el.style.background = SHADES[shade];
+    // Use the actual pixel output value (now exposed as a number 0-3)
+    if (e.pix !== undefined && e.pix >= 0 && e.pix <= 3) {
+      el.style.background = SHADES[e.pix];
     } else {
       el.style.background = 'var(--bg)';
     }
