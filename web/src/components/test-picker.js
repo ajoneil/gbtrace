@@ -36,8 +36,8 @@ const TEST_SUITES = [
     preferredEmu: 'gambatte',
     tests: null,
     categories: [
-      { name: 'cpu', filter: 'cpu_instrs' },
-      { name: 'timing', filter: 'instr_timing' },
+      { name: 'cpu instrs', filter: 'cpu_instrs/' },
+      { name: 'instr timing', filter: 'instr_timing' },
     ],
   },
   {
@@ -48,16 +48,18 @@ const TEST_SUITES = [
     preferredEmu: 'gambatte',
     tests: null,
     categories: [
-      { name: 'timer', filter: 'timer/' },
-      { name: 'ppu', filter: 'ppu/' },
-      { name: 'oam', filter: 'oam_dma' },
-      { name: 'bits', filter: 'bits/' },
+      { name: 'timer', filter: 'timer' },
+      { name: 'ppu', filter: 'ppu' },
+      { name: 'oam dma', filter: 'oam_dma' },
+      { name: 'bits', filter: 'bits' },
       { name: 'instr', filter: 'instr/' },
-      { name: 'interrupts', filter: 'interrupts/' },
-      { name: 'serial', filter: 'serial/' },
-      { name: 'halt', filter: 'halt_' },
+      { name: 'interrupts', filter: 'interrupts' },
+      { name: 'serial', filter: 'serial' },
+      { name: 'halt', filter: 'halt' },
       { name: 'boot', filter: 'boot_' },
-      { name: 'timing', filter: '_timing' },
+      { name: 'timing', filter: 'timing' },
+      { name: 'call/ret', filter: 'call' },
+      { name: 'ei/di', filter: 'ei_' },
     ],
   },
   {
@@ -340,7 +342,10 @@ export class TestPicker extends LitElement {
     if (!suite.tests) return [];
     let tests = suite.tests;
     if (this._category) {
-      tests = tests.filter(t => t.name.startsWith(this._category));
+      tests = tests.filter(t =>
+        t.name.includes(this._category) ||
+        (t.rom && t.rom.includes(this._category))
+      );
     }
     if (this._search) {
       const q = this._search.toLowerCase();
