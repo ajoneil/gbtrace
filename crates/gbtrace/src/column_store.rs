@@ -1431,6 +1431,9 @@ mod lazy {
                 }
             }
 
+            // Propagate explicit frame boundaries
+            store.explicit_boundaries = self.explicit_boundaries.clone();
+
             Ok(store)
         }
     }
