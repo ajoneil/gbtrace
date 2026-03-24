@@ -78,10 +78,9 @@ impl Frame {
 /// Returns one `Frame` per detected frame boundary. Uses `ly` to track
 /// scanlines and resets the x cursor when `ly` changes.
 pub fn reconstruct_frames(store: &dyn TraceStore) -> Vec<Frame> {
-    let pix_col = match store.field_col("pix") {
-        Some(c) => c,
-        None => return Vec::new(),
-    };
+    if store.field_col("pix").is_none() {
+        return Vec::new();
+    }
 
     let boundaries = store.frame_boundaries();
     if boundaries.is_empty() {
@@ -99,35 +98,8 @@ pub fn reconstruct_frames(store: &dyn TraceStore) -> Vec<Frame> {
             total
         };
 
-        let mut frame = Frame::new(fi, start);
-        frame.end_entry = end;
-
-        let mut pixel_idx: usize = 0;
-
-        for i in start..end {
-            let pix_str = store.get_str(pix_col, i);
-            if pix_str.is_empty() { continue; }
-
-            // Full-frame pixel dump (160*144 = 23040 chars)
-            if pix_str.len() == LCD_WIDTH * LCD_HEIGHT {
-                for (j, ch) in pix_str.bytes().enumerate() {
-                    if ch >= b'0' && ch <= b'3' {
-                        frame.pixels[j] = ch - b'0';
-                    }
-                }
-                pixel_idx = LCD_WIDTH * LCD_HEIGHT;
-                continue;
-            }
-
-            // Per-pixel output: each char is the next pixel in LCD order
-            for ch in pix_str.bytes() {
-                if ch >= b'0' && ch <= b'3' && pixel_idx < LCD_WIDTH * LCD_HEIGHT {
-                    frame.pixels[pixel_idx] = ch - b'0';
-                    pixel_idx += 1;
-                }
-            }
-        }
-
+        let mut frame = reconstruct_partial_frame(store, start, end);
+        frame.index = fi;
         frames.push(frame);
     }
 
