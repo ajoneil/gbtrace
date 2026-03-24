@@ -66,6 +66,11 @@ void gbtrace_writer_set_bool(GbtraceWriter *w, size_t field, bool value);
 void gbtrace_writer_set_str(GbtraceWriter *w, size_t field,
                              const char *ptr, size_t len);
 
+/* Mark a frame boundary at the current entry position.
+ * Call at vblank. Writes boundary to metadata and flushes row group.
+ * Returns 0 on success, -1 on error. */
+int gbtrace_writer_mark_frame(GbtraceWriter *w);
+
 /* Finish the current entry (after setting all fields).
  * Returns 0 on success, -1 on error. */
 int gbtrace_writer_finish_entry(GbtraceWriter *w);

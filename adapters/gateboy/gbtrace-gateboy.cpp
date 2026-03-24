@@ -870,6 +870,11 @@ int main(int argc, char *argv[]) {
         if ((phase_count % PHASES_PER_FRAME) == 0) {
             frames++;
 
+            // Signal frame boundary to parquet writer
+            if (g_parquet) {
+                gbtrace_writer_mark_frame(g_parquet);
+            }
+
             // Check reference match at frame boundary (always immediate)
             if (has_reference && check_frame_matches_reference()) {
                 std::fprintf(stderr, "Reference match at frame %d\n", frames);

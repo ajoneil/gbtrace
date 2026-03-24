@@ -25,6 +25,7 @@ use crate::header::TraceHeader;
 use crate::profile::{field_type, FieldType};
 
 const HEADER_METADATA_KEY: &str = "gbtrace_header";
+const FRAME_BOUNDARIES_KEY: &str = "gbtrace_frame_boundaries";
 const BATCH_SIZE: usize = 65536;
 
 // ---------------------------------------------------------------------------
@@ -89,6 +90,10 @@ pub struct ParquetTraceWriter {
     pix_col: Option<usize>,
     /// Previous value of `ly`, for detecting frame boundaries.
     prev_ly: Option<u8>,
+    /// Explicit frame boundary indices signalled by the adapter.
+    frame_boundaries: Vec<u64>,
+    /// Total entries written so far.
+    entries_written: u64,
 }
 
 impl ParquetTraceWriter {
@@ -144,6 +149,8 @@ impl ParquetTraceWriter {
             ly_col,
             pix_col,
             prev_ly: None,
+            frame_boundaries: Vec::new(),
+            entries_written: 0,
         })
     }
 
@@ -205,6 +212,7 @@ impl ParquetTraceWriter {
             self.flush_batch()?;
         }
 
+        self.entries_written += 1;
         Ok(())
     }
 
@@ -275,6 +283,17 @@ impl ParquetTraceWriter {
         if self.columns[0].len() >= BATCH_SIZE {
             self.flush_batch()?;
         }
+        self.entries_written += 1;
+        Ok(())
+    }
+
+    /// Mark a frame boundary at the current entry position.
+    /// Call this at vblank — the current entry index becomes a frame start.
+    /// Also flushes the current batch to start a new row group.
+    pub fn mark_frame(&mut self) -> Result<()> {
+        self.frame_boundaries.push(self.entries_written);
+        self.flush_batch()?;
+        self.writer.flush()?;
         Ok(())
     }
 
@@ -305,6 +324,21 @@ impl ParquetTraceWriter {
     /// Flush remaining entries and finalize the file.
     pub fn finish(mut self) -> Result<()> {
         self.flush_batch()?;
+
+        // Store explicit frame boundaries in file metadata if any were marked
+        if !self.frame_boundaries.is_empty() {
+            let boundaries_str = self.frame_boundaries.iter()
+                .map(|b| b.to_string())
+                .collect::<Vec<_>>()
+                .join(",");
+            self.writer.append_key_value_metadata(
+                parquet::format::KeyValue::new(
+                    FRAME_BOUNDARIES_KEY.to_string(),
+                    Some(boundaries_str),
+                )
+            );
+        }
+
         self.writer.close()?;
         Ok(())
     }

@@ -78,6 +78,9 @@ pub struct ColumnStore {
     columns: Vec<ColumnData>,
     field_index: HashMap<String, usize>,
     len: usize,
+    /// Explicit frame boundary entry indices (from parquet metadata).
+    /// If set, these take priority over LY/pix-based detection.
+    pub explicit_boundaries: Option<Vec<u32>>,
 }
 
 impl ColumnStore {
@@ -99,6 +102,7 @@ impl ColumnStore {
             columns,
             field_index,
             len: 0,
+            explicit_boundaries: None,
         }
     }
 
@@ -464,6 +468,13 @@ impl ColumnStore {
     ///    each one marks a frame boundary.
     /// 2. Otherwise, scan `ly` for vblank→active transitions.
     pub fn frame_boundaries(&self) -> Vec<u32> {
+        // Strategy 0: explicit boundaries from parquet metadata
+        if let Some(ref boundaries) = self.explicit_boundaries {
+            if !boundaries.is_empty() {
+                return boundaries.clone();
+            }
+        }
+
         // Strategy 1: full-frame pix dumps as boundaries
         if let Some(pix_col) = self.field_col("pix") {
             let expected = 160 * 144;
@@ -710,6 +721,14 @@ fn load_from_parquet(path: &std::path::Path) -> Result<ColumnStore> {
     // Access the underlying batch reader directly by re-opening
     let file = std::fs::File::open(path)?;
     let builder = parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder::try_new(file)?;
+
+    // Extract explicit frame boundaries from parquet file metadata
+    let metadata = builder.metadata();
+    store.explicit_boundaries = metadata.file_metadata().key_value_metadata()
+        .and_then(|kvs| kvs.iter().find(|kv| kv.key == "gbtrace_frame_boundaries"))
+        .and_then(|kv| kv.value.as_ref())
+        .map(|s| s.split(',').filter_map(|v| v.parse::<u32>().ok()).collect::<Vec<_>>());
+
     let batch_reader = builder.with_batch_size(65536).build()?;
 
     for batch_result in batch_reader {
@@ -805,6 +824,14 @@ pub fn load_column_store_from_bytes(data: &[u8]) -> Result<ColumnStore> {
         let bytes = bytes::Bytes::from(data.to_vec());
         let builder =
             parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder::try_new(bytes)?;
+
+        // Extract explicit frame boundaries
+        let metadata = builder.metadata();
+        store.explicit_boundaries = metadata.file_metadata().key_value_metadata()
+            .and_then(|kvs| kvs.iter().find(|kv| kv.key == "gbtrace_frame_boundaries"))
+            .and_then(|kv| kv.value.as_ref())
+            .map(|s| s.split(',').filter_map(|v| v.parse::<u32>().ok()).collect::<Vec<_>>());
+
         let batch_reader = builder.with_batch_size(65536).build()?;
 
         for batch_result in batch_reader {
@@ -1003,6 +1030,8 @@ mod lazy {
         index: RowGroupIndex,
         data: bytes::Bytes,
         cache: RefCell<LruCache>,
+        /// Explicit frame boundaries from parquet metadata.
+        explicit_boundaries: Option<Vec<u32>>,
     }
 
     impl LazyColumnStore {
@@ -1030,6 +1059,12 @@ mod lazy {
                 cumulative.push(total);
             }
 
+            // Extract explicit frame boundaries from parquet file metadata
+            let explicit_boundaries = metadata.file_metadata().key_value_metadata()
+                .and_then(|kvs| kvs.iter().find(|kv| kv.key == "gbtrace_frame_boundaries"))
+                .and_then(|kv| kv.value.as_ref())
+                .map(|s| s.split(',').filter_map(|v| v.parse::<u32>().ok()).collect::<Vec<_>>());
+
             let field_types: Vec<FieldType> = header.fields.iter().map(|n| field_type(n)).collect();
             let field_index: HashMap<String, usize> = header
                 .fields
@@ -1045,6 +1080,7 @@ mod lazy {
                 index: RowGroupIndex { cumulative },
                 data,
                 cache: RefCell::new(LruCache::new()),
+                explicit_boundaries,
             })
         }
 
@@ -1072,9 +1108,21 @@ mod lazy {
         /// Row groups are aligned with frames by the parquet writer (flushed
         /// at ly wraps and full-frame pix dumps).
         pub fn frame_boundaries(&self) -> Vec<u32> {
-            (0..self.index.num_row_groups())
-                .map(|rg| self.index.row_group_start(rg) as u32)
-                .collect()
+            // Use explicit boundaries from parquet metadata if available
+            if let Some(ref boundaries) = self.explicit_boundaries {
+                if !boundaries.is_empty() {
+                    return boundaries.clone();
+                }
+            }
+            // Fallback: decode and scan LY/pix data
+            match self.to_eager() {
+                Ok(eager) => eager.frame_boundaries(),
+                Err(_) => {
+                    (0..self.index.num_row_groups())
+                        .map(|rg| self.index.row_group_start(rg) as u32)
+                        .collect()
+                }
+            }
         }
 
         /// Ensure a row group is in the cache, decoding if necessary.
