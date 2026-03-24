@@ -98,31 +98,30 @@ jobs:
 
           MAX_JOBS=$(nproc)
 
+          # Run a command in the background, limiting parallelism
+          run_parallel() {
+            while [ "$(jobs -r | wc -l)" -ge "$MAX_JOBS" ]; do wait -n 2>/dev/null || true; done
+            "$@" || true &
+          }
+
           case "$SUITE" in
             gbmicrotest)
               PROFILE="test-suites/gbmicrotest/gbmicrotest.toml"
-              SCRIPT="scripts/trace-gbmicrotest.sh"
-              find "$ROM_DIR" -name '*.gb' -print0 | sort -z | while IFS= read -r -d '' rom; do
-                bash "$SCRIPT" "$BIN" "$rom" "$PROFILE" "$TRACE_DIR" &
-                # Limit parallelism
-                while [ "$(jobs -r | wc -l)" -ge "$MAX_JOBS" ]; do wait -n; done
-              done
+              while IFS= read -r -d '' rom; do
+                run_parallel bash scripts/trace-gbmicrotest.sh "$BIN" "$rom" "$PROFILE" "$TRACE_DIR"
+              done < <(find "$ROM_DIR" -name '*.gb' -print0 | sort -z)
               ;;
             blargg)
               PROFILE="test-suites/blargg/blargg.toml"
-              SCRIPT="scripts/trace-blargg.sh"
-              find "$ROM_DIR" -name '*.gb' -print0 | sort -z | while IFS= read -r -d '' rom; do
-                bash "$SCRIPT" "$BIN" "$rom" "$PROFILE" "$TRACE_DIR" "$ROM_DIR" &
-                while [ "$(jobs -r | wc -l)" -ge "$MAX_JOBS" ]; do wait -n; done
-              done
+              while IFS= read -r -d '' rom; do
+                run_parallel bash scripts/trace-blargg.sh "$BIN" "$rom" "$PROFILE" "$TRACE_DIR" "$ROM_DIR"
+              done < <(find "$ROM_DIR" -name '*.gb' -print0 | sort -z)
               ;;
             mooneye)
               PROFILE="test-suites/mooneye/mooneye.toml"
-              SCRIPT="scripts/trace-mooneye.sh"
-              find "$ROM_DIR" -name '*.gb' -print0 | sort -z | while IFS= read -r -d '' rom; do
-                bash "$SCRIPT" "$BIN" "$rom" "$PROFILE" "$TRACE_DIR" "$ROM_DIR" &
-                while [ "$(jobs -r | wc -l)" -ge "$MAX_JOBS" ]; do wait -n; done
-              done
+              while IFS= read -r -d '' rom; do
+                run_parallel bash scripts/trace-mooneye.sh "$BIN" "$rom" "$PROFILE" "$TRACE_DIR" "$ROM_DIR"
+              done < <(find "$ROM_DIR" -name '*.gb' -print0 | sort -z)
               ;;
             dmg-acid2)
               PROFILE="test-suites/dmg-acid2/dmg-acid2.toml"
@@ -131,7 +130,9 @@ jobs:
                 "test-suites/dmg-acid2/dmg-acid2.gb" "$PROFILE" "$REF" "$TRACE_DIR" 30 || true
               ;;
           esac
-          wait
+
+          # Wait for all background jobs, don't fail if some tests failed
+          wait 2>/dev/null || true
 
           python3 scripts/manifest.py "$TRACE_DIR" "$ROM_DIR"
         env:
