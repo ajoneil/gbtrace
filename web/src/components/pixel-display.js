@@ -115,7 +115,8 @@ export class PixelDisplay extends LitElement {
     if (changed.has('viewStart') || changed.has('frameBoundaries') ||
         changed.has('store') || changed.has('storeB')) {
       this._syncFrameIndex();
-      this._draw();
+      // Wait for DOM update (template may switch between single/compare mode)
+      this.updateComplete.then(() => this._draw());
     }
     if (changed.has('currentIndex') && this.tcyclePixels && this.currentIndex != null) {
       this._updateForCurrentIndex();

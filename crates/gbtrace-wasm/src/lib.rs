@@ -139,8 +139,11 @@ impl TraceStore {
     /// Number of reconstructed pixel frames.
     #[wasm_bindgen(js_name = frameCount)]
     pub fn frame_count(&self) -> usize {
-        self.ensure_frames();
-        self.frames_cache.borrow().as_ref().map(|f| f.len()).unwrap_or(0)
+        let store: &dyn gbtrace::column_store::TraceStore = match &self.store {
+            StoreKind::Lazy(s) => s,
+            StoreKind::Eager(s) => s,
+        };
+        store.frame_boundaries().len()
     }
 
     /// Render a complete frame as RGBA pixel data (160×144×4 = 92160 bytes).
