@@ -1,5 +1,5 @@
 import { LitElement, html, css } from 'lit';
-import { prepareForDiffSync } from '../lib/wasm-bridge.js';
+// prepareForDiffSync removed — downsampling is now a transparent view on the store
 import './file-loader.js';
 import './test-picker.js';
 import './trace-selector.js';
@@ -564,14 +564,17 @@ export class AppShell extends LitElement {
       this._syncMode = 'ly=0';
     }
 
-    try {
-      const [prepA, prepB] = prepareForDiffSync(this._store, store, this._syncMode);
-      this._store = prepA;
-      this._header = prepA.header();
-      store = prepB;
-      this._downsampled = (trigA !== trigB);
-    } catch (err) {
-      console.error('Failed to prepare traces for diff:', err);
+    // If triggers differ (e.g. tcycle vs instruction), downsample the
+    // higher-resolution store to instruction level for comparison.
+    // The stores are NOT replaced — downsampling is a transparent view.
+    if (trigA !== trigB) {
+      if (trigA === 'tcycle') {
+        this._store.enableDownsampling();
+      }
+      if (trigB === 'tcycle') {
+        store.enableDownsampling();
+      }
+      this._downsampled = true;
     }
 
     this._storeB = store;

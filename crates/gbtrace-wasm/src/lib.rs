@@ -39,6 +39,9 @@ pub struct TraceStore {
     original_bytes: Option<Vec<u8>>,
     /// Cached reconstructed frames (lazily populated).
     frames_cache: RefCell<Option<Vec<Frame>>>,
+    /// Optional downsampling index: maps downsampled row → original row.
+    /// When set, all accessors use this mapping transparently.
+    downsample_map: Option<Vec<usize>>,
 }
 
 #[wasm_bindgen]
@@ -59,7 +62,46 @@ impl TraceStore {
                     .map_err(|e| JsError::new(&format!("{e}")))?
             )
         };
-        Ok(TraceStore { store, rom: None, original_bytes: Some(data.to_vec()), frames_cache: RefCell::new(None) })
+        Ok(TraceStore { store, rom: None, original_bytes: Some(data.to_vec()), frames_cache: RefCell::new(None), downsample_map: None })
+    }
+
+    /// Enable instruction-level downsampling. Picks one entry per PC change.
+    /// Call this to compare a T-cycle trace against an instruction-level one.
+    /// The downsampled view is transparent to all other methods.
+    #[wasm_bindgen(js_name = enableDownsampling)]
+    pub fn enable_downsampling(&mut self) {
+        let store = self.as_trait();
+        let pc_col = store.field_col("pc");
+        let mut map = Vec::new();
+        if let Some(pc) = pc_col {
+            let count = store.entry_count();
+            if count > 0 {
+                map.push(0);
+                let mut prev_pc = store.get_numeric(pc, 0);
+                for i in 1..count {
+                    let cur_pc = store.get_numeric(pc, i);
+                    if cur_pc != prev_pc {
+                        map.push(i);
+                        prev_pc = cur_pc;
+                    }
+                }
+            }
+        }
+        self.downsample_map = if map.is_empty() { None } else { Some(map) };
+        *self.frames_cache.borrow_mut() = None; // invalidate cache
+    }
+
+    /// Disable downsampling, restoring the full-resolution view.
+    #[wasm_bindgen(js_name = disableDownsampling)]
+    pub fn disable_downsampling(&mut self) {
+        self.downsample_map = None;
+        *self.frames_cache.borrow_mut() = None;
+    }
+
+    /// Whether this store is currently downsampled.
+    #[wasm_bindgen(js_name = isDownsampled)]
+    pub fn is_downsampled(&self) -> bool {
+        self.downsample_map.is_some()
     }
 
     /// Return the trace header as a JS object.
@@ -74,10 +116,7 @@ impl TraceStore {
     /// Number of entries in the trace.
     #[wasm_bindgen(js_name = entryCount)]
     pub fn entry_count(&self) -> usize {
-        match &self.store {
-            StoreKind::Lazy(s) => s.entry_count(),
-            StoreKind::Eager(s) => s.entry_count(),
-        }
+        self.effective_entry_count()
     }
 
     /// Get frame boundary entry indices as a Uint32Array.
@@ -86,23 +125,21 @@ impl TraceStore {
     /// metadata when available, otherwise falls back to reconstruct_frames.
     #[wasm_bindgen(js_name = frameBoundaries)]
     pub fn frame_boundaries(&self) -> js_sys::Uint32Array {
-        // Check for explicit boundaries from the store first
-        let explicit = match &self.store {
-            StoreKind::Lazy(s) => s.frame_boundaries(),
-            StoreKind::Eager(s) => s.frame_boundaries(),
-        };
-        if !explicit.is_empty() {
-            let arr = js_sys::Uint32Array::new_with_length(explicit.len() as u32);
-            arr.copy_from(&explicit);
-            return arr;
-        }
+        let orig_boundaries = self.as_trait().frame_boundaries();
 
-        // Fallback to reconstruct_frames
-        self.ensure_frames();
-        let cache = self.frames_cache.borrow();
-        let boundaries: Vec<u32> = cache.as_ref()
-            .map(|frames| frames.iter().map(|f| f.start_entry as u32).collect())
-            .unwrap_or_default();
+        let boundaries = if let Some(ref map) = self.downsample_map {
+            // Map original boundaries to downsampled indices
+            orig_boundaries.iter().filter_map(|&orig_entry| {
+                match map.binary_search(&(orig_entry as usize)) {
+                    Ok(i) => Some(i as u32),
+                    Err(i) if i < map.len() => Some(i as u32),
+                    _ => None,
+                }
+            }).collect()
+        } else {
+            orig_boundaries
+        };
+
         let arr = js_sys::Uint32Array::new_with_length(boundaries.len() as u32);
         arr.copy_from(&boundaries);
         arr
@@ -482,6 +519,30 @@ impl TraceStore {
 
 // Private helpers
 impl TraceStore {
+    /// Get a reference to the underlying store as a trait object.
+    fn as_trait(&self) -> &dyn gbtrace::column_store::TraceStore {
+        match &self.store {
+            StoreKind::Lazy(s) => s,
+            StoreKind::Eager(s) => s,
+        }
+    }
+
+    /// Map a row index through the downsample map (if any).
+    fn map_row(&self, row: usize) -> usize {
+        match &self.downsample_map {
+            Some(map) => map.get(row).copied().unwrap_or(row),
+            None => row,
+        }
+    }
+
+    /// Entry count respecting downsampling.
+    fn effective_entry_count(&self) -> usize {
+        match &self.downsample_map {
+            Some(map) => map.len(),
+            None => self.as_trait().entry_count(),
+        }
+    }
+
     /// Lazily reconstruct frames and cache the result.
     ///
     /// If the current store yields no frames (e.g. after T-cycle collapse
@@ -584,20 +645,17 @@ impl TraceStore {
     }
 
     fn row_to_map(&self, index: usize) -> BTreeMap<String, JsField> {
-        let store: &dyn gbtrace::column_store::TraceStore = match &self.store {
-            StoreKind::Lazy(s) => s,
-            StoreKind::Eager(s) => s,
-        };
+        let store = self.as_trait();
+        let orig_row = self.map_row(index);
         let fields = store.header().fields.clone();
         let mut map = BTreeMap::new();
 
         for (col_idx, field_name) in fields.iter().enumerate() {
             let ft = gbtrace::profile::field_type(field_name);
             let val = match ft {
-                FieldType::Bool => JsField::Bool(store.get_bool(col_idx, index)),
+                FieldType::Bool => JsField::Bool(store.get_bool(col_idx, orig_row)),
                 FieldType::Str => {
-                    // For pix: expose single-char pixel values as numbers
-                    let s = store.get_str(col_idx, index);
+                    let s = store.get_str(col_idx, orig_row);
                     if s.len() == 1 {
                         let ch = s.as_bytes()[0];
                         if ch >= b'0' && ch <= b'3' {
@@ -609,7 +667,7 @@ impl TraceStore {
                         continue; // skip multi-char strings (full-frame dumps)
                     }
                 }
-                _ => JsField::Num(store.get_numeric(col_idx, index) as f64),
+                _ => JsField::Num(store.get_numeric(col_idx, orig_row) as f64),
             };
             map.insert(field_name.clone(), val);
         }
@@ -657,7 +715,7 @@ pub fn prepare_for_diff(a: TraceStore, b: TraceStore, sync: Option<String>) -> R
         .map_err(|e| JsError::new(&format!("{e}")))?;
 
     let arr = js_sys::Array::new();
-    arr.push(&JsValue::from(TraceStore { store: StoreKind::Eager(new_a), rom: rom_a, original_bytes: bytes_a, frames_cache: RefCell::new(None) }));
-    arr.push(&JsValue::from(TraceStore { store: StoreKind::Eager(new_b), rom: rom_b, original_bytes: bytes_b, frames_cache: RefCell::new(None) }));
+    arr.push(&JsValue::from(TraceStore { store: StoreKind::Eager(new_a), rom: rom_a, original_bytes: bytes_a, frames_cache: RefCell::new(None), downsample_map: None }));
+    arr.push(&JsValue::from(TraceStore { store: StoreKind::Eager(new_b), rom: rom_b, original_bytes: bytes_b, frames_cache: RefCell::new(None), downsample_map: None }));
     Ok(arr)
 }
