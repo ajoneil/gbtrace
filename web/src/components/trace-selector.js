@@ -299,12 +299,6 @@ export class TraceSelector extends LitElement {
           <div class="fields-row">
             <span class="ft-label">columns</span>
             ${this._renderFieldGroups()}
-            ${this.hasPixels ? html`
-              <span class="ft-sep"></span>
-              <span class="ft-group ${this.pixelsActive ? 'on' : ''}"
-                @click=${this._togglePixels}
-              >PPU</span>
-            ` : ''}
             ${this.suite?.profile || this.testRom ? html`
               <span class="downloads">
                 ${this.suite?.profile ? html`<a href="${this.suite.profile}" download>profile</a>` : ''}

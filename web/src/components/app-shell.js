@@ -306,6 +306,14 @@ export class AppShell extends LitElement {
           ></trace-chart>
         ` : ''}
 
+        ${(this._store?.hasPixels()) ? html`
+          <div style="display:flex;align-items:center;gap:6px;font-size:0.75rem;font-family:var(--mono);">
+            <span style="cursor:pointer;padding:2px 8px;border-radius:4px;border:1px solid var(--border);${this._chartField === '__pixels__' ? 'background:var(--accent-subtle);color:var(--accent);border-color:var(--accent);' : 'color:var(--text-muted);'}"
+              @click=${this._togglePpu}
+            >PPU</span>
+          </div>
+        ` : ''}
+
         <trace-table
           .store=${this._store}
           .viewStart=${this._viewStart}
@@ -318,6 +326,14 @@ export class AppShell extends LitElement {
         ></trace-table>
       </div>
     `;
+  }
+
+  _togglePpu() {
+    if (this._chartField === '__pixels__') {
+      this._chartField = null;
+    } else {
+      this._chartField = '__pixels__';
+    }
   }
 
   _renderCompare() {
