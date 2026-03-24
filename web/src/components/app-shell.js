@@ -335,6 +335,11 @@ export class AppShell extends LitElement {
     const e = this._effectiveIndex != null ? this._store?.entry(this._effectiveIndex) : null;
     const expanded = this._ppuExpanded;
 
+    const mode = e?.stat !== undefined ? (e.stat & 3) : null;
+    const modeLabels = ['HBlank', 'VBlank', 'OAM', 'Draw'];
+    const modeColors = ['#4caf50', '#f44336', '#42a5f5', '#ffb74d'];
+    const modeBgs = ['#1a3a1a', '#3a1a1a', '#1a1a3a', '#3a3a1a'];
+
     return html`
       <div style="border:1px solid var(--border);border-radius:8px;background:var(--bg-surface);overflow:hidden;">
         <div style="display:flex;align-items:center;gap:8px;padding:6px 10px;cursor:pointer;font-size:0.72rem;font-family:var(--mono);"
@@ -355,6 +360,9 @@ export class AppShell extends LitElement {
               ${e.obp1 !== undefined ? html`<span>obp1:<span style="color:var(--text);">${this._hex(e.obp1)}</span></span>` : ''}
               ${e.frame_num !== undefined ? html`<span>frame:<span style="color:var(--text);">${e.frame_num}</span></span>` : ''}
             </span>
+          ` : ''}
+          ${mode !== null ? html`
+            <span style="margin-left:auto;padding:1px 8px;border-radius:4px;font-weight:600;font-size:0.65rem;background:${modeBgs[mode]};color:${modeColors[mode]};">${modeLabels[mode]}</span>
           ` : ''}
         </div>
         ${expanded ? html`
