@@ -33,7 +33,7 @@ const TEST_SUITES = [
     base: 'tests/blargg',
     profile: 'tests/blargg/profile.toml',
     manifest: 'tests/blargg/manifest.json',
-    preferredEmu: 'gambatte',
+    preferredEmu: 'gateboy',
     tests: null,
     categories: [
       { name: 'cpu instrs', filter: 'cpu_instrs/' },
@@ -45,7 +45,7 @@ const TEST_SUITES = [
     base: 'tests/mooneye',
     profile: 'tests/mooneye/profile.toml',
     manifest: 'tests/mooneye/manifest.json',
-    preferredEmu: 'gambatte',
+    preferredEmu: 'gateboy',
     tests: null,
     categories: [
       { name: 'timer', filter: 'timer' },
