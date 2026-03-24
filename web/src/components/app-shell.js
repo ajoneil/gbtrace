@@ -104,6 +104,7 @@ export class AppShell extends LitElement {
     _highlightIndices: { state: true },
     _chartField: { state: true },
     _hoverIndex: { state: true },
+    _currentIndex: { state: true },
     _diffStats: { state: true },
     _hiddenFields: { state: true },
     _downsampled: { state: true },
@@ -129,6 +130,7 @@ export class AppShell extends LitElement {
     this._chartField = null;
     this._hiddenFields = new Set();
     this._hoverIndex = null;
+    this._currentIndex = null;
     this._diffStats = null;
     this._downsampled = false;
     this._viewStart = 0;
@@ -141,6 +143,11 @@ export class AppShell extends LitElement {
   /** All fields from the trace header. */
   get _allFields() {
     return this._header?.fields || [];
+  }
+
+  /** The effective cursor index: hover takes priority, falls back to current. */
+  get _effectiveIndex() {
+    return this._hoverIndex ?? this._currentIndex ?? null;
   }
 
   /** True if the trace includes PPU internal fields. */
@@ -166,6 +173,7 @@ export class AppShell extends LitElement {
         @jump-to-index=${this._onJumpToIndex}
         @field-selected=${this._onFieldSelected}
         @hover-index=${this._onHoverIndex}
+        @current-index=${this._onCurrentIndex}
         @hidden-fields-changed=${this._onHiddenFieldsChanged}
       >
         <header>
@@ -242,17 +250,17 @@ export class AppShell extends LitElement {
               .frameBoundaries=${this._frameBoundaries}
               .viewStart=${this._viewStart}
               .tcyclePixels=${this._store?.isTcyclePixels() || false}
-              .hoverIndex=${this._hoverIndex}
+              .hoverIndex=${this._effectiveIndex}
             ></pixel-display>
             ${this._hasPpuInternals ? html`
               <div style="display:flex;flex-direction:column;gap:8px;min-width:200px;">
                 <ppu-sprite-table
                   .store=${this._store}
-                  .cursorIndex=${this._hoverIndex >= 0 ? this._hoverIndex : this._viewStart}
+                  .cursorIndex=${this._effectiveIndex ?? this._viewStart}
                 ></ppu-sprite-table>
                 <ppu-fifo-visualizer
                   .store=${this._store}
-                  .cursorIndex=${this._hoverIndex >= 0 ? this._hoverIndex : this._viewStart}
+                  .cursorIndex=${this._effectiveIndex ?? this._viewStart}
                 ></ppu-fifo-visualizer>
               </div>
             ` : ''}
@@ -262,7 +270,7 @@ export class AppShell extends LitElement {
             .store=${this._store}
             .field=${this._chartField}
             .highlightIndices=${this._highlightIndices}
-            .cursorIndex=${this._hoverIndex}
+            .cursorIndex=${this._effectiveIndex}
             .viewStart=${this._viewStart}
             .viewEnd=${this._viewEnd}
           ></trace-chart>
@@ -276,6 +284,7 @@ export class AppShell extends LitElement {
           .highlightIndices=${this._highlightIndices}
           .hiddenFields=${this._hiddenFields}
           .tcyclePixels=${this._store?.isTcyclePixels() || false}
+          .currentIndex=${this._currentIndex}
         ></trace-table>
       </div>
     `;
@@ -346,7 +355,7 @@ export class AppShell extends LitElement {
             .nameB=${this._nameB}
             .field=${this._chartField}
             .highlightIndices=${this._highlightIndices}
-            .cursorIndex=${this._hoverIndex}
+            .cursorIndex=${this._effectiveIndex}
             .viewStart=${this._viewStart}
             .viewEnd=${this._viewEnd}
           ></trace-chart>
@@ -408,6 +417,7 @@ export class AppShell extends LitElement {
     this._highlightIndices = null;
     this._chartField = null;
     this._hoverIndex = null;
+    this._currentIndex = null;
     this._diffStats = null;
     this._downsampled = false;
     this._frameBoundaries = Array.from(store.frameBoundaries());
@@ -553,6 +563,7 @@ export class AppShell extends LitElement {
   }
 
   _onJumpToIndex(e) {
+    this._currentIndex = e.detail.index;
     const table = this.renderRoot?.querySelector('trace-table') ||
                   this.renderRoot?.querySelector('trace-diff-table');
     if (table) table.scrollToIndex(e.detail.index);
@@ -571,6 +582,10 @@ export class AppShell extends LitElement {
 
   _onHoverIndex(e) {
     this._hoverIndex = e.detail.index;
+  }
+
+  _onCurrentIndex(e) {
+    this._currentIndex = e.detail.index;
   }
 
   _onHiddenFieldsChanged(e) {
