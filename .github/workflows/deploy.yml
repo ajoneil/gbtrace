@@ -97,7 +97,7 @@ jobs:
 
           # Copy profile TOMLs
           for suite in gbmicrotest blargg mooneye dmg-acid2; do
-            toml="test-suites/$suite/$suite.toml"
+            toml="test-suites/$suite/profile.toml"
             if [ -f "$toml" ] && [ -d "build/site/tests/$suite" ]; then
               cp "$toml" "build/site/tests/$suite/"
             fi
