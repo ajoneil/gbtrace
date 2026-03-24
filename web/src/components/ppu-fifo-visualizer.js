@@ -96,21 +96,21 @@ export class PpuFifoVisualizer extends LitElement {
     }
     .merge-row {
       display: flex;
-      gap: 0;
+      gap: 1px;
     }
     .merge-cell {
-      width: ${PIXEL_SIZE}px;
-      height: 10px;
+      width: ${PIXEL_SIZE - 1}px;
+      height: 14px;
       display: flex;
       align-items: center;
       justify-content: center;
-      font-size: 0.45rem;
+      font-size: 0.5rem;
       font-weight: 600;
-      border: 0.5px solid rgba(128,128,128,0.2);
+      border-radius: 2px;
     }
-    .merge-bg { background: rgba(52,104,86,0.3); color: #88c070; }
+    .merge-bg { background: rgba(52,104,86,0.25); color: #88c070; }
     .merge-obj { background: rgba(255,183,77,0.3); color: #ffb74d; }
-    .merge-none { background: transparent; color: var(--text-muted); opacity: 0.3; }
+    .merge-none { color: var(--text-muted); opacity: 0.2; }
     .output-section {
       display: flex;
       flex-direction: column;
