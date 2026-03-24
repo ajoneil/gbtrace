@@ -35,7 +35,7 @@ TMP="/tmp/gbtrace_mooneye_${NAME}_${ADAPTER}_$$"
 stderr_file="${TMP}.stderr"
 tmp_parquet="${TMP}.parquet"
 
-cleanup() { rm -f "$stderr_file" "${TMP}_trimmed.parquet" "${ROM%.gb}.sav"; }
+cleanup() { rm -f "$stderr_file" "${ROM%.gb}.sav"; }
 trap cleanup EXIT
 
 # --- Capture ---
@@ -72,13 +72,6 @@ status=$("$CLI" query "$tmp_parquet" --last 1 2>&1 | \
     grep -qP 'b=03\b.*c=05\b.*d=08\b.*e=0d\b.*h=15\b.*l=22\b' \
     && echo "pass" || echo "fail")
 
-# --- Trim to reference if available ---
-if [[ "$status" == "pass" ]] && [[ -f "$PIX_REF" ]]; then
-    if "$CLI" trim "$tmp_parquet" --reference "$PIX_REF" \
-        --output "${TMP}_trimmed.parquet" >/dev/null 2>&1; then
-        mv "${TMP}_trimmed.parquet" "$tmp_parquet"
-    fi
-fi
 
 # --- Output ---
 mkdir -p "$TRACE_SUBDIR"
