@@ -252,8 +252,16 @@ export class PixelDisplay extends LitElement {
       const rgba = store.renderFrame(frameIndex);
       if (!rgba) { ctx.clearRect(0, 0, LCD_WIDTH, LCD_HEIGHT); return null; }
       const arr = new Uint8ClampedArray(rgba.buffer || rgba);
-      const imgData = new ImageData(arr, LCD_WIDTH, LCD_HEIGHT);
-      ctx.putImageData(imgData, 0, 0);
+      // Draw checkerboard for unrendered areas, then composite frame over it
+      this._drawCheckerboard(ctx);
+      if (!this._tmpCanvas) {
+        this._tmpCanvas = document.createElement('canvas');
+        this._tmpCanvas.width = LCD_WIDTH;
+        this._tmpCanvas.height = LCD_HEIGHT;
+      }
+      const tmp = this._tmpCanvas.getContext('2d');
+      tmp.putImageData(new ImageData(arr, LCD_WIDTH, LCD_HEIGHT), 0, 0);
+      ctx.drawImage(this._tmpCanvas, 0, 0);
       return arr;
     } catch (err) {
       console.error('Failed to render frame:', err);

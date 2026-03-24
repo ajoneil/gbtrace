@@ -292,21 +292,19 @@ export class TraceSelector extends LitElement {
           })}
         ` : ''}
 
-        ${this.hasPixels ? html`
-          <span class="sep">|</span>
-          <button class="trace-btn ${this.pixelsActive ? 'active' : ''}"
-            @click=${this._togglePixels}
-          >PPU</button>
-        ` : ''}
-
         ${this._loading ? html`<span class="status loading">loading ${this._loading}...</span>` : ''}
         ${this._error ? html`<span class="status error">${this._error}</span>` : ''}
-
 
         ${this.allFields.length ? html`
           <div class="fields-row">
             <span class="ft-label">columns</span>
             ${this._renderFieldGroups()}
+            ${this.hasPixels ? html`
+              <span class="ft-sep"></span>
+              <span class="ft-group ${this.pixelsActive ? 'on' : ''}"
+                @click=${this._togglePixels}
+              >PPU</span>
+            ` : ''}
             ${this.suite?.profile || this.testRom ? html`
               <span class="downloads">
                 ${this.suite?.profile ? html`<a href="${this.suite.profile}" download>profile</a>` : ''}
