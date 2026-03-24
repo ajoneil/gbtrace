@@ -5,10 +5,12 @@ const PIXEL_SIZE = 16;
 const FIFO_LEN = 8;
 
 /**
- * Visualizes PPU pixel FIFO contents, fetcher state, and pipeline counters.
+ * Visualizes the PPU pixel pipeline as a left-to-right flow:
+ *   [Tile Fetcher] → [FIFOs (BG + OBJ merge)] → [Output Pixel]
+ *
  * Reads bgw_fifo_{a,b}, spr_fifo_{a,b}, mask_pipe, pal_pipe, bgp, obp0, obp1,
  * tfetch_state, sfetch_state, tile_temp_{a,b}, pix_count, sprite_count,
- * scan_count, rendering, win_mode from the trace entry.
+ * scan_count, rendering, win_mode, pix from the trace entry.
  */
 export class PpuFifoVisualizer extends LitElement {
   static properties = {
@@ -19,56 +21,48 @@ export class PpuFifoVisualizer extends LitElement {
 
   static styles = css`
     :host { display: block; }
-    .wrap {
+    .pipeline {
+      display: flex;
+      align-items: stretch;
+      gap: 0;
       border: 1px solid var(--border);
       border-radius: 8px;
       background: var(--bg-surface);
-      padding: 8px;
       font-size: 0.7rem;
       font-family: var(--mono);
+      overflow: hidden;
     }
-    .title {
+    .stage {
+      padding: 8px;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      min-width: 0;
+    }
+    .stage + .stage {
+      border-left: 1px solid var(--border);
+    }
+    .stage-title {
       font-weight: 600;
       color: var(--accent);
-      margin-bottom: 4px;
-    }
-    .fifo-row {
-      display: flex;
-      align-items: center;
-      gap: 6px;
-      margin-bottom: 4px;
-    }
-    .fifo-label {
-      width: 28px;
-      color: var(--text-muted);
-      flex-shrink: 0;
       font-size: 0.65rem;
-    }
-    canvas {
-      image-rendering: pixelated;
-      border: 1px solid var(--border);
-      border-radius: 2px;
-    }
-    .counters {
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
       display: flex;
-      gap: 10px;
-      margin-top: 6px;
-      flex-wrap: wrap;
-    }
-    .counter {
-      display: flex;
-      gap: 3px;
-      align-items: baseline;
-    }
-    .counter-label { color: var(--text-muted); }
-    .counter-val { color: var(--text); font-weight: 600; }
-    .flag-on { color: var(--accent); font-weight: 600; }
-    .flag-off { color: var(--text-muted); opacity: 0.4; }
-    .fetcher-row {
-      display: flex;
-      gap: 10px;
-      margin-top: 4px;
       align-items: center;
+      gap: 4px;
+    }
+    .arrow {
+      color: var(--text-muted);
+      font-size: 0.9rem;
+      display: flex;
+      align-items: center;
+      padding: 0 4px;
+    }
+    .fetcher-info {
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
     }
     .tile-preview {
       display: flex;
@@ -78,6 +72,68 @@ export class PpuFifoVisualizer extends LitElement {
       width: 8px;
       height: 8px;
       border: 0.5px solid var(--border);
+    }
+    .fifo-section {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+    .fifo-row {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .fifo-label {
+      width: 26px;
+      color: var(--text-muted);
+      flex-shrink: 0;
+      font-size: 0.6rem;
+    }
+    canvas {
+      image-rendering: pixelated;
+      border: 1px solid var(--border);
+      border-radius: 2px;
+    }
+    .merge-hint {
+      font-size: 0.58rem;
+      color: var(--text-muted);
+      text-align: center;
+      padding: 0 4px;
+    }
+    .output-section {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 4px;
+      justify-content: center;
+    }
+    .output-pixel {
+      width: 32px;
+      height: 32px;
+      border: 2px solid var(--border);
+      border-radius: 4px;
+    }
+    .counter {
+      display: flex;
+      gap: 3px;
+      align-items: baseline;
+    }
+    .counter-label { color: var(--text-muted); font-size: 0.6rem; }
+    .counter-val { color: var(--text); font-weight: 600; }
+    .counters {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    .flag-on { color: var(--accent); font-weight: 600; }
+    .flag-off { color: var(--text-muted); opacity: 0.4; }
+    .flags {
+      display: flex;
+      gap: 6px;
+    }
+    .pipe-info {
+      font-size: 0.58rem;
+      color: var(--text-muted);
     }
   `;
 
@@ -105,46 +161,76 @@ export class PpuFifoVisualizer extends LitElement {
     const e = this._entry;
 
     return html`
-      <div class="wrap">
-        <div class="title">Pixel Pipeline</div>
-
-        <div class="fifo-row">
-          <span class="fifo-label">BG</span>
-          <canvas id="bg-fifo" width="${FIFO_LEN * PIXEL_SIZE}" height="${PIXEL_SIZE}"></canvas>
-          <span class="fifo-label">OBJ</span>
-          <canvas id="obj-fifo" width="${FIFO_LEN * PIXEL_SIZE}" height="${PIXEL_SIZE}"></canvas>
+      <div class="pipeline">
+        <!-- Stage 1: Tile Fetcher -->
+        <div class="stage">
+          <div class="stage-title">Tile Fetch</div>
+          <div class="fetcher-info">
+            <div class="counter">
+              <span class="counter-label">TFetch:</span>
+              <span class="counter-val">${e.tfetch_state}</span>
+            </div>
+            <div class="counter">
+              <span class="counter-label">SFetch:</span>
+              <span class="counter-val">${e.sfetch_state}</span>
+            </div>
+            <div class="counter">
+              <span class="counter-label">Tile row:</span>
+            </div>
+            ${this._renderTilePreview(e.tile_temp_a, e.tile_temp_b, e.bgp)}
+          </div>
+          <div class="flags">
+            <span class="${e.rendering ? 'flag-on' : 'flag-off'}">REN</span>
+            <span class="${e.win_mode ? 'flag-on' : 'flag-off'}">WIN</span>
+          </div>
         </div>
 
-        <div class="fetcher-row">
-          <span class="counter">
-            <span class="counter-label">TFetch:</span>
-            <span class="counter-val">${e.tfetch_state}</span>
-          </span>
-          <span class="counter">
-            <span class="counter-label">SFetch:</span>
-            <span class="counter-val">${e.sfetch_state}</span>
-          </span>
-          <span class="counter">
-            <span class="counter-label">Tile:</span>
-          </span>
-          ${this._renderTilePreview(e.tile_temp_a, e.tile_temp_b, e.bgp)}
+        <div class="arrow">\u2192</div>
+
+        <!-- Stage 2: FIFOs -->
+        <div class="stage">
+          <div class="stage-title">FIFOs</div>
+          <div class="fifo-section">
+            <div class="fifo-row">
+              <span class="fifo-label">BG</span>
+              <canvas id="bg-fifo" width="${FIFO_LEN * PIXEL_SIZE}" height="${PIXEL_SIZE}"></canvas>
+            </div>
+            <div class="merge-hint">priority / mask \u2193</div>
+            <div class="fifo-row">
+              <span class="fifo-label">OBJ</span>
+              <canvas id="obj-fifo" width="${FIFO_LEN * PIXEL_SIZE}" height="${PIXEL_SIZE}"></canvas>
+            </div>
+          </div>
+          <div class="counters">
+            <span class="counter">
+              <span class="counter-label">sprites:</span>
+              <span class="counter-val">${e.sprite_count}</span>
+            </span>
+            <span class="counter">
+              <span class="counter-label">scan:</span>
+              <span class="counter-val">${e.scan_count}</span>
+            </span>
+          </div>
         </div>
 
-        <div class="counters">
-          <span class="counter">
-            <span class="counter-label">pix:</span>
-            <span class="counter-val">${e.pix_count}</span>
-          </span>
-          <span class="counter">
-            <span class="counter-label">sprites:</span>
-            <span class="counter-val">${e.sprite_count}</span>
-          </span>
-          <span class="counter">
-            <span class="counter-label">scan:</span>
-            <span class="counter-val">${e.scan_count}</span>
-          </span>
-          <span class="${e.rendering ? 'flag-on' : 'flag-off'}">RENDER</span>
-          <span class="${e.win_mode ? 'flag-on' : 'flag-off'}">WIN</span>
+        <div class="arrow">\u2192</div>
+
+        <!-- Stage 3: Output Pixel -->
+        <div class="stage">
+          <div class="stage-title">Output</div>
+          <div class="output-section">
+            <div class="output-pixel" id="output-px"></div>
+            <div class="counter">
+              <span class="counter-label">pix:</span>
+              <span class="counter-val">${e.pix_count}</span>
+            </div>
+            ${e.mask_pipe !== undefined ? html`
+              <div class="pipe-info">mask: 0x${(e.mask_pipe ?? 0).toString(16).padStart(2, '0')}</div>
+            ` : ''}
+            ${e.pal_pipe !== undefined ? html`
+              <div class="pipe-info">pal: 0x${(e.pal_pipe ?? 0).toString(16).padStart(2, '0')}</div>
+            ` : ''}
+          </div>
         </div>
       </div>
     `;
@@ -157,6 +243,7 @@ export class PpuFifoVisualizer extends LitElement {
     this.updateComplete.then(() => {
       this._drawFifo('bg-fifo', e.bgw_fifo_a, e.bgw_fifo_b, e.bgp);
       this._drawFifo('obj-fifo', e.spr_fifo_a, e.spr_fifo_b, e.obp0, e.mask_pipe);
+      this._drawOutputPixel(e);
     });
   }
 
@@ -184,6 +271,29 @@ export class PpuFifoVisualizer extends LitElement {
       // Draw grid lines
       ctx.strokeStyle = 'rgba(128,128,128,0.3)';
       ctx.strokeRect(i * PIXEL_SIZE, 0, PIXEL_SIZE, PIXEL_SIZE);
+    }
+  }
+
+  _drawOutputPixel(e) {
+    const el = this.shadowRoot?.getElementById('output-px');
+    if (!el) return;
+
+    // If we have a pix field, use it directly as a 2-bit shade index
+    if (e.pix !== undefined) {
+      const shade = e.pix & 3;
+      el.style.background = SHADES[shade];
+      return;
+    }
+
+    // Otherwise derive from the head of the BG FIFO after palette
+    if (e.bgw_fifo_a !== undefined) {
+      const lo = (e.bgw_fifo_a >> 7) & 1;
+      const hi = (e.bgw_fifo_b >> 7) & 1;
+      const colorIdx = (hi << 1) | lo;
+      const shade = (e.bgp >> (colorIdx * 2)) & 3;
+      el.style.background = SHADES[shade];
+    } else {
+      el.style.background = 'var(--bg)';
     }
   }
 

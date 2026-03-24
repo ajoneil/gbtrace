@@ -277,6 +277,16 @@ export class AppShell extends LitElement {
 
         ${this._chartField === '__pixels__' ? html`
           <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-start;">
+            ${this._hasPpuInternals ? html`
+              <ppu-sprite-table
+                .store=${this._store}
+                .cursorIndex=${this._effectiveIndex ?? this._viewStart}
+              ></ppu-sprite-table>
+              <ppu-fifo-visualizer
+                .store=${this._store}
+                .cursorIndex=${this._effectiveIndex ?? this._viewStart}
+              ></ppu-fifo-visualizer>
+            ` : ''}
             <pixel-display
               .store=${this._store}
               .frameBoundaries=${this._frameBoundaries}
@@ -284,18 +294,6 @@ export class AppShell extends LitElement {
               .tcyclePixels=${isTcycle}
               .currentIndex=${this._effectiveIndex}
             ></pixel-display>
-            ${this._hasPpuInternals ? html`
-              <div style="display:flex;flex-direction:column;gap:8px;min-width:200px;">
-                <ppu-sprite-table
-                  .store=${this._store}
-                  .cursorIndex=${this._effectiveIndex ?? this._viewStart}
-                ></ppu-sprite-table>
-                <ppu-fifo-visualizer
-                  .store=${this._store}
-                  .cursorIndex=${this._effectiveIndex ?? this._viewStart}
-                ></ppu-fifo-visualizer>
-              </div>
-            ` : ''}
           </div>
         ` : this._chartField ? html`
           <trace-chart
@@ -459,6 +457,7 @@ export class AppShell extends LitElement {
     // Auto-hide PPU internal fields from the table (they're shown in
     // dedicated PPU widgets instead). Don't touch other hidden fields.
     const ppuFields = [
+      'frame_num','pix',
       'oam0_x','oam0_id','oam0_attr','oam1_x','oam1_id','oam1_attr',
       'oam2_x','oam2_id','oam2_attr','oam3_x','oam3_id','oam3_attr',
       'oam4_x','oam4_id','oam4_attr','oam5_x','oam5_id','oam5_attr',
