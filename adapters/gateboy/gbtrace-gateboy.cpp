@@ -901,6 +901,11 @@ int main(int argc, char *argv[]) {
                 if (g_parquet) {
                     gbtrace_writer_mark_frame(g_parquet);
                 }
+                // If a stop was requested, now is the time — LCD frame is complete
+                if (stop_triggered) {
+                    stopped_early = true;
+                    break;
+                }
             }
             prev_vsync = vsync;
         }
@@ -909,11 +914,13 @@ int main(int argc, char *argv[]) {
         if ((phase_count % PHASES_PER_FRAME) == 0) {
             frames++;
 
-            // Check reference match at frame boundary (always immediate)
-            if (has_reference && check_frame_matches_reference()) {
-                std::fprintf(stderr, "Reference match at frame %d\n", frames);
-                stopped_early = true;
-                break;
+            // Check reference match at phase-counter boundary.
+            // Don't stop immediately — continue until the next VSYNC
+            // so the last LCD frame is complete.
+            if (has_reference && !stop_triggered && check_frame_matches_reference()) {
+                std::fprintf(stderr, "Reference match at frame %d, finishing LCD frame...\n", frames);
+                stop_triggered = true;
+                // remaining_extra not used here — we stop at next VSYNC instead
             }
 
             // Extra-frames countdown at frame boundaries
