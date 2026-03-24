@@ -154,10 +154,18 @@ static Profile parse_profile(const std::string &path) {
             strip_quotes(val);
             prof.trigger = val;
         } else if (!val.empty() && val.front() == '[') {
-            auto start = val.find('[');
-            auto end = val.find(']');
+            // Handle multi-line arrays: accumulate lines until ']'
+            std::string array_str = val;
+            while (array_str.find(']') == std::string::npos && std::getline(f, line)) {
+                auto h = line.find('#');
+                if (h != std::string::npos) line = line.substr(0, h);
+                trim(line);
+                array_str += " " + line;
+            }
+            auto start = array_str.find('[');
+            auto end = array_str.find(']');
             if (start != std::string::npos && end != std::string::npos) {
-                std::string inner = val.substr(start + 1, end - start - 1);
+                std::string inner = array_str.substr(start + 1, end - start - 1);
                 std::istringstream ss(inner);
                 std::string token;
                 while (std::getline(ss, token, ',')) {
@@ -177,8 +185,11 @@ static Profile parse_profile(const std::string &path) {
 
 struct FieldEmitter {
     std::string name;
-    enum Source { CPU_REG8, CPU_REG16, CPU_IME, IO_READ, PIX } source;
+    enum Source { CPU_REG8, CPU_REG16, CPU_IME, IO_READ, PIX, PPU_U8, PPU_BOOL } source;
     unsigned short io_addr; // for IO_READ
+    // For PPU_U8/PPU_BOOL: function pointer to read the value
+    uint8_t (*read_ppu_u8)(const GateBoy &gb);
+    bool (*read_ppu_bool)(const GateBoy &gb);
 };
 
 static std::vector<FieldEmitter> g_emitters;
@@ -293,6 +304,49 @@ static const std::unordered_map<std::string, unsigned short> IO_FIELD_ADDR = {
     {"sb",   0xFF01}, {"sc",   0xFF02},
 };
 
+// --- PPU internal readers ---
+// Each returns a u8 from gate-level state via bit_pack().
+
+// Sprite store: 10 sprites, each with x (8-bit), id (6-bit index), attr (4-bit flags)
+#define SPRITE_X(N) [](const GateBoy &gb) -> uint8_t { return (uint8_t)bit_pack(gb.gb_state.store_x##N); }
+#define SPRITE_ID(N) [](const GateBoy &gb) -> uint8_t { return (uint8_t)bit_pack(gb.gb_state.store_i##N); }
+#define SPRITE_ATTR(N) [](const GateBoy &gb) -> uint8_t { return (uint8_t)bit_pack(gb.gb_state.store_l##N); }
+
+static const std::unordered_map<std::string, uint8_t(*)(const GateBoy &)> PPU_U8_READERS = {
+    // Sprite store
+    {"oam0_x", SPRITE_X(0)}, {"oam0_id", SPRITE_ID(0)}, {"oam0_attr", SPRITE_ATTR(0)},
+    {"oam1_x", SPRITE_X(1)}, {"oam1_id", SPRITE_ID(1)}, {"oam1_attr", SPRITE_ATTR(1)},
+    {"oam2_x", SPRITE_X(2)}, {"oam2_id", SPRITE_ID(2)}, {"oam2_attr", SPRITE_ATTR(2)},
+    {"oam3_x", SPRITE_X(3)}, {"oam3_id", SPRITE_ID(3)}, {"oam3_attr", SPRITE_ATTR(3)},
+    {"oam4_x", SPRITE_X(4)}, {"oam4_id", SPRITE_ID(4)}, {"oam4_attr", SPRITE_ATTR(4)},
+    {"oam5_x", SPRITE_X(5)}, {"oam5_id", SPRITE_ID(5)}, {"oam5_attr", SPRITE_ATTR(5)},
+    {"oam6_x", SPRITE_X(6)}, {"oam6_id", SPRITE_ID(6)}, {"oam6_attr", SPRITE_ATTR(6)},
+    {"oam7_x", SPRITE_X(7)}, {"oam7_id", SPRITE_ID(7)}, {"oam7_attr", SPRITE_ATTR(7)},
+    {"oam8_x", SPRITE_X(8)}, {"oam8_id", SPRITE_ID(8)}, {"oam8_attr", SPRITE_ATTR(8)},
+    {"oam9_x", SPRITE_X(9)}, {"oam9_id", SPRITE_ID(9)}, {"oam9_attr", SPRITE_ATTR(9)},
+    // Pixel FIFO
+    {"bgw_fifo_a", [](const GateBoy &gb) -> uint8_t { return (uint8_t)bit_pack(gb.gb_state.bgw_pipe_a); }},
+    {"bgw_fifo_b", [](const GateBoy &gb) -> uint8_t { return (uint8_t)bit_pack(gb.gb_state.bgw_pipe_b); }},
+    {"spr_fifo_a", [](const GateBoy &gb) -> uint8_t { return (uint8_t)bit_pack(gb.gb_state.spr_pipe_a); }},
+    {"spr_fifo_b", [](const GateBoy &gb) -> uint8_t { return (uint8_t)bit_pack(gb.gb_state.spr_pipe_b); }},
+    {"mask_pipe",  [](const GateBoy &gb) -> uint8_t { return (uint8_t)bit_pack(gb.gb_state.mask_pipe); }},
+    {"pal_pipe",   [](const GateBoy &gb) -> uint8_t { return (uint8_t)bit_pack(gb.gb_state.pal_pipe); }},
+    // Fetcher state
+    {"tfetch_state", [](const GateBoy &gb) -> uint8_t { return (uint8_t)bit_pack(gb.gb_state.tfetch_counter); }},
+    {"sfetch_state", [](const GateBoy &gb) -> uint8_t { return (uint8_t)bit_pack(gb.gb_state.sfetch_counter_evn); }},
+    {"tile_temp_a",  [](const GateBoy &gb) -> uint8_t { return (uint8_t)bit_pack(gb.gb_state.tile_temp_a); }},
+    {"tile_temp_b",  [](const GateBoy &gb) -> uint8_t { return (uint8_t)bit_pack(gb.gb_state.tile_temp_b); }},
+    // Counters
+    {"pix_count",    [](const GateBoy &gb) -> uint8_t { return (uint8_t)bit_pack(gb.gb_state.pix_count); }},
+    {"sprite_count", [](const GateBoy &gb) -> uint8_t { return (uint8_t)bit_pack(gb.gb_state.sprite_counter); }},
+    {"scan_count",   [](const GateBoy &gb) -> uint8_t { return (uint8_t)bit_pack(gb.gb_state.scan_counter); }},
+};
+
+static const std::unordered_map<std::string, bool(*)(const GateBoy &)> PPU_BOOL_READERS = {
+    {"rendering", [](const GateBoy &gb) -> bool { return !gb.gb_state.XYMU_RENDERING_LATCHn.state; }},
+    {"win_mode",  [](const GateBoy &gb) -> bool { return gb.gb_state.win_ctrl.PYNU_WIN_MODE_LATCHp.state != 0; }},
+};
+
 static void build_emitters(const Profile &prof) {
     g_emitters.clear();
     for (const auto &field : prof.fields) {
@@ -324,6 +378,12 @@ static void build_emitters(const Profile &prof) {
         } else if (auto it2 = prof.memory.find(field); it2 != prof.memory.end()) {
             em.source = FieldEmitter::IO_READ;
             em.io_addr = it2->second;
+        } else if (auto it3 = PPU_U8_READERS.find(field); it3 != PPU_U8_READERS.end()) {
+            em.source = FieldEmitter::PPU_U8;
+            em.read_ppu_u8 = it3->second;
+        } else if (auto it4 = PPU_BOOL_READERS.find(field); it4 != PPU_BOOL_READERS.end()) {
+            em.source = FieldEmitter::PPU_BOOL;
+            em.read_ppu_bool = it4->second;
         } else {
             std::fprintf(stderr, "Warning: unknown field '%s', skipping\n", field.c_str());
             continue;
@@ -425,6 +485,12 @@ static void emit_entry(FILE *out, GateBoy &gb) {
             std::fprintf(out, "\"%s\"", g_pix_buf.c_str());
             g_pix_buf.clear();
             break;
+        case FieldEmitter::PPU_U8:
+            std::fprintf(out, "%d", em.read_ppu_u8(gb));
+            break;
+        case FieldEmitter::PPU_BOOL:
+            std::fprintf(out, "%s", em.read_ppu_bool(gb) ? "true" : "false");
+            break;
         }
     }
 
@@ -467,6 +533,12 @@ static void emit_entry_parquet(GateBoy &gb) {
             gbtrace_writer_set_str(g_parquet, col,
                                    g_pix_buf.c_str(), g_pix_buf.size());
             g_pix_buf.clear();
+            break;
+        case FieldEmitter::PPU_U8:
+            gbtrace_writer_set_u8(g_parquet, col, em.read_ppu_u8(gb));
+            break;
+        case FieldEmitter::PPU_BOOL:
+            gbtrace_writer_set_bool(g_parquet, col, em.read_ppu_bool(gb));
             break;
         }
     }

@@ -108,10 +108,18 @@ static Profile parse_profile(const std::string &path) {
             strip_quotes(val);
             prof.trigger = val;
         } else if (!val.empty() && val.front() == '[') {
-            auto start = val.find('[');
-            auto end = val.find(']');
+            // Handle multi-line arrays: accumulate lines until ']'
+            std::string array_str = val;
+            while (array_str.find(']') == std::string::npos && std::getline(f, line)) {
+                auto h = line.find('#');
+                if (h != std::string::npos) line = line.substr(0, h);
+                trim(line);
+                array_str += " " + line;
+            }
+            auto start = array_str.find('[');
+            auto end = array_str.find(']');
             if (start != std::string::npos && end != std::string::npos) {
-                std::string inner = val.substr(start + 1, end - start - 1);
+                std::string inner = array_str.substr(start + 1, end - start - 1);
                 std::istringstream ss(inner);
                 std::string token;
                 while (std::getline(ss, token, ',')) {

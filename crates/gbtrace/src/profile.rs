@@ -39,6 +39,8 @@ struct FieldGroups {
     #[serde(default)]
     ppu: Vec<String>,
     #[serde(default)]
+    ppu_internal: Vec<String>,
+    #[serde(default)]
     timer: Vec<String>,
     #[serde(default)]
     interrupt: Vec<String>,
@@ -57,7 +59,7 @@ const KNOWN_FIELDS: &[&str] = &[
     "cy",
     // cpu
     "a", "f", "b", "c", "d", "e", "h", "l", "sp", "pc", "op", "ime",
-    // ppu
+    // ppu registers
     "lcdc", "stat", "ly", "lyc", "scy", "scx", "wy", "wx", "bgp", "obp0", "obp1", "dma",
     // pixel output
     "pix", "pix_x",
@@ -67,6 +69,21 @@ const KNOWN_FIELDS: &[&str] = &[
     "if_", "ie",
     // serial
     "sb", "sc",
+    // ppu internal — sprite store (10 sprites × 3 fields each)
+    "oam0_x", "oam0_id", "oam0_attr", "oam1_x", "oam1_id", "oam1_attr",
+    "oam2_x", "oam2_id", "oam2_attr", "oam3_x", "oam3_id", "oam3_attr",
+    "oam4_x", "oam4_id", "oam4_attr", "oam5_x", "oam5_id", "oam5_attr",
+    "oam6_x", "oam6_id", "oam6_attr", "oam7_x", "oam7_id", "oam7_attr",
+    "oam8_x", "oam8_id", "oam8_attr", "oam9_x", "oam9_id", "oam9_attr",
+    // ppu internal — pixel FIFO
+    "bgw_fifo_a", "bgw_fifo_b", "spr_fifo_a", "spr_fifo_b",
+    "mask_pipe", "pal_pipe",
+    // ppu internal — fetcher
+    "tfetch_state", "sfetch_state",
+    "tile_temp_a", "tile_temp_b",
+    // ppu internal — counters/flags
+    "pix_count", "sprite_count", "scan_count",
+    "rendering", "win_mode",
 ];
 
 /// Native type of a trace field, used for Parquet column types.
@@ -84,7 +101,7 @@ pub fn field_type(name: &str) -> FieldType {
     match name {
         "cy" => FieldType::UInt64,
         "pc" | "sp" => FieldType::UInt16,
-        "ime" => FieldType::Bool,
+        "ime" | "rendering" | "win_mode" => FieldType::Bool,
         "pix" => FieldType::Str,
         _ => FieldType::UInt8,
     }
@@ -111,6 +128,7 @@ impl Profile {
         let groups = [
             &raw.fields.cpu,
             &raw.fields.ppu,
+            &raw.fields.ppu_internal,
             &raw.fields.timer,
             &raw.fields.interrupt,
             &raw.fields.serial,
