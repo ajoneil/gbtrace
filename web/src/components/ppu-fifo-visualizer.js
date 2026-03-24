@@ -1,6 +1,6 @@
 import { LitElement, html, css } from 'lit';
 
-const SHADES = ['#e0f0e0', '#88c070', '#305830', '#0f1f0f'];
+const SHADES = ['#e0f8d0', '#88c070', '#346856', '#081820'];
 const PIXEL_SIZE = 16;
 const FIFO_LEN = 8;
 
