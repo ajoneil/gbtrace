@@ -9,7 +9,7 @@ const COL_WIDTH = 56;
 const IDX_WIDTH = 50;
 const ASM_WIDTH = 120;
 const PIX_WIDTH = 28;
-const PIX_COLORS = ['#fff', '#aaa', '#555', '#000'];
+const PIX_COLORS = ['#e0f0e0', '#88c070', '#305830', '#0f1f0f'];
 
 export class TraceTable extends LitElement {
   static styles = css`

@@ -36,7 +36,13 @@ impl Frame {
     /// Return raw RGBA pixel data (160×144×4 bytes). DMG palette: 0=white, 3=black.
     /// Pixels with value 0xFF (unrendered sentinel) get alpha=0.
     pub fn to_rgba(&self) -> Vec<u8> {
-        const PALETTE: [u8; 4] = [0xFF, 0xAA, 0x55, 0x00]; // DMG shades
+        // DMG green palette: #e0f0e0, #88c070, #305830, #0f1f0f
+        const PALETTE: [(u8, u8, u8); 4] = [
+            (0xe0, 0xf0, 0xe0), // lightest
+            (0x88, 0xc0, 0x70), // light
+            (0x30, 0x58, 0x30), // dark
+            (0x0f, 0x1f, 0x0f), // darkest
+        ];
 
         let mut rgba = vec![0u8; LCD_WIDTH * LCD_HEIGHT * 4];
         for (i, &pix) in self.pixels.iter().enumerate() {
@@ -44,10 +50,10 @@ impl Frame {
                 // Unrendered — transparent
                 continue;
             }
-            let shade = PALETTE[pix.min(3) as usize];
-            rgba[i * 4] = shade;
-            rgba[i * 4 + 1] = shade;
-            rgba[i * 4 + 2] = shade;
+            let (r, g, b) = PALETTE[pix.min(3) as usize];
+            rgba[i * 4] = r;
+            rgba[i * 4 + 1] = g;
+            rgba[i * 4 + 2] = b;
             rgba[i * 4 + 3] = 0xFF;
         }
         rgba
