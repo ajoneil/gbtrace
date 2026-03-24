@@ -144,14 +144,26 @@ impl TraceStore {
     }
 
     /// Render a frame as RGBA pixel data (160×144×4 = 92160 bytes).
-    /// Returns null if no pixel data or frame index is out of range.
+    /// Uses explicit frame boundaries to determine the entry range, then
+    /// decodes only the needed row groups from the lazy store.
     #[wasm_bindgen(js_name = renderFrame)]
     pub fn render_frame(&self, frame_index: usize) -> Result<JsValue, JsError> {
-        self.ensure_frames();
-        let cache = self.frames_cache.borrow();
-        match cache.as_ref().and_then(|frames| frames.get(frame_index)) {
+        let (start, end) = match self.frame_entry_range(frame_index) {
+            Some(r) => r,
+            None => return Ok(JsValue::NULL),
+        };
+        let store = self.decode_range(start, end)?;
+        let frames = framebuffer::reconstruct_frames(&store);
+        // Return the last frame with visible pixels (the one we want)
+        match frames.iter().rev().find(|f| f.pixels.iter().any(|&p| p != 0)) {
             Some(f) => Ok(js_sys::Uint8ClampedArray::from(&f.to_rgba()[..]).into()),
-            None => Ok(JsValue::NULL),
+            None => {
+                // No visible pixels — return blank frame
+                match frames.last() {
+                    Some(f) => Ok(js_sys::Uint8ClampedArray::from(&f.to_rgba()[..]).into()),
+                    None => Ok(JsValue::NULL),
+                }
+            }
         }
     }
 
@@ -159,16 +171,12 @@ impl TraceStore {
     /// Used for the progressive scrubber in T-cycle traces.
     #[wasm_bindgen(js_name = renderPartialFrame)]
     pub fn render_partial_frame(&self, frame_index: usize, stop_entry: usize) -> Result<JsValue, JsError> {
-        self.ensure_frames();
-        let frame_start = {
-            let cache = self.frames_cache.borrow();
-            match cache.as_ref().and_then(|f| f.get(frame_index)) {
-                Some(f) => f.start_entry,
-                None => return Ok(JsValue::NULL),
-            }
+        let (start, _end) = match self.frame_entry_range(frame_index) {
+            Some(r) => r,
+            None => return Ok(JsValue::NULL),
         };
-        let store = self.get_eager_store()?;
-        let frame = framebuffer::reconstruct_partial_frame(&store, frame_start, stop_entry);
+        let store = self.decode_range(start, stop_entry)?;
+        let frame = framebuffer::reconstruct_partial_frame(&store, 0, store.entry_count());
         Ok(js_sys::Uint8ClampedArray::from(&frame.to_rgba()[..]).into())
     }
 
@@ -508,6 +516,42 @@ impl TraceStore {
     /// Check if any frame has non-zero pixel data.
     fn has_visible_pixels(frames: &[Frame]) -> bool {
         frames.iter().any(|f| f.pixels.iter().any(|&p| p != 0))
+    }
+
+    /// Get the entry range (start, end) for a frame by index.
+    fn frame_entry_range(&self, frame_index: usize) -> Option<(usize, usize)> {
+        let boundaries = match &self.store {
+            StoreKind::Lazy(s) => s.frame_boundaries(),
+            StoreKind::Eager(s) => s.frame_boundaries(),
+        };
+        if frame_index >= boundaries.len() {
+            return None;
+        }
+        let start = boundaries[frame_index] as usize;
+        let end = if frame_index + 1 < boundaries.len() {
+            boundaries[frame_index + 1] as usize
+        } else {
+            match &self.store {
+                StoreKind::Lazy(s) => s.entry_count(),
+                StoreKind::Eager(s) => s.entry_count(),
+            }
+        };
+        Some((start, end))
+    }
+
+    /// Decode a range of entries into an eager column store.
+    /// For lazy stores, only decodes the row groups that overlap the range.
+    fn decode_range(&self, start: usize, end: usize) -> Result<ColumnStore, JsError> {
+        match &self.store {
+            StoreKind::Lazy(s) => {
+                s.decode_range(start, end)
+                    .map_err(|e| JsError::new(&format!("{e}")))
+            }
+            StoreKind::Eager(s) => {
+                // For eager stores, create a sub-store view
+                Ok(s.slice(start, end))
+            }
+        }
     }
 
     fn get_eager_store(&self) -> Result<ColumnStore, JsError> {
