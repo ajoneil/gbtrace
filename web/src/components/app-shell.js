@@ -373,9 +373,13 @@ export class AppShell extends LitElement {
             ` : ''}
             <pixel-display
               .store=${this._store}
+              .storeB=${this._storeB || null}
+              .nameA=${this._nameA}
+              .nameB=${this._nameB}
               .frameBoundaries=${this._frameBoundaries}
+              .frameBoundariesB=${this._frameBoundariesB}
               .viewStart=${this._viewStart}
-              .tcyclePixels=${isTcycle}
+              .tcyclePixels=${isTcycle && !this._storeB}
               .currentIndex=${this._effectiveIndex}
             ></pixel-display>
           </div>
@@ -435,17 +439,7 @@ export class AppShell extends LitElement {
           .viewEnd=${this._viewEnd}
         ></trace-query>
 
-        ${this._chartField === '__pixels__' ? html`
-          <pixel-display
-            .store=${this._store}
-            .storeB=${this._storeB}
-            .nameA=${this._nameA}
-            .nameB=${this._nameB}
-            .frameBoundaries=${this._frameBoundaries}
-            .frameBoundariesB=${this._frameBoundariesB}
-            .viewStart=${this._viewStart}
-          ></pixel-display>
-        ` : this._chartField ? html`
+        ${this._chartField && this._chartField !== '__pixels__' ? html`
           <trace-chart
             .store=${this._store}
             .storeB=${this._storeB}
@@ -457,6 +451,10 @@ export class AppShell extends LitElement {
             .viewStart=${this._viewStart}
             .viewEnd=${this._viewEnd}
           ></trace-chart>
+        ` : ''}
+
+        ${(this._store?.hasPixels() || this._storeB?.hasPixels()) ? html`
+          ${this._renderPpuBar(false)}
         ` : ''}
 
         <trace-diff-table
