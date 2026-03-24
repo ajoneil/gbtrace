@@ -184,14 +184,14 @@ export class PpuSpriteTable extends LitElement {
     return html`
       <div class="stat-bar">
         <div class="stat-row">
-          ${mode !== null ? html`
-            <span class="mode-badge mode-${mode}">${modeLabels[mode]}</span>
-          ` : ''}
           <span class="${lcdOn ? 'stat-flag-on' : 'stat-flag-off'}">LCD</span>
           <span class="${bgEn ? 'stat-flag-on' : 'stat-flag-off'}">BG</span>
           <span class="${objEn ? 'stat-flag-on' : 'stat-flag-off'}">OBJ</span>
           <span class="${winEn ? 'stat-flag-on' : 'stat-flag-off'}">WIN</span>
           <span class="${objSize ? 'stat-flag-on' : 'stat-flag-off'}">8x16</span>
+          ${mode !== null ? html`
+            <span style="margin-left:auto;" class="mode-badge mode-${mode}">${modeLabels[mode]}</span>
+          ` : ''}
         </div>
       </div>
     `;
