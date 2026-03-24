@@ -241,14 +241,8 @@ export class AppShell extends LitElement {
           .viewEnd=${this._viewEnd}
           .compareMode=${!!this._storeB}
           .syncMode=${this._syncMode}
+          .currentIndex=${this._currentIndex}
         ></trace-timeline>
-        <div class="scrubber-row">
-          <input type="range"
-            min=${this._viewStart} max=${this._viewEnd - 1}
-            .value=${String(this._currentIndex ?? this._viewStart)}
-            @input=${this._onScrub}>
-          <span class="scrub-info">${this._currentIndex ?? this._viewStart} / ${this._viewEnd}</span>
-        </div>
       ` : ''}
 
       ${this._store
