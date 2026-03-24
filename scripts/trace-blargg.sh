@@ -34,7 +34,7 @@ TMP="/tmp/gbtrace_blargg_${NAME}_${ADAPTER}_$$"
 stderr_file="${TMP}.stderr"
 tmp_parquet="${TMP}.parquet"
 
-cleanup() { rm -f "$stderr_file" "${TMP}_trimmed.parquet" "${ROM%.gb}.sav"; }
+cleanup() { rm -f "$stderr_file" "${ROM%.gb}.sav"; }
 trap cleanup EXIT
 
 # --- Capture ---
@@ -68,20 +68,18 @@ fi
 # --- Determine pass/fail ---
 status="fail"
 
-# Method 1: Serial output (check if trace contains serial data)
-serial=$("$CLI" query "$tmp_parquet" -w "sc changes to FF" --max 100 2>&1 | \
-    grep -oP 'sb=\K[0-9a-f]+' | while read hex; do printf "\\x$hex"; done) || serial=""
-
-if echo "$serial" | grep -qi "passed"; then
+# Method 1: Adapter reported reference match (works for all adapters)
+if grep -q "Reference match" "$stderr_file" 2>/dev/null; then
     status="pass"
-elif echo "$serial" | grep -qi "failed"; then
-    status="fail"
-# Method 2: Screenshot matching against .pix reference
-elif [[ -f "$PIX_REF" ]]; then
-    if "$CLI" trim "$tmp_parquet" --reference "$PIX_REF" \
-        --output "${TMP}_trimmed.parquet" >/dev/null 2>&1; then
+# Method 2: Serial output (check if trace contains serial data)
+else
+    serial=$("$CLI" query "$tmp_parquet" -w "sc changes to FF" --max 100 2>&1 | \
+        grep -oP 'sb=\K[0-9a-f]+' | while read hex; do printf "\\x$hex"; done) || serial=""
+
+    if echo "$serial" | grep -qi "passed"; then
         status="pass"
-        mv "${TMP}_trimmed.parquet" "$tmp_parquet"
+    elif echo "$serial" | grep -qi "failed"; then
+        status="fail"
     fi
 fi
 
