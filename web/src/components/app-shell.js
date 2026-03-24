@@ -10,6 +10,8 @@ import './trace-chart.js';
 import './trace-diff-table.js';
 import './trace-timeline.js';
 import './pixel-display.js';
+import './ppu-sprite-table.js';
+import './ppu-fifo-visualizer.js';
 
 export class AppShell extends LitElement {
   static styles = css`
@@ -141,6 +143,11 @@ export class AppShell extends LitElement {
     return this._header?.fields || [];
   }
 
+  /** True if the trace includes PPU internal fields. */
+  get _hasPpuInternals() {
+    return this._allFields.includes('oam0_x');
+  }
+
   /** Fields the user has selected (all minus hidden). Used for queries, stats, diff. */
   get _visibleFields() {
     return this._allFields.filter(f => !this._hiddenFields.has(f));
@@ -245,6 +252,20 @@ export class AppShell extends LitElement {
             .viewStart=${this._viewStart}
             .viewEnd=${this._viewEnd}
           ></trace-chart>
+        ` : ''}
+
+        ${this._hasPpuInternals ? html`
+          <div style="display:flex;gap:8px;flex-wrap:wrap;">
+            <ppu-sprite-table
+              .store=${this._store}
+              .cursorIndex=${this._hoverIndex >= 0 ? this._hoverIndex : this._viewStart}
+            ></ppu-sprite-table>
+            <ppu-fifo-visualizer
+              style="flex:1;min-width:200px;"
+              .store=${this._store}
+              .cursorIndex=${this._hoverIndex >= 0 ? this._hoverIndex : this._viewStart}
+            ></ppu-fifo-visualizer>
+          </div>
         ` : ''}
 
         <trace-table
