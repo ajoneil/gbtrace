@@ -189,6 +189,20 @@ pub unsafe extern "C" fn gbtrace_writer_set_str(
     (*w).writer.append_str(field, s);
 }
 
+/// Mark a frame boundary at the current entry position.
+/// Call at vblank — writes the boundary to parquet metadata and flushes.
+/// Returns 0 on success, -1 on error.
+#[no_mangle]
+pub unsafe extern "C" fn gbtrace_writer_mark_frame(w: *mut GbtraceWriter) -> i32 {
+    match (*w).writer.mark_frame() {
+        Ok(()) => 0,
+        Err(e) => {
+            eprintln!("gbtrace_writer_mark_frame: {e}");
+            -1
+        }
+    }
+}
+
 /// Finish the current entry (call after setting all fields).
 /// Returns 0 on success, -1 on error.
 #[no_mangle]
