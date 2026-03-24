@@ -47,7 +47,7 @@ def main():
     micro_stamps = gen_suite(
         'gbmicrotest',
         'test-suites/gbmicrotest',
-        'test-suites/gbmicrotest/gbmicrotest.toml',
+        'test-suites/gbmicrotest/profile.toml',
         '$(GBMICROTEST_TRACE_DIR)',
         emus,
         'scripts/trace-gbmicrotest.sh',
@@ -56,7 +56,7 @@ def main():
     blargg_stamps = gen_suite(
         'blargg',
         'test-suites/blargg',
-        'test-suites/blargg/blargg.toml',
+        'test-suites/blargg/profile.toml',
         '$(BLARGG_TRACE_DIR)',
         blargg_emus,
         'scripts/trace-blargg.sh',
@@ -65,7 +65,7 @@ def main():
     mooneye_stamps = gen_suite(
         'mooneye',
         'test-suites/mooneye',
-        'test-suites/mooneye/mooneye.toml',
+        'test-suites/mooneye/profile.toml',
         '$(MOONEYE_TRACE_DIR)',
         emus,
         'scripts/trace-mooneye.sh',

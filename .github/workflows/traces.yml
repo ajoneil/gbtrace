@@ -106,25 +106,25 @@ jobs:
 
           case "$SUITE" in
             gbmicrotest)
-              PROFILE="test-suites/gbmicrotest/gbmicrotest.toml"
+              PROFILE="test-suites/gbmicrotest/profile.toml"
               while IFS= read -r -d '' rom; do
                 run_parallel bash scripts/trace-gbmicrotest.sh "$BIN" "$rom" "$PROFILE" "$TRACE_DIR"
               done < <(find "$ROM_DIR" -name '*.gb' -print0 | sort -z)
               ;;
             blargg)
-              PROFILE="test-suites/blargg/blargg.toml"
+              PROFILE="test-suites/blargg/profile.toml"
               while IFS= read -r -d '' rom; do
                 run_parallel bash scripts/trace-blargg.sh "$BIN" "$rom" "$PROFILE" "$TRACE_DIR" "$ROM_DIR"
               done < <(find "$ROM_DIR" -name '*.gb' -print0 | sort -z)
               ;;
             mooneye)
-              PROFILE="test-suites/mooneye/mooneye.toml"
+              PROFILE="test-suites/mooneye/profile.toml"
               while IFS= read -r -d '' rom; do
                 run_parallel bash scripts/trace-mooneye.sh "$BIN" "$rom" "$PROFILE" "$TRACE_DIR" "$ROM_DIR"
               done < <(find "$ROM_DIR" -name '*.gb' -print0 | sort -z)
               ;;
             dmg-acid2)
-              PROFILE="test-suites/dmg-acid2/dmg-acid2.toml"
+              PROFILE="test-suites/dmg-acid2/profile.toml"
               REF="test-suites/dmg-acid2/reference.pix"
               bash scripts/trace-screenshot.sh "$BIN" \
                 "test-suites/dmg-acid2/dmg-acid2.gb" "$PROFILE" "$REF" "$TRACE_DIR" 30 || true
