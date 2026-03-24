@@ -236,13 +236,27 @@ export class AppShell extends LitElement {
         ></trace-query>
 
         ${this._chartField === '__pixels__' ? html`
-          <pixel-display
-            .store=${this._store}
-            .frameBoundaries=${this._frameBoundaries}
-            .viewStart=${this._viewStart}
-            .tcyclePixels=${this._store?.isTcyclePixels() || false}
-            .hoverIndex=${this._hoverIndex}
-          ></pixel-display>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-start;">
+            <pixel-display
+              .store=${this._store}
+              .frameBoundaries=${this._frameBoundaries}
+              .viewStart=${this._viewStart}
+              .tcyclePixels=${this._store?.isTcyclePixels() || false}
+              .hoverIndex=${this._hoverIndex}
+            ></pixel-display>
+            ${this._hasPpuInternals ? html`
+              <div style="display:flex;flex-direction:column;gap:8px;min-width:200px;">
+                <ppu-sprite-table
+                  .store=${this._store}
+                  .cursorIndex=${this._hoverIndex >= 0 ? this._hoverIndex : this._viewStart}
+                ></ppu-sprite-table>
+                <ppu-fifo-visualizer
+                  .store=${this._store}
+                  .cursorIndex=${this._hoverIndex >= 0 ? this._hoverIndex : this._viewStart}
+                ></ppu-fifo-visualizer>
+              </div>
+            ` : ''}
+          </div>
         ` : this._chartField ? html`
           <trace-chart
             .store=${this._store}
@@ -252,20 +266,6 @@ export class AppShell extends LitElement {
             .viewStart=${this._viewStart}
             .viewEnd=${this._viewEnd}
           ></trace-chart>
-        ` : ''}
-
-        ${this._hasPpuInternals ? html`
-          <div style="display:flex;gap:8px;flex-wrap:wrap;">
-            <ppu-sprite-table
-              .store=${this._store}
-              .cursorIndex=${this._hoverIndex >= 0 ? this._hoverIndex : this._viewStart}
-            ></ppu-sprite-table>
-            <ppu-fifo-visualizer
-              style="flex:1;min-width:200px;"
-              .store=${this._store}
-              .cursorIndex=${this._hoverIndex >= 0 ? this._hoverIndex : this._viewStart}
-            ></ppu-fifo-visualizer>
-          </div>
         ` : ''}
 
         <trace-table
@@ -414,7 +414,27 @@ export class AppShell extends LitElement {
     this._frameBoundariesB = [];
     this._viewStart = 0;
     this._viewEnd = store.entryCount();
-    // Don't reset _hiddenFields — persist across trace switches
+    // Auto-hide PPU internal fields from the table (they're shown in
+    // dedicated PPU widgets instead). Don't touch other hidden fields.
+    const ppuFields = [
+      'oam0_x','oam0_id','oam0_attr','oam1_x','oam1_id','oam1_attr',
+      'oam2_x','oam2_id','oam2_attr','oam3_x','oam3_id','oam3_attr',
+      'oam4_x','oam4_id','oam4_attr','oam5_x','oam5_id','oam5_attr',
+      'oam6_x','oam6_id','oam6_attr','oam7_x','oam7_id','oam7_attr',
+      'oam8_x','oam8_id','oam8_attr','oam9_x','oam9_id','oam9_attr',
+      'bgw_fifo_a','bgw_fifo_b','spr_fifo_a','spr_fifo_b',
+      'mask_pipe','pal_pipe',
+      'tfetch_state','sfetch_state','tile_temp_a','tile_temp_b',
+      'pix_count','sprite_count','scan_count','rendering','win_mode',
+    ];
+    const fields = this._allFields;
+    if (fields.some(f => ppuFields.includes(f))) {
+      const h = new Set(this._hiddenFields || []);
+      for (const f of ppuFields) {
+        if (fields.includes(f)) h.add(f);
+      }
+      this._hiddenFields = h;
+    }
   }
 
   _setStoreB(store, name) {
