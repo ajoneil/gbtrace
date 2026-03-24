@@ -274,15 +274,13 @@ export class AppShell extends LitElement {
           .viewStart=${this._viewStart} .viewEnd=${this._viewEnd}
         ></trace-query>
 
-        ${this._chartField === '__pixels__' && isTcycle ? html`
-          <div class="scrubber-row">
-            <input type="range"
-              min=${frameStart} max=${frameEnd}
-              .value=${String(this._currentIndex ?? frameStart)}
-              @input=${this._onScrub}>
-            <span class="scrub-info">entry ${this._currentIndex ?? frameStart} / ${frameEnd}</span>
-          </div>
-        ` : ''}
+        <div class="scrubber-row">
+          <input type="range"
+            min=${this._viewStart} max=${this._viewEnd - 1}
+            .value=${String(this._currentIndex ?? this._viewStart)}
+            @input=${this._onScrub}>
+          <span class="scrub-info">entry ${this._currentIndex ?? this._viewStart} / ${this._viewEnd}</span>
+        </div>
 
         ${this._chartField === '__pixels__' ? html`
           <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-start;">
