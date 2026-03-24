@@ -132,6 +132,23 @@ export class AppShell extends LitElement {
     _ppuExpanded: { state: true },
   };
 
+  connectedCallback() {
+    super.connectedCallback();
+    // Auto-load test from URL hash: #suiteName/testPath
+    const hash = location.hash.slice(1);
+    if (hash) {
+      this._pendingDeepLink = hash;
+      // Wait for first render so test-picker exists
+      this.updateComplete.then(() => {
+        const picker = this.renderRoot?.querySelector('test-picker');
+        if (picker && this._pendingDeepLink) {
+          picker.loadFromHash(this._pendingDeepLink);
+          this._pendingDeepLink = null;
+        }
+      });
+    }
+  }
+
   constructor() {
     super();
     this._suite = null;
@@ -466,6 +483,13 @@ export class AppShell extends LitElement {
     this._testName = testRom?.replace('.gb', '').split('/').pop() || '';
     this._testInfo = testInfo || null;
     this._setStoreA(store, emulator);
+
+    // Update URL hash for deep linking
+    if (suite?.name && testRom) {
+      const testName = testRom.replace('.gb', '');
+      const hash = `${suite.name}/${testName}`;
+      history.replaceState(null, '', `#${hash}`);
+    }
   }
 
   _onFileLoaded(e) {

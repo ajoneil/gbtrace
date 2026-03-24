@@ -384,6 +384,40 @@ export class TestPicker extends LitElement {
     }
   }
 
+  /** Deep-link: parse "suiteName/testPath" and auto-load the test. */
+  async loadFromHash(hash) {
+    // Wait for manifests to load
+    await this._loadManifests();
+
+    const slashIdx = hash.indexOf('/');
+    if (slashIdx < 0) return;
+    const suiteName = hash.slice(0, slashIdx).toLowerCase();
+    const testPath = hash.slice(slashIdx + 1);
+
+    const suite = TEST_SUITES.find(s => s.name.toLowerCase() === suiteName);
+    if (!suite || !suite.tests) return;
+
+    const test = suite.tests.find(t =>
+      t.rom?.replace('.gb', '') === testPath || t.name === testPath
+    );
+    if (!test) return;
+
+    // Select the suite and test in the UI
+    this._selectedSuite = TEST_SUITES.indexOf(suite);
+    this._category = '';
+    this._selectedTest = suite.tests.indexOf(test);
+    this.requestUpdate();
+
+    // Load with preferred emulator
+    const emus = test.emulators || {};
+    const emu = (suite.preferredEmu && emus[suite.preferredEmu])
+      ? suite.preferredEmu
+      : EMULATORS.find(e => emus[e]);
+    if (emu) {
+      this._load(suite, test, emu, emus[emu] || 'pass');
+    }
+  }
+
   async _load(suite, test, emulator, status = 'pass') {
     const url = traceUrl(suite, test.rom, emulator, status);
     const filename = url.split('/').pop();
