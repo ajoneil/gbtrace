@@ -268,14 +268,6 @@ export class TraceSelector extends LitElement {
           `;
         })}
 
-        <button
-          class="add-btn"
-          ?disabled=${this._loading !== null}
-          @click=${this._clickUpload}
-          title="upload a trace file"
-        >+ upload</button>
-        <input type="file" accept=".gbtrace,.gz,.parquet" @change=${this._onFileChange}>
-
         ${hasActive ? html`
           <span class="sep">|</span>
           <span class="label">compare</span>
@@ -294,6 +286,15 @@ export class TraceSelector extends LitElement {
 
         ${this._loading ? html`<span class="status loading">loading ${this._loading}...</span>` : ''}
         ${this._error ? html`<span class="status error">${this._error}</span>` : ''}
+
+        <button
+          class="add-btn"
+          style="margin-left:auto;"
+          ?disabled=${this._loading !== null}
+          @click=${this._clickUpload}
+          title="upload a trace file"
+        >+ upload</button>
+        <input type="file" accept=".gbtrace,.gz,.parquet" @change=${this._onFileChange}>
 
         ${this.allFields.length ? html`
           <div class="fields-row">
