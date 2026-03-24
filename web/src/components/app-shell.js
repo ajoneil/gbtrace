@@ -341,16 +341,18 @@ export class AppShell extends LitElement {
           ` : ''}
         </div>
         ${expanded ? html`
-          <div style="border-top:1px solid var(--border);padding:8px;display:flex;gap:8px;flex-wrap:wrap;align-items:flex-start;">
+          <div style="border-top:1px solid var(--border);padding:8px;display:flex;gap:8px;align-items:flex-start;">
             ${this._hasPpuInternals ? html`
-              <ppu-sprite-table
-                .store=${this._store}
-                .cursorIndex=${this._effectiveIndex ?? this._viewStart}
-              ></ppu-sprite-table>
-              <ppu-fifo-visualizer
-                .store=${this._store}
-                .cursorIndex=${this._effectiveIndex ?? this._viewStart}
-              ></ppu-fifo-visualizer>
+              <div style="display:flex;flex-direction:column;gap:8px;min-width:0;">
+                <ppu-fifo-visualizer
+                  .store=${this._store}
+                  .cursorIndex=${this._effectiveIndex ?? this._viewStart}
+                ></ppu-fifo-visualizer>
+                <ppu-sprite-table
+                  .store=${this._store}
+                  .cursorIndex=${this._effectiveIndex ?? this._viewStart}
+                ></ppu-sprite-table>
+              </div>
             ` : ''}
             <pixel-display
               .store=${this._store}
