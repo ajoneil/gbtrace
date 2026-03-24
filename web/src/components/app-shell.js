@@ -631,6 +631,7 @@ export class AppShell extends LitElement {
   }
 
   _reset() {
+    history.replaceState(null, '', location.pathname);
     if (this._store) this._store.free();
     if (this._storeB) this._storeB.free();
     this._suite = null;
