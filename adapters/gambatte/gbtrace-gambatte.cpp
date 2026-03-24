@@ -11,6 +11,7 @@
 //   See Makefile in this directory.
 
 #include <gambatte.h>
+#include "gbtrace.h"
 
 #include <cstdio>
 #include <cstdlib>
@@ -149,6 +150,11 @@ static bool g_has_pix = false;
 static int g_stop_opcode = -1;
 static bool g_stop_opcode_triggered = false;
 
+// --- Parquet direct writer (FFI) ---
+static GbtraceWriter *g_parquet = nullptr;
+static std::vector<int> g_parquet_cols;
+static int g_parquet_ly_col = -1;
+
 // --- Pixel capture ---
 // Gambatte fills video_buf as a 160x144 RGBA framebuffer during runFor().
 // After each frame completes, we convert to a 2-bit shade string and emit
@@ -239,9 +245,73 @@ static inline void fput_u16(FILE *out, int val) {
 static std::unordered_map<unsigned short, unsigned char> g_io_cache;
 static bool g_io_cache_valid = false;
 
+static void emit_entry_parquet(int *r) {
+    // Gather ly and pix_len for boundary check
+    uint8_t ly_val = 255;
+    size_t pix_len = 0;
+    if (g_parquet_ly_col >= 0) {
+        if (g_io_cache_valid) {
+            auto it = g_io_cache.find(0xFF44);
+            if (it != g_io_cache.end()) ly_val = it->second;
+        } else {
+            ly_val = g_gb->externalRead(0xFF44);
+        }
+    }
+    if (g_has_pix) {
+        pix_len = g_pending_pix.size();
+    }
+    gbtrace_writer_check_boundary(g_parquet, ly_val, pix_len);
+
+    // Read current IO values (post-execution of this instruction)
+    std::unordered_map<unsigned short, unsigned char> io_now;
+    for (const auto &em : g_emitters) {
+        if (em.source == FieldEmitter::IO_READ) {
+            io_now[em.io_addr] = g_gb->externalRead(em.io_addr);
+        }
+    }
+
+    // Set all field values
+    for (size_t i = 0; i < g_emitters.size(); i++) {
+        int col = g_parquet_cols[i];
+        if (col < 0) continue;
+        const auto &em = g_emitters[i];
+        switch (em.source) {
+        case FieldEmitter::CALLBACK_8:
+            gbtrace_writer_set_u8(g_parquet, col, r[em.cb_index] & 0xFF);
+            break;
+        case FieldEmitter::CALLBACK_16:
+            gbtrace_writer_set_u16(g_parquet, col, r[em.cb_index] & 0xFFFF);
+            break;
+        case FieldEmitter::IO_READ:
+            if (g_io_cache_valid) {
+                gbtrace_writer_set_u8(g_parquet, col, g_io_cache[em.io_addr]);
+            } else {
+                gbtrace_writer_set_u8(g_parquet, col, io_now[em.io_addr]);
+            }
+            break;
+        case FieldEmitter::IME:
+            break;
+        case FieldEmitter::PIX:
+            gbtrace_writer_set_str(g_parquet, col,
+                                   g_pending_pix.c_str(), g_pending_pix.size());
+            g_pending_pix.clear();
+            break;
+        }
+    }
+
+    gbtrace_writer_finish_entry(g_parquet);
+
+    // Update cache for next callback
+    g_io_cache = io_now;
+    g_io_cache_valid = true;
+}
+
 static void trace_callback(void *data) {
     int *r = static_cast<int *>(data);
 
+    if (g_parquet) {
+        emit_entry_parquet(r);
+    } else {
     // Read current IO values (post-execution of this instruction)
     std::unordered_map<unsigned short, unsigned char> io_now;
     for (const auto &em : g_emitters) {
@@ -289,6 +359,7 @@ static void trace_callback(void *data) {
     // Update cache for next callback
     g_io_cache = io_now;
     g_io_cache_valid = true;
+    } // end JSONL path
 
     // Check opcode stop condition
     if (g_stop_opcode >= 0 && !g_stop_opcode_triggered) {
@@ -468,19 +539,28 @@ int main(int argc, char *argv[]) {
     std::fprintf(stderr, "Profile: %s (%zu fields)\n",
                  g_profile.name.c_str(), g_profile.fields.size());
 
-    // Open output
-    if (output_path.empty() || output_path == "-") {
-        g_output = stdout;
-    } else {
-        g_output = std::fopen(output_path.c_str(), "w");
-        if (!g_output) {
-            std::fprintf(stderr, "Error: cannot open %s for writing\n", output_path.c_str());
-            return 1;
-        }
+    // Detect parquet output mode from file extension
+    bool parquet_mode = false;
+    if (output_path.size() >= 8 &&
+        output_path.substr(output_path.size() - 8) == ".parquet") {
+        parquet_mode = true;
     }
 
-    static char output_buf[64 * 1024];
-    std::setvbuf(g_output, output_buf, _IOFBF, sizeof(output_buf));
+    // Open output (JSONL mode only; parquet mode opens via FFI after header is built)
+    if (!parquet_mode) {
+        if (output_path.empty() || output_path == "-") {
+            g_output = stdout;
+        } else {
+            g_output = std::fopen(output_path.c_str(), "w");
+            if (!g_output) {
+                std::fprintf(stderr, "Error: cannot open %s for writing\n", output_path.c_str());
+                return 1;
+            }
+        }
+
+        static char output_buf[64 * 1024];
+        std::setvbuf(g_output, output_buf, _IOFBF, sizeof(output_buf));
+    }
 
     // Init emulator
     gambatte::GB gb;
@@ -507,9 +587,42 @@ int main(int argc, char *argv[]) {
                      boot_rom_path.c_str(), boot_rom_info.c_str());
     }
 
-    // Write header and set callback
+    // Write header / init parquet writer
     std::string rom_hash = sha256_file(rom_path);
-    write_header(g_output, g_profile, rom_hash, model, boot_rom_info);
+
+    if (parquet_mode) {
+        // Build header JSON for the FFI writer
+        std::string header_json = "{\"_header\":true,\"format_version\":\"0.1.0\","
+            "\"emulator\":\"gambatte-speedrun\",\"emulator_version\":\"r730+\","
+            "\"rom_sha256\":\"" + rom_hash + "\",\"model\":\"" + model + "\","
+            "\"boot_rom\":\"" + boot_rom_info + "\",\"profile\":\"" + g_profile.name + "\","
+            "\"fields\":[";
+        for (size_t i = 0; i < g_emitters.size(); i++) {
+            if (i > 0) header_json += ",";
+            header_json += "\"" + g_emitters[i].name + "\"";
+        }
+        header_json += "],\"trigger\":\"instruction\"}";
+
+        g_parquet = gbtrace_writer_new(
+            output_path.c_str(), header_json.c_str(), header_json.size());
+        if (!g_parquet) {
+            std::fprintf(stderr, "Error: failed to create parquet writer\n");
+            return 1;
+        }
+
+        // Cache column indices
+        g_parquet_cols.resize(g_emitters.size());
+        for (size_t i = 0; i < g_emitters.size(); i++) {
+            g_parquet_cols[i] = gbtrace_writer_find_field(
+                g_parquet, g_emitters[i].name.c_str());
+        }
+        g_parquet_ly_col = gbtrace_writer_find_field(g_parquet, "ly");
+
+        std::fprintf(stderr, "Output: parquet (direct write)\n");
+    } else {
+        write_header(g_output, g_profile, rom_hash, model, boot_rom_info);
+    }
+
     gb.setTraceCallback(trace_callback);
 
     // Run
@@ -616,9 +729,14 @@ int main(int argc, char *argv[]) {
         }
     }
 
-    std::fflush(g_output);
-    if (g_output != stdout) {
-        std::fclose(g_output);
+    if (g_parquet) {
+        gbtrace_writer_close(g_parquet);
+        g_parquet = nullptr;
+    } else {
+        std::fflush(g_output);
+        if (g_output != stdout) {
+            std::fclose(g_output);
+        }
     }
 
     if (stopped_early) {

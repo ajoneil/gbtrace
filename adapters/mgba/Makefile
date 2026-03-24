@@ -14,12 +14,14 @@ MGBA_BUILD ?= $(MGBA_DIR)/build
 
 CC ?= cc
 CFLAGS = -O2 -std=c11 -Wall -Wextra
+FFI_DIR  ?= ../../crates/gbtrace-ffi
+FFI_LIB  ?= ../../target/release/libgbtrace_ffi.a
 
 # Use the exact same defines as the mGBA library build to ensure struct layout matches
 MGBA_DEFINES = $(shell sed -n 's/^C_DEFINES = //p' $(MGBA_BUILD)/CMakeFiles/mgba.dir/flags.make)
-INCLUDES = -I$(MGBA_DIR)/include -I$(MGBA_BUILD)/include -I$(MGBA_DIR)/src
+INCLUDES = -I$(MGBA_DIR)/include -I$(MGBA_BUILD)/include -I$(MGBA_DIR)/src -I$(FFI_DIR)
 LDFLAGS = -L$(MGBA_BUILD)
-LDLIBS = -lmgba -lm -lpthread -lz
+LDLIBS = -lmgba -lm -ldl -lpthread -lz
 
 TARGET = gbtrace-mgba
 
@@ -27,8 +29,8 @@ TARGET = gbtrace-mgba
 
 all: $(TARGET)
 
-$(TARGET): gbtrace-mgba.c
-	$(CC) $(CFLAGS) $(MGBA_DEFINES) $(INCLUDES) -o $@ $< $(LDFLAGS) $(LDLIBS)
+$(TARGET): gbtrace-mgba.c $(FFI_LIB)
+	$(CC) $(CFLAGS) $(MGBA_DEFINES) $(INCLUDES) -o $@ $< $(FFI_LIB) $(LDFLAGS) $(LDLIBS)
 
 clean:
 	rm -f $(TARGET)

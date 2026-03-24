@@ -4,8 +4,10 @@ GAMBATTE_DIR ?= gambatte-speedrun/gambatte_core
 
 CXX ?= g++
 CXXFLAGS = -O2 -std=c++17 -Wall -Wextra -DHAVE_CSTDINT
-INCLUDES = -I$(GAMBATTE_DIR)/libgambatte/include
-LDLIBS = -lz
+FFI_DIR  ?= ../../crates/gbtrace-ffi
+FFI_LIB  ?= ../../target/release/libgbtrace_ffi.a
+INCLUDES = -I$(GAMBATTE_DIR)/libgambatte/include -I$(FFI_DIR)
+LDLIBS = -lz -lm -ldl -lpthread
 
 TARGET = gbtrace-gambatte
 LIB = $(GAMBATTE_DIR)/libgambatte/libgambatte.a
@@ -22,8 +24,8 @@ gambatte-speedrun:
 $(LIB): gambatte-speedrun
 	cd $(GAMBATTE_DIR)/libgambatte && scons -j$$(nproc)
 
-$(TARGET): gbtrace-gambatte.cpp $(LIB)
-	$(CXX) $(CXXFLAGS) $(INCLUDES) -o $@ $< $(LIB) $(LDLIBS)
+$(TARGET): gbtrace-gambatte.cpp $(LIB) $(FFI_LIB)
+	$(CXX) $(CXXFLAGS) $(INCLUDES) -o $@ $< $(LIB) $(FFI_LIB) $(LDLIBS)
 
 clean:
 	rm -f $(TARGET)

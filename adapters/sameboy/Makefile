@@ -11,10 +11,12 @@ SAMEBOY_DIR ?= SameBoy
 
 CXX ?= g++
 CXXFLAGS = -O2 -std=c++17 -Wall -Wextra
+FFI_DIR  ?= ../../crates/gbtrace-ffi
+FFI_LIB  ?= ../../target/release/libgbtrace_ffi.a
 # Include Core/ directly (we define GB_INTERNAL for full struct access)
-INCLUDES = -I$(SAMEBOY_DIR)/Core
+INCLUDES = -I$(SAMEBOY_DIR)/Core -I$(FFI_DIR)
 LDFLAGS = -L$(SAMEBOY_DIR)/build/lib
-LDLIBS = -lsameboy -lm -lpthread
+LDLIBS = -lsameboy -lm -ldl -lpthread
 
 TARGET = gbtrace-sameboy
 
@@ -22,8 +24,8 @@ TARGET = gbtrace-sameboy
 
 all: $(TARGET)
 
-$(TARGET): gbtrace-sameboy.cpp
-	$(CXX) $(CXXFLAGS) $(INCLUDES) -o $@ $< $(LDFLAGS) $(LDLIBS)
+$(TARGET): gbtrace-sameboy.cpp $(FFI_LIB)
+	$(CXX) $(CXXFLAGS) $(INCLUDES) -o $@ $< $(FFI_LIB) $(LDFLAGS) $(LDLIBS)
 
 clean:
 	rm -f $(TARGET)
