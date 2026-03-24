@@ -22,6 +22,7 @@ export class TraceTimeline extends LitElement {
     compareMode: { type: Boolean },
     entryCountB: { type: Number },
     syncMode: { type: String },
+    currentIndex: { type: Number },
     _dragging: { state: true },
   };
 
@@ -157,6 +158,12 @@ export class TraceTimeline extends LitElement {
       background: var(--accent);
       pointer-events: none;
     }
+
+    .scrubber {
+      width: 100%;
+      margin: 6px 0 0 0;
+      accent-color: var(--accent);
+    }
   `;
 
   constructor() {
@@ -284,6 +291,11 @@ export class TraceTimeline extends LitElement {
             </div>
           ` : ''}
         </div>
+
+        <input type="range" class="scrubber"
+          min=${this.viewStart} max=${Math.max(this.viewStart, this.viewEnd - 1)}
+          .value=${String(this.currentIndex ?? this.viewStart)}
+          @input=${this._onScrub}>
       </div>
     `;
   }
@@ -381,6 +393,14 @@ export class TraceTimeline extends LitElement {
 
   _onDoubleClick() {
     this._selectAll();
+  }
+
+  _onScrub(e) {
+    const index = parseInt(e.target.value, 10);
+    this.dispatchEvent(new CustomEvent('current-index', {
+      detail: { index },
+      bubbles: true, composed: true,
+    }));
   }
 
   _changeSync(mode) {
