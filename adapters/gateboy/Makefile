@@ -15,8 +15,10 @@ METROLIB_DIR ?= metrolib
 CXX      ?= g++
 CXXFLAGS  = -O3 -std=c++20 -Wall -Wextra -Wno-unused-parameter \
             -DCONFIG_RELEASE
+FFI_DIR  ?= ../../crates/gbtrace-ffi
+FFI_LIB  ?= ../../target/release/libgbtrace_ffi.a
 INCLUDES  = -I$(METROBOY_DIR)/src -I$(METROBOY_DIR)/symlinks \
-            -I$(METROBOY_DIR)/symlinks/metrolib
+            -I$(METROBOY_DIR)/symlinks/metrolib -I$(FFI_DIR)
 
 TARGET = gbtrace-gateboy
 
@@ -66,8 +68,9 @@ deps:
 		ln -sf $(realpath $(METROLIB_DIR)) $(METROBOY_DIR)/symlinks/metrolib; \
 	fi
 
-$(TARGET): deps $(ALL_LIB_OBJS) $(ADAPTER_OBJ) $(AUDIO_STUB_OBJ)
-	$(CXX) $(CXXFLAGS) -o $@ $(ALL_LIB_OBJS) $(ADAPTER_OBJ) $(AUDIO_STUB_OBJ) -lpthread
+$(TARGET): deps $(ALL_LIB_OBJS) $(ADAPTER_OBJ) $(AUDIO_STUB_OBJ) $(FFI_LIB)
+	$(CXX) $(CXXFLAGS) -o $@ $(ALL_LIB_OBJS) $(ADAPTER_OBJ) $(AUDIO_STUB_OBJ) \
+		$(FFI_LIB) -lpthread -lm -ldl
 
 # Adapter source
 build/gbtrace-gateboy.o: gbtrace-gateboy.cpp | deps

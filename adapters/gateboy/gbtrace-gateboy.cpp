@@ -17,6 +17,7 @@
 
 #include "GateBoyLib/GateBoy.h"
 #include "metrolib/core/Blobs.h"
+#include "gbtrace.h"
 
 #include <cstdio>
 #include <cstdlib>
@@ -182,6 +183,12 @@ struct FieldEmitter {
 
 static std::vector<FieldEmitter> g_emitters;
 static bool g_has_pix = false;
+
+// --- Parquet direct writer (FFI) ---
+static GbtraceWriter *g_parquet = nullptr;
+// Column indices into the parquet writer, parallel to g_emitters
+static std::vector<int> g_parquet_cols;
+static int g_parquet_ly_col = -1;
 
 // --- Pixel capture ---
 // Uses GateBoy's pixel_callback in update_framebuffer() to capture each
@@ -424,6 +431,49 @@ static void emit_entry(FILE *out, GateBoy &gb) {
     std::fprintf(out, "}\n");
 }
 
+static void emit_entry_parquet(GateBoy &gb) {
+    const CpuState &reg = gb.cpu.core.reg;
+
+    // Gather ly and pix_len for boundary check
+    uint8_t ly_val = 255;
+    size_t pix_len = 0;
+    if (g_parquet_ly_col >= 0) {
+        ly_val = (uint8_t)bit_pack(gb.gb_state.reg_ly);
+    }
+    if (g_has_pix) {
+        pix_len = g_pix_buf.size();
+    }
+    gbtrace_writer_check_boundary(g_parquet, ly_val, pix_len);
+
+    // Set all field values
+    for (size_t i = 0; i < g_emitters.size(); i++) {
+        int col = g_parquet_cols[i];
+        if (col < 0) continue;
+        const auto &em = g_emitters[i];
+        switch (em.source) {
+        case FieldEmitter::CPU_REG8:
+            gbtrace_writer_set_u8(g_parquet, col, read_cpu_reg8(reg, em.name));
+            break;
+        case FieldEmitter::CPU_REG16:
+            gbtrace_writer_set_u16(g_parquet, col, read_cpu_reg16(reg, em.name));
+            break;
+        case FieldEmitter::CPU_IME:
+            gbtrace_writer_set_bool(g_parquet, col, reg.ime);
+            break;
+        case FieldEmitter::IO_READ:
+            gbtrace_writer_set_u8(g_parquet, col, read_reg(gb, em.io_addr));
+            break;
+        case FieldEmitter::PIX:
+            gbtrace_writer_set_str(g_parquet, col,
+                                   g_pix_buf.c_str(), g_pix_buf.size());
+            g_pix_buf.clear();
+            break;
+        }
+    }
+
+    gbtrace_writer_finish_entry(g_parquet);
+}
+
 // --- Main ---
 
 static void print_usage(const char *argv0) {
@@ -514,21 +564,29 @@ int main(int argc, char *argv[]) {
         }
     }
 
-    // Open output
-    FILE *output = nullptr;
-    if (output_path.empty() || output_path == "-") {
-        output = stdout;
-    } else {
-        output = std::fopen(output_path.c_str(), "w");
-        if (!output) {
-            std::fprintf(stderr, "Error: cannot open %s for writing\n",
-                         output_path.c_str());
-            return 1;
-        }
+    // Detect parquet output mode from file extension
+    bool parquet_mode = false;
+    if (output_path.size() >= 8 &&
+        output_path.substr(output_path.size() - 8) == ".parquet") {
+        parquet_mode = true;
     }
 
-    static char output_buf[64 * 1024];
-    std::setvbuf(output, output_buf, _IOFBF, sizeof(output_buf));
+    // Open output (JSONL mode only; parquet mode opens via FFI after header is built)
+    FILE *output = nullptr;
+    if (!parquet_mode) {
+        if (output_path.empty() || output_path == "-") {
+            output = stdout;
+        } else {
+            output = std::fopen(output_path.c_str(), "w");
+            if (!output) {
+                std::fprintf(stderr, "Error: cannot open %s for writing\n",
+                             output_path.c_str());
+                return 1;
+            }
+        }
+        static char output_buf[64 * 1024];
+        std::setvbuf(output, output_buf, _IOFBF, sizeof(output_buf));
+    }
 
     // Load ROM into a blob
     blob cart_blob;
@@ -578,9 +636,41 @@ int main(int argc, char *argv[]) {
         boot_rom_info = "built-in";
     }
 
-    // Write header
+    // Write header / init parquet writer
     std::string rom_hash = sha256_file(rom_path);
-    write_header(output, profile, rom_hash, boot_rom_info.c_str());
+
+    if (parquet_mode) {
+        // Build header JSON for the FFI writer
+        std::string header_json = "{\"_header\":true,\"format_version\":\"0.1.0\","
+            "\"emulator\":\"gateboy\",\"emulator_version\":\"metroboy-git\","
+            "\"rom_sha256\":\"" + rom_hash + "\",\"model\":\"DMG\","
+            "\"boot_rom\":\"" + boot_rom_info + "\",\"profile\":\"" + profile.name + "\","
+            "\"fields\":[";
+        for (size_t i = 0; i < g_emitters.size(); i++) {
+            if (i > 0) header_json += ",";
+            header_json += "\"" + g_emitters[i].name + "\"";
+        }
+        header_json += "],\"trigger\":\"" + profile.trigger + "\"}";
+
+        g_parquet = gbtrace_writer_new(
+            output_path.c_str(), header_json.c_str(), header_json.size());
+        if (!g_parquet) {
+            std::fprintf(stderr, "Error: failed to create parquet writer\n");
+            return 1;
+        }
+
+        // Cache column indices
+        g_parquet_cols.resize(g_emitters.size());
+        for (size_t i = 0; i < g_emitters.size(); i++) {
+            g_parquet_cols[i] = gbtrace_writer_find_field(
+                g_parquet, g_emitters[i].name.c_str());
+        }
+        g_parquet_ly_col = gbtrace_writer_find_field(g_parquet, "ly");
+
+        std::fprintf(stderr, "Output: parquet (direct write)\n");
+    } else {
+        write_header(output, profile, rom_hash, boot_rom_info.c_str());
+    }
 
     // Print stop conditions
     for (const auto &cond : stop_conditions) {
@@ -641,7 +731,11 @@ int main(int argc, char *argv[]) {
                               || (reg.op_state == 0 && reg.op_addr != prev_op_addr);
 
         if (should_emit) {
-            emit_entry(output, gb);
+            if (g_parquet) {
+                emit_entry_parquet(gb);
+            } else {
+                emit_entry(output, gb);
+            }
         }
 
         // Check stop conditions at instruction boundaries only
@@ -722,9 +816,14 @@ int main(int argc, char *argv[]) {
         }
     }
 
-    std::fflush(output);
-    if (output != stdout) {
-        std::fclose(output);
+    if (g_parquet) {
+        gbtrace_writer_close(g_parquet);
+        g_parquet = nullptr;
+    } else {
+        std::fflush(output);
+        if (output != stdout) {
+            std::fclose(output);
+        }
     }
 
     if (stopped_early) {

@@ -38,33 +38,39 @@ tmp_pipe="${TMP}.pipe"
 cleanup() { rm -f "$tmp_pipe" "$stderr_file" "${TMP}_trimmed.parquet" "${ROM%.gb}.sav"; }
 trap cleanup EXIT
 
-# --- Capture + convert via named pipe (no intermediate file on disk) ---
+# --- Capture ---
 EXTRA_ARGS=()
 if [[ -f "$PIX_REF" ]]; then
     EXTRA_ARGS+=(--reference "$PIX_REF")
 fi
 
-mkfifo "$tmp_pipe"
+ADAPTER_ARGS=(
+    --rom "$ROM"
+    --profile "$PROFILE"
+    --stop-on-serial "0A"
+    --stop-serial-count 4
+    --extra-frames 2
+    --frames "$MAX_FRAMES"
+    "${EXTRA_ARGS[@]}"
+)
 
-(
-    set +eo pipefail
-    "$BIN" \
-        --rom "$ROM" \
-        --profile "$PROFILE" \
-        --stop-on-serial "0A" \
-        --stop-serial-count 4 \
-        --extra-frames 2 \
-        --frames "$MAX_FRAMES" \
-        "${EXTRA_ARGS[@]}" \
-        --output "$tmp_pipe" \
-        2>"$stderr_file" \
-        < /dev/null
-) &
-adapter_pid=$!
-
-"$CLI" convert "$tmp_pipe" -o "$tmp_parquet" >/dev/null 2>&1 || true
-
-wait "$adapter_pid" || true
+# Adapters with FFI support write parquet directly (detected by name).
+# Others use a named pipe to stream JSONL to the converter.
+if [[ "$ADAPTER" == "gateboy" ]]; then
+    (
+        set +eo pipefail
+        "$BIN" "${ADAPTER_ARGS[@]}" --output "$tmp_parquet" 2>"$stderr_file" </dev/null
+    ) || true
+else
+    mkfifo "$tmp_pipe"
+    (
+        set +eo pipefail
+        "$BIN" "${ADAPTER_ARGS[@]}" --output "$tmp_pipe" 2>"$stderr_file" </dev/null
+    ) &
+    adapter_pid=$!
+    "$CLI" convert "$tmp_pipe" -o "$tmp_parquet" >/dev/null 2>&1 || true
+    wait "$adapter_pid" || true
+fi
 
 if [[ ! -s "$tmp_parquet" ]]; then
     err_msg=$(head -1 "$stderr_file" 2>/dev/null || echo "unknown")
