@@ -129,6 +129,7 @@ export class AppShell extends LitElement {
     _frameBoundaries: { state: true },
     _frameBoundariesB: { state: true },
     _syncMode: { state: true },
+    _ppuExpanded: { state: true },
   };
 
   constructor() {
@@ -147,6 +148,7 @@ export class AppShell extends LitElement {
     this._hiddenFields = new Set();
     this._hoverIndex = null;
     this._currentIndex = null;
+    this._ppuExpanded = false;
     this._diffStats = null;
     this._downsampled = false;
     this._viewStart = 0;
@@ -275,8 +277,71 @@ export class AppShell extends LitElement {
           .viewStart=${this._viewStart} .viewEnd=${this._viewEnd}
         ></trace-query>
 
-        ${this._chartField === '__pixels__' ? html`
-          <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-start;">
+        ${this._chartField && this._chartField !== '__pixels__' ? html`
+          <trace-chart
+            .store=${this._store}
+            .field=${this._chartField}
+            .highlightIndices=${this._highlightIndices}
+            .cursorIndex=${this._effectiveIndex}
+            .viewStart=${this._viewStart}
+            .viewEnd=${this._viewEnd}
+          ></trace-chart>
+        ` : ''}
+
+        ${(this._store?.hasPixels()) ? html`
+          ${this._renderPpuBar(isTcycle)}
+        ` : ''}
+
+        <trace-table
+          .store=${this._store}
+          .viewStart=${this._viewStart}
+          .viewEnd=${this._viewEnd}
+          .fields=${this._allFields}
+          .highlightIndices=${this._highlightIndices}
+          .hiddenFields=${this._hiddenFields}
+          .tcyclePixels=${this._store?.isTcyclePixels() || false}
+          .currentIndex=${this._currentIndex}
+        ></trace-table>
+      </div>
+    `;
+  }
+
+  _togglePpu() {
+    this._ppuExpanded = !this._ppuExpanded;
+    // Ensure pixel mode is active when expanded
+    if (this._ppuExpanded) {
+      this._chartField = '__pixels__';
+    }
+  }
+
+  _renderPpuBar(isTcycle) {
+    const e = this._effectiveIndex != null ? this._store?.entry(this._effectiveIndex) : null;
+    const expanded = this._ppuExpanded;
+
+    return html`
+      <div style="border:1px solid var(--border);border-radius:8px;background:var(--bg-surface);overflow:hidden;">
+        <div style="display:flex;align-items:center;gap:8px;padding:6px 10px;cursor:pointer;font-size:0.72rem;font-family:var(--mono);"
+          @click=${this._togglePpu}>
+          <span style="font-weight:600;color:var(--accent);">PPU</span>
+          <span style="color:var(--text-muted);font-size:0.8rem;">${expanded ? '\u25BC' : '\u25B6'}</span>
+          ${!expanded && e ? html`
+            <span style="color:var(--text-muted);display:flex;gap:8px;flex-wrap:wrap;">
+              ${e.lcdc !== undefined ? html`<span>lcdc:<span style="color:var(--text);">${this._hex(e.lcdc)}</span></span>` : ''}
+              ${e.stat !== undefined ? html`<span>stat:<span style="color:var(--text);">${this._hex(e.stat)}</span></span>` : ''}
+              ${e.ly !== undefined ? html`<span>ly:<span style="color:var(--text);">${this._hex(e.ly)}</span></span>` : ''}
+              ${e.scy !== undefined ? html`<span>scy:<span style="color:var(--text);">${this._hex(e.scy)}</span></span>` : ''}
+              ${e.scx !== undefined ? html`<span>scx:<span style="color:var(--text);">${this._hex(e.scx)}</span></span>` : ''}
+              ${e.wy !== undefined ? html`<span>wy:<span style="color:var(--text);">${this._hex(e.wy)}</span></span>` : ''}
+              ${e.wx !== undefined ? html`<span>wx:<span style="color:var(--text);">${this._hex(e.wx)}</span></span>` : ''}
+              ${e.bgp !== undefined ? html`<span>bgp:<span style="color:var(--text);">${this._hex(e.bgp)}</span></span>` : ''}
+              ${e.obp0 !== undefined ? html`<span>obp0:<span style="color:var(--text);">${this._hex(e.obp0)}</span></span>` : ''}
+              ${e.obp1 !== undefined ? html`<span>obp1:<span style="color:var(--text);">${this._hex(e.obp1)}</span></span>` : ''}
+              ${e.frame_num !== undefined ? html`<span>frame:<span style="color:var(--text);">${e.frame_num}</span></span>` : ''}
+            </span>
+          ` : ''}
+        </div>
+        ${expanded ? html`
+          <div style="border-top:1px solid var(--border);padding:8px;display:flex;gap:8px;flex-wrap:wrap;align-items:flex-start;">
             ${this._hasPpuInternals ? html`
               <ppu-sprite-table
                 .store=${this._store}
@@ -295,45 +360,13 @@ export class AppShell extends LitElement {
               .currentIndex=${this._effectiveIndex}
             ></pixel-display>
           </div>
-        ` : this._chartField ? html`
-          <trace-chart
-            .store=${this._store}
-            .field=${this._chartField}
-            .highlightIndices=${this._highlightIndices}
-            .cursorIndex=${this._effectiveIndex}
-            .viewStart=${this._viewStart}
-            .viewEnd=${this._viewEnd}
-          ></trace-chart>
         ` : ''}
-
-        ${(this._store?.hasPixels()) ? html`
-          <div style="display:flex;align-items:center;gap:6px;font-size:0.75rem;font-family:var(--mono);">
-            <span style="cursor:pointer;padding:2px 8px;border-radius:4px;border:1px solid var(--border);${this._chartField === '__pixels__' ? 'background:var(--accent-subtle);color:var(--accent);border-color:var(--accent);' : 'color:var(--text-muted);'}"
-              @click=${this._togglePpu}
-            >PPU</span>
-          </div>
-        ` : ''}
-
-        <trace-table
-          .store=${this._store}
-          .viewStart=${this._viewStart}
-          .viewEnd=${this._viewEnd}
-          .fields=${this._allFields}
-          .highlightIndices=${this._highlightIndices}
-          .hiddenFields=${this._hiddenFields}
-          .tcyclePixels=${this._store?.isTcyclePixels() || false}
-          .currentIndex=${this._currentIndex}
-        ></trace-table>
       </div>
     `;
   }
 
-  _togglePpu() {
-    if (this._chartField === '__pixels__') {
-      this._chartField = null;
-    } else {
-      this._chartField = '__pixels__';
-    }
+  _hex(v) {
+    return (v ?? 0).toString(16).padStart(2, '0');
   }
 
   _renderCompare() {
