@@ -269,7 +269,7 @@ fn cmd_frames(path: &PathBuf) -> i32 {
 // ---------------------------------------------------------------------------
 
 fn cmd_render(path: &PathBuf, output_dir: Option<PathBuf>, frame_filter: Option<String>) -> i32 {
-    let store = match gbtrace::column_store::load_column_store(path) {
+    let store = match gbtrace::column_store::open_trace_store(path) {
         Ok(s) => s,
         Err(e) => {
             eprintln!("Error: {e}");
@@ -277,7 +277,7 @@ fn cmd_render(path: &PathBuf, output_dir: Option<PathBuf>, frame_filter: Option<
         }
     };
 
-    let frames = gbtrace::framebuffer::reconstruct_frames(&store);
+    let frames = gbtrace::framebuffer::reconstruct_frames(store.as_ref());
     if frames.is_empty() {
         eprintln!("No frames with pixel data found (trace needs a 'pix' field)");
         return 1;

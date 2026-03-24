@@ -769,7 +769,20 @@ impl<'a> EntryView<'a> {
 #[cfg(feature = "parquet")]
 use crate::parquet::ParquetTraceReader;
 
-/// Load a column store from any supported trace file format.
+/// Load a trace store from any supported format. Returns a lazy store for
+/// parquet (row groups decoded on demand) or an eager store for JSONL.
+pub fn open_trace_store(path: impl AsRef<std::path::Path>) -> Result<Box<dyn TraceStore>> {
+    let path = path.as_ref();
+    #[cfg(feature = "parquet")]
+    if path.extension().is_some_and(|ext| ext == "parquet") {
+        let data = std::fs::read(path)?;
+        let store = LazyColumnStore::from_bytes(&data)?;
+        return Ok(Box::new(store));
+    }
+    Ok(Box::new(load_from_jsonl(path)?))
+}
+
+/// Load a column store from any supported trace file format (eager).
 pub fn load_column_store(path: impl AsRef<std::path::Path>) -> Result<ColumnStore> {
     let path = path.as_ref();
     #[cfg(feature = "parquet")]
