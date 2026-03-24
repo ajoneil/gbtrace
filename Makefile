@@ -132,9 +132,11 @@ site: wasm traces
 	@find test-suites/gbmicrotest -name '*.gb' -exec cp {} $(BUILD_DIR)/site/tests/gbmicrotest/ \;
 	@cd test-suites/blargg && find . -name '*.gb' -exec sh -c 'mkdir -p "$(BUILD_DIR)/site/tests/blargg/$$(dirname "{}")" && cp "{}" "$(BUILD_DIR)/site/tests/blargg/{}"' \;
 	@if [ -d "$(BUILD_DIR)/site/tests/dmg-acid2" ]; then cp test-suites/dmg-acid2/dmg-acid2.gb $(BUILD_DIR)/site/tests/dmg-acid2/; fi
+	@if [ -d "$(BUILD_DIR)/site/tests/mooneye" ]; then cd test-suites/mooneye && find . -name '*.gb' -exec sh -c 'mkdir -p "$(BUILD_DIR)/site/tests/mooneye/$$(dirname "{}")" && cp "{}" "$(BUILD_DIR)/site/tests/mooneye/{}"' \; ; fi
 	@# Copy profile TOMLs so the viewer can offer them for download
 	@cp test-suites/gbmicrotest/profile.toml $(BUILD_DIR)/site/tests/gbmicrotest/
 	@cp test-suites/blargg/profile.toml $(BUILD_DIR)/site/tests/blargg/
+	@if [ -d "$(BUILD_DIR)/site/tests/mooneye" ]; then cp test-suites/mooneye/profile.toml $(BUILD_DIR)/site/tests/mooneye/; fi
 	@if [ -d "$(BUILD_DIR)/site/tests/dmg-acid2" ]; then cp test-suites/dmg-acid2/profile.toml $(BUILD_DIR)/site/tests/dmg-acid2/; fi
 	@echo "Site ready: $(BUILD_DIR)/site/"
 
@@ -150,6 +152,7 @@ serve: wasm
 	@if [ -d "$(DMG_ACID2_TRACE_DIR)" ]; then cp -r $(DMG_ACID2_TRACE_DIR) $(BUILD_DIR)/site/tests/dmg-acid2; fi
 	@if [ -d "$(BUILD_DIR)/site/tests/gbmicrotest" ]; then cp test-suites/gbmicrotest/profile.toml $(BUILD_DIR)/site/tests/gbmicrotest/; fi
 	@if [ -d "$(BUILD_DIR)/site/tests/blargg" ]; then cp test-suites/blargg/profile.toml $(BUILD_DIR)/site/tests/blargg/; fi
+	@if [ -d "$(BUILD_DIR)/site/tests/mooneye" ]; then cp test-suites/mooneye/profile.toml $(BUILD_DIR)/site/tests/mooneye/; fi
 	@if [ -d "$(BUILD_DIR)/site/tests/dmg-acid2" ]; then cp test-suites/dmg-acid2/profile.toml $(BUILD_DIR)/site/tests/dmg-acid2/; fi
 	@echo "Serving on http://localhost:3080"
 	@echo "  Local files from web/, traces from local build or $(PAGES_URL)"
