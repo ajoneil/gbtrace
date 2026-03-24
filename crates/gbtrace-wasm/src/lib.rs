@@ -143,40 +143,36 @@ impl TraceStore {
         self.frames_cache.borrow().as_ref().map(|f| f.len()).unwrap_or(0)
     }
 
-    /// Render a frame as RGBA pixel data (160×144×4 = 92160 bytes).
-    /// Uses explicit frame boundaries to determine the entry range, then
-    /// decodes only the needed row groups from the lazy store.
+    /// Render a complete frame as RGBA pixel data (160×144×4 = 92160 bytes).
+    /// The library handles all internal decoding transparently.
     #[wasm_bindgen(js_name = renderFrame)]
     pub fn render_frame(&self, frame_index: usize) -> Result<JsValue, JsError> {
         let (start, end) = match self.frame_entry_range(frame_index) {
             Some(r) => r,
             None => return Ok(JsValue::NULL),
         };
-        let store = self.decode_range(start, end)?;
-        let frames = framebuffer::reconstruct_frames(&store);
-        // Return the last frame with visible pixels (the one we want)
-        match frames.iter().rev().find(|f| f.pixels.iter().any(|&p| p != 0)) {
-            Some(f) => Ok(js_sys::Uint8ClampedArray::from(&f.to_rgba()[..]).into()),
-            None => {
-                // No visible pixels — return blank frame
-                match frames.last() {
-                    Some(f) => Ok(js_sys::Uint8ClampedArray::from(&f.to_rgba()[..]).into()),
-                    None => Ok(JsValue::NULL),
-                }
-            }
-        }
+        let store: &dyn gbtrace::column_store::TraceStore = match &self.store {
+            StoreKind::Lazy(s) => s,
+            StoreKind::Eager(s) => s,
+        };
+        let frame = framebuffer::reconstruct_partial_frame(store, start, end);
+        Ok(js_sys::Uint8ClampedArray::from(&frame.to_rgba()[..]).into())
     }
 
     /// Render a partial frame up to `stop_entry` as RGBA pixel data.
     /// Used for the progressive scrubber in T-cycle traces.
+    /// The library handles all internal decoding transparently.
     #[wasm_bindgen(js_name = renderPartialFrame)]
     pub fn render_partial_frame(&self, frame_index: usize, stop_entry: usize) -> Result<JsValue, JsError> {
         let (start, _end) = match self.frame_entry_range(frame_index) {
             Some(r) => r,
             None => return Ok(JsValue::NULL),
         };
-        let store = self.decode_range(start, stop_entry)?;
-        let frame = framebuffer::reconstruct_partial_frame(&store, 0, store.entry_count());
+        let store: &dyn gbtrace::column_store::TraceStore = match &self.store {
+            StoreKind::Lazy(s) => s,
+            StoreKind::Eager(s) => s,
+        };
+        let frame = framebuffer::reconstruct_partial_frame(store, start, stop_entry);
         Ok(js_sys::Uint8ClampedArray::from(&frame.to_rgba()[..]).into())
     }
 
@@ -206,16 +202,15 @@ impl TraceStore {
     /// where each element is `(x << 16) | y`, or 0xFFFFFFFF for no pixel.
     #[wasm_bindgen(js_name = buildPixelPositionMap)]
     pub fn build_pixel_position_map(&self, frame_index: usize) -> Result<JsValue, JsError> {
-        self.ensure_frames();
-        let (frame_start, frame_end) = {
-            let cache = self.frames_cache.borrow();
-            match cache.as_ref().and_then(|f| f.get(frame_index)) {
-                Some(f) => (f.start_entry, f.end_entry),
-                None => return Ok(JsValue::NULL),
-            }
+        let (frame_start, frame_end) = match self.frame_entry_range(frame_index) {
+            Some(r) => r,
+            None => return Ok(JsValue::NULL),
         };
-        let store = self.get_eager_store()?;
-        let map = framebuffer::build_pixel_position_map(&store, frame_start, frame_end);
+        let store: &dyn gbtrace::column_store::TraceStore = match &self.store {
+            StoreKind::Lazy(s) => s,
+            StoreKind::Eager(s) => s,
+        };
+        let map = framebuffer::build_pixel_position_map(store, frame_start, frame_end);
         let packed: Vec<u32> = map.iter().map(|&(x, y)| {
             if x == 0xFFFF { 0xFFFFFFFF } else { ((x as u32) << 16) | (y as u32) }
         }).collect();

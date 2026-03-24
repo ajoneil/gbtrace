@@ -5,7 +5,7 @@
 //! pixel value ('0'-'3'). Pixels are pushed left-to-right per scanline,
 //! with scanline boundaries detected from `ly` changes.
 
-use crate::column_store::ColumnStore;
+use crate::column_store::TraceStore;
 
 pub const LCD_WIDTH: usize = 160;
 pub const LCD_HEIGHT: usize = 144;
@@ -77,7 +77,7 @@ impl Frame {
 ///
 /// Returns one `Frame` per detected frame boundary. Uses `ly` to track
 /// scanlines and resets the x cursor when `ly` changes.
-pub fn reconstruct_frames(store: &ColumnStore) -> Vec<Frame> {
+pub fn reconstruct_frames(store: &dyn TraceStore) -> Vec<Frame> {
     let pix_col = match store.field_col("pix") {
         Some(c) => c,
         None => return Vec::new(),
@@ -105,7 +105,7 @@ pub fn reconstruct_frames(store: &ColumnStore) -> Vec<Frame> {
         let mut pixel_idx: usize = 0;
 
         for i in start..end {
-            let pix_str = store.column(pix_col).get_str(i);
+            let pix_str = store.get_str(pix_col, i);
             if pix_str.is_empty() { continue; }
 
             // Full-frame pixel dump (160*144 = 23040 chars)
@@ -140,7 +140,7 @@ pub fn reconstruct_frames(store: &ColumnStore) -> Vec<Frame> {
 /// LCD image progressively. Unrendered pixels are set to 0xFF (sentinel)
 /// so `to_rgba()` outputs them as transparent.
 pub fn reconstruct_partial_frame(
-    store: &ColumnStore,
+    store: &dyn TraceStore,
     frame_start: usize,
     stop_entry: usize,
 ) -> Frame {
@@ -159,7 +159,7 @@ pub fn reconstruct_partial_frame(
 
     let end = stop_entry.min(store.entry_count());
     for i in frame_start..end {
-        let pix_str = store.column(pix_col).get_str(i);
+        let pix_str = store.get_str(pix_col, i);
         if pix_str.is_empty() { continue; }
 
         // Full-frame dump: write all pixels at once
@@ -191,7 +191,7 @@ pub fn reconstruct_partial_frame(
 /// Entries with no pixel data get `(0xFFFF, 0xFFFF)`.
 /// Position is derived from sequential pixel count (LCD order).
 pub fn build_pixel_position_map(
-    store: &ColumnStore,
+    store: &dyn TraceStore,
     frame_start: usize,
     frame_end: usize,
 ) -> Vec<(u16, u16)> {
@@ -207,7 +207,7 @@ pub fn build_pixel_position_map(
 
     let end = frame_end.min(store.entry_count());
     for i in frame_start..end {
-        let pix_str = store.column(pix_col).get_str(i);
+        let pix_str = store.get_str(pix_col, i);
         if pix_str.is_empty() { continue; }
 
         // Skip full-frame dumps for position tracking
