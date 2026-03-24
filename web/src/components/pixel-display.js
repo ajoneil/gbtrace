@@ -223,6 +223,11 @@ export class PixelDisplay extends LitElement {
 
   _onScrub(e) {
     this._scrubEntry = parseInt(e.target.value, 10);
+    // Scrubbing sets the current index
+    this.dispatchEvent(new CustomEvent('current-index', {
+      detail: { index: this._scrubEntry },
+      bubbles: true, composed: true,
+    }));
     if (!this._rafPending) {
       this._rafPending = true;
       requestAnimationFrame(() => {

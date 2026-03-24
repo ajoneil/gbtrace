@@ -50,6 +50,7 @@ export class TraceTable extends LitElement {
     viewStart: { type: Number },
     viewEnd: { type: Number },
     tcyclePixels: { type: Boolean },
+    currentIndex: { type: Number },
   };
 
   constructor() {
@@ -202,8 +203,10 @@ export class TraceTable extends LitElement {
     for (let i = 0; i < entries.length; i++) {
       const globalIdx = globalStart + i;
       const data = entries[i];
-      const bg = hl?.has(globalIdx) ? 'background:var(--accent-subtle);' : '';
-      parts.push(`<div style="display:flex;height:${ROW_HEIGHT}px;align-items:center;border-bottom:1px solid var(--bg);${bg}" data-idx="${globalIdx}">`);
+      const isCurrent = this.currentIndex != null && globalIdx === this.currentIndex;
+      const bg = isCurrent ? 'background:var(--accent-subtle);border-left:3px solid var(--accent);'
+        : hl?.has(globalIdx) ? 'background:var(--accent-subtle);' : '';
+      parts.push(`<div style="display:flex;height:${ROW_HEIGHT}px;align-items:center;border-bottom:1px solid var(--bg);cursor:pointer;${bg}" data-idx="${globalIdx}">`);
       parts.push(`<span style="${cs(IDX_WIDTH, 'color:var(--text-muted);')}">${globalIdx}</span>`);
       if (pixArr) {
         const pv = pixArr[i];
@@ -227,11 +230,18 @@ export class TraceTable extends LitElement {
       const idx = parseInt(row.dataset.idx, 10);
       row.addEventListener('mouseenter', () => this._emitHover(idx));
       row.addEventListener('mouseleave', () => this._emitHover(null));
+      row.addEventListener('click', () => this._emitCurrent(idx));
     }
   }
 
   _emitHover(index) {
     this.dispatchEvent(new CustomEvent('hover-index', {
+      detail: { index }, bubbles: true, composed: true,
+    }));
+  }
+
+  _emitCurrent(index) {
+    this.dispatchEvent(new CustomEvent('current-index', {
       detail: { index }, bubbles: true, composed: true,
     }));
   }
