@@ -10,6 +10,7 @@ const FIELD_GROUPS = [
   { name: 'timer',     fields: ['div', 'tima', 'tma', 'tac'] },
   { name: 'serial',    fields: ['sb', 'sc'] },
   { name: 'ppu_int',   fields: [
+    'frame_num',
     'oam0_x', 'oam0_id', 'oam0_attr', 'oam1_x', 'oam1_id', 'oam1_attr',
     'oam2_x', 'oam2_id', 'oam2_attr', 'oam3_x', 'oam3_id', 'oam3_attr',
     'oam4_x', 'oam4_id', 'oam4_attr', 'oam5_x', 'oam5_id', 'oam5_attr',
@@ -291,6 +292,13 @@ export class TraceSelector extends LitElement {
           })}
         ` : ''}
 
+        ${this.hasPixels ? html`
+          <span class="sep">|</span>
+          <button class="trace-btn ${this.pixelsActive ? 'active' : ''}"
+            @click=${this._togglePixels}
+          >PPU</button>
+        ` : ''}
+
         ${this._loading ? html`<span class="status loading">loading ${this._loading}...</span>` : ''}
         ${this._error ? html`<span class="status error">${this._error}</span>` : ''}
 
@@ -299,12 +307,6 @@ export class TraceSelector extends LitElement {
           <div class="fields-row">
             <span class="ft-label">columns</span>
             ${this._renderFieldGroups()}
-            ${this.hasPixels ? html`
-              <span class="ft-sep"></span>
-              <span class="ft-chip ${this.pixelsActive ? 'on' : ''}"
-                @click=${this._togglePixels}
-              >pixels</span>
-            ` : ''}
             ${this.suite?.profile || this.testRom ? html`
               <span class="downloads">
                 ${this.suite?.profile ? html`<a href="${this.suite.profile}" download>profile</a>` : ''}
