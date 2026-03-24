@@ -94,12 +94,23 @@ export class PpuFifoVisualizer extends LitElement {
       border: 1px solid var(--border);
       border-radius: 2px;
     }
-    .merge-hint {
-      font-size: 0.58rem;
-      color: var(--text-muted);
-      text-align: center;
-      padding: 0 4px;
+    .merge-row {
+      display: flex;
+      gap: 0;
     }
+    .merge-cell {
+      width: ${PIXEL_SIZE}px;
+      height: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 0.45rem;
+      font-weight: 600;
+      border: 0.5px solid rgba(128,128,128,0.2);
+    }
+    .merge-bg { background: rgba(52,104,86,0.3); color: #88c070; }
+    .merge-obj { background: rgba(255,183,77,0.3); color: #ffb74d; }
+    .merge-none { background: transparent; color: var(--text-muted); opacity: 0.3; }
     .output-section {
       display: flex;
       flex-direction: column;
@@ -195,7 +206,10 @@ export class PpuFifoVisualizer extends LitElement {
               <span class="fifo-label">BG</span>
               <canvas id="bg-fifo" width="${FIFO_LEN * PIXEL_SIZE}" height="${PIXEL_SIZE}"></canvas>
             </div>
-            <div class="merge-hint">priority / mask \u2193</div>
+            <div class="fifo-row">
+              <span class="fifo-label" style="font-size:0.5rem;">\u2193mix</span>
+              <div class="merge-row">${this._renderMerge(e)}</div>
+            </div>
             <div class="fifo-row">
               <span class="fifo-label">OBJ</span>
               <canvas id="obj-fifo" width="${FIFO_LEN * PIXEL_SIZE}" height="${PIXEL_SIZE}"></canvas>
@@ -284,6 +298,32 @@ export class PpuFifoVisualizer extends LitElement {
     } else {
       el.style.background = 'var(--bg)';
     }
+  }
+
+  _renderMerge(e) {
+    if (e.mask_pipe === undefined) return html``;
+    const cells = [];
+    for (let i = 0; i < FIFO_LEN; i++) {
+      const bitPos = i; // matches FIFO direction: bit 0 left, bit 7 right (output)
+      const hasMask = (e.mask_pipe >> bitPos) & 1;
+      // OBJ color at this position
+      const objLo = (e.spr_fifo_a >> bitPos) & 1;
+      const objHi = (e.spr_fifo_b >> bitPos) & 1;
+      const objColor = (objHi << 1) | objLo;
+      // OBJ wins if mask is set AND obj color is non-zero (not transparent)
+      const objWins = hasMask && objColor !== 0;
+      const pal = (e.pal_pipe >> bitPos) & 1;
+
+      if (objWins) {
+        cells.push(html`<div class="merge-cell merge-obj">${pal ? 'P1' : 'P0'}</div>`);
+      } else if (hasMask) {
+        // Mask set but OBJ is transparent → BG wins
+        cells.push(html`<div class="merge-cell merge-bg">bg</div>`);
+      } else {
+        cells.push(html`<div class="merge-cell merge-bg">bg</div>`);
+      }
+    }
+    return cells;
   }
 
   _renderTilePreview(tileA, tileB, palette) {
