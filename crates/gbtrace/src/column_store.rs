@@ -17,6 +17,25 @@ use crate::profile::{field_type, FieldType};
 use crate::query::{self, Condition};
 
 // ---------------------------------------------------------------------------
+// Trait — the single interface for reading trace data
+// ---------------------------------------------------------------------------
+
+/// Read-only access to trace data. Both eager (ColumnStore) and lazy
+/// (LazyColumnStore) implement this. All consumers — framebuffer
+/// reconstruction, WASM viewer, queries — should use this trait.
+pub trait TraceStore {
+    fn header(&self) -> &TraceHeader;
+    fn entry_count(&self) -> usize;
+    fn field_col(&self, name: &str) -> Option<usize>;
+    fn frame_boundaries(&self) -> Vec<u32>;
+
+    // Column value access by (col_index, row_index)
+    fn get_str(&self, col: usize, row: usize) -> String;
+    fn get_numeric(&self, col: usize, row: usize) -> u64;
+    fn get_bool(&self, col: usize, row: usize) -> bool;
+}
+
+// ---------------------------------------------------------------------------
 // Column data
 // ---------------------------------------------------------------------------
 
@@ -694,6 +713,23 @@ fn parse_bool_str(s: &str) -> Option<bool> {
     }
 }
 
+impl TraceStore for ColumnStore {
+    fn header(&self) -> &TraceHeader { &self.header }
+    fn entry_count(&self) -> usize { self.len }
+    fn field_col(&self, name: &str) -> Option<usize> { self.field_index.get(name).copied() }
+    fn frame_boundaries(&self) -> Vec<u32> { self.frame_boundaries() }
+
+    fn get_str(&self, col: usize, row: usize) -> String {
+        self.columns[col].get_str(row).to_string()
+    }
+    fn get_numeric(&self, col: usize, row: usize) -> u64 {
+        self.columns[col].get_numeric(row)
+    }
+    fn get_bool(&self, col: usize, row: usize) -> bool {
+        self.columns[col].get_bool(row)
+    }
+}
+
 // ---------------------------------------------------------------------------
 // EntryView — zero-allocation row reference
 // ---------------------------------------------------------------------------
@@ -1172,6 +1208,10 @@ mod lazy {
                 }
             }
 
+            // The sub-store represents a single frame range — mark entry 0
+            // as the boundary so reconstruct_frames treats it as one frame.
+            store.explicit_boundaries = Some(vec![0]);
+
             Ok(store)
         }
 
@@ -1503,6 +1543,23 @@ mod lazy {
             store.explicit_boundaries = self.explicit_boundaries.clone();
 
             Ok(store)
+        }
+    }
+
+    impl TraceStore for LazyColumnStore {
+        fn header(&self) -> &TraceHeader { &self.header }
+        fn entry_count(&self) -> usize { self.index.total_rows() }
+        fn field_col(&self, name: &str) -> Option<usize> { self.field_index.get(name).copied() }
+        fn frame_boundaries(&self) -> Vec<u32> { self.frame_boundaries() }
+
+        fn get_str(&self, col: usize, row: usize) -> String {
+            self.get_str_named(&self.header.fields[col], row).unwrap_or_default()
+        }
+        fn get_numeric(&self, col: usize, row: usize) -> u64 {
+            self.get_numeric(col, row)
+        }
+        fn get_bool(&self, col: usize, row: usize) -> bool {
+            self.get_bool_named(&self.header.fields[col], row).unwrap_or(false)
         }
     }
 }
