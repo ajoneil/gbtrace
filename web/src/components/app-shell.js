@@ -324,7 +324,7 @@ export class AppShell extends LitElement {
           @click=${this._togglePpu}>
           <span style="font-weight:600;color:var(--accent);">PPU</span>
           <span style="color:var(--text-muted);font-size:0.8rem;">${expanded ? '\u25BC' : '\u25B6'}</span>
-          ${!expanded && e ? html`
+          ${e ? html`
             <span style="color:var(--text-muted);display:flex;gap:8px;flex-wrap:wrap;">
               ${e.lcdc !== undefined ? html`<span>lcdc:<span style="color:var(--text);">${this._hex(e.lcdc)}</span></span>` : ''}
               ${e.stat !== undefined ? html`<span>stat:<span style="color:var(--text);">${this._hex(e.stat)}</span></span>` : ''}
