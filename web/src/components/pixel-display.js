@@ -195,18 +195,32 @@ export class PixelDisplay extends LitElement {
     const canvas = this.renderRoot?.querySelector('#canvasA');
     if (!canvas) return;
     try {
-      const rgba = this.store.renderPartialFrame(this._frameIndex, entry);
-      if (!rgba) return;
       const ctx = canvas.getContext('2d');
-      const arr = new Uint8ClampedArray(rgba.buffer || rgba);
       if (!this._tmpCanvas) {
         this._tmpCanvas = document.createElement('canvas');
         this._tmpCanvas.width = LCD_WIDTH;
         this._tmpCanvas.height = LCD_HEIGHT;
       }
       const tmp = this._tmpCanvas.getContext('2d');
+
+      // Draw the full completed frame as a faded background
+      const fullRgba = this.store.renderFrame(this._frameIndex);
+      if (fullRgba) {
+        const fullArr = new Uint8ClampedArray(fullRgba.buffer || fullRgba);
+        tmp.putImageData(new ImageData(fullArr, LCD_WIDTH, LCD_HEIGHT), 0, 0);
+        this._drawCheckerboard(ctx);
+        ctx.globalAlpha = 0.25;
+        ctx.drawImage(this._tmpCanvas, 0, 0);
+        ctx.globalAlpha = 1.0;
+      } else {
+        this._drawCheckerboard(ctx);
+      }
+
+      // Draw the partial frame (up to current entry) at full opacity on top
+      const rgba = this.store.renderPartialFrame(this._frameIndex, entry);
+      if (!rgba) return;
+      const arr = new Uint8ClampedArray(rgba.buffer || rgba);
       tmp.putImageData(new ImageData(arr, LCD_WIDTH, LCD_HEIGHT), 0, 0);
-      this._drawCheckerboard(ctx);
       ctx.drawImage(this._tmpCanvas, 0, 0);
     } catch (err) {
       console.error('Failed to render partial frame:', err);
