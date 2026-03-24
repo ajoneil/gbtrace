@@ -238,12 +238,6 @@ export class PpuFifoVisualizer extends LitElement {
               <span class="counter-label">pix:</span>
               <span class="counter-val">${e.pix_count}</span>
             </div>
-            ${e.mask_pipe !== undefined ? html`
-              <div class="pipe-info">mask: 0x${(e.mask_pipe ?? 0).toString(16).padStart(2, '0')}</div>
-            ` : ''}
-            ${e.pal_pipe !== undefined ? html`
-              <div class="pipe-info">pal: 0x${(e.pal_pipe ?? 0).toString(16).padStart(2, '0')}</div>
-            ` : ''}
           </div>
         </div>
       </div>
@@ -304,21 +298,23 @@ export class PpuFifoVisualizer extends LitElement {
     if (e.mask_pipe === undefined) return html``;
     const cells = [];
     for (let i = 0; i < FIFO_LEN; i++) {
-      const bitPos = i; // matches FIFO direction: bit 0 left, bit 7 right (output)
+      const bitPos = i;
       const hasMask = (e.mask_pipe >> bitPos) & 1;
-      // OBJ color at this position
       const objLo = (e.spr_fifo_a >> bitPos) & 1;
       const objHi = (e.spr_fifo_b >> bitPos) & 1;
       const objColor = (objHi << 1) | objLo;
-      // OBJ wins if mask is set AND obj color is non-zero (not transparent)
       const objWins = hasMask && objColor !== 0;
       const pal = (e.pal_pipe >> bitPos) & 1;
 
       if (objWins) {
-        cells.push(html`<div class="merge-cell merge-obj">${pal ? 'P1' : 'P0'}</div>`);
-      } else if (hasMask) {
-        // Mask set but OBJ is transparent → BG wins
-        cells.push(html`<div class="merge-cell merge-bg">bg</div>`);
+        // Sprite pixel overrides — show which palette
+        cells.push(html`<div class="merge-cell merge-obj" title="OBJ wins (color ${objColor}, OBP${pal})">${pal ? 'P1' : 'P0'}</div>`);
+      } else if (hasMask && objColor === 0) {
+        // Sprite present but transparent (color 0) → BG shows through
+        cells.push(html`<div class="merge-cell merge-bg" title="OBJ transparent → BG">T</div>`);
+      } else if (!hasMask) {
+        // No sprite at this position
+        cells.push(html`<div class="merge-cell merge-none" title="No sprite">\u00b7</div>`);
       } else {
         cells.push(html`<div class="merge-cell merge-bg">bg</div>`);
       }
