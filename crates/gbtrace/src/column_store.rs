@@ -506,6 +506,26 @@ impl ColumnStore {
         boundaries
     }
 
+    /// Create a sub-store containing entries [start..end).
+    pub fn slice(&self, start: usize, end: usize) -> ColumnStore {
+        let end = end.min(self.len);
+        let start = start.min(end);
+        let count = end - start;
+
+        let mut new_store = ColumnStore::with_capacity(self.header.clone(), count);
+        for row in start..end {
+            for (col, src) in self.columns.iter().enumerate() {
+                match src {
+                    ColumnData::Str(_) => new_store.push_str(col, src.get_str(row)),
+                    ColumnData::Bool(_) => new_store.push_bool(col, src.get_bool(row)),
+                    _ => new_store.push_u64(col, src.get_numeric(row)),
+                }
+            }
+            new_store.finish_row();
+        }
+        new_store
+    }
+
     // --- Query ---
 
     /// Evaluate a condition against all rows and return matching indices.
@@ -1101,6 +1121,43 @@ mod lazy {
 
         pub fn field_col(&self, name: &str) -> Option<usize> {
             self.field_index.get(name).copied()
+        }
+
+        /// Decode only the row groups overlapping [start..end) into an eager store.
+        /// The returned store has entries re-indexed from 0.
+        pub fn decode_range(&self, start: usize, end: usize) -> Result<ColumnStore> {
+            let end = end.min(self.entry_count());
+            let mut store = ColumnStore::with_capacity(self.header.clone(), end - start);
+            let ncols = self.header.fields.len();
+
+            for rg in 0..self.index.num_row_groups() {
+                let rg_start = self.index.row_group_start(rg);
+                let rg_end = rg_start + self.index.row_group_len(rg);
+
+                // Skip row groups outside the range
+                if rg_end <= start || rg_start >= end { continue; }
+
+                self.ensure_loaded(rg);
+                let cache = self.cache.borrow();
+                let rg_store = &cache.entries.iter().find(|(k, _)| *k == rg).unwrap().1;
+
+                let local_start = if start > rg_start { start - rg_start } else { 0 };
+                let local_end = if end < rg_end { end - rg_start } else { rg_store.entry_count() };
+
+                for row in local_start..local_end {
+                    for col in 0..ncols {
+                        let src = rg_store.column(col);
+                        match src {
+                            ColumnData::Str(_) => store.push_str(col, src.get_str(row)),
+                            ColumnData::Bool(_) => store.push_bool(col, src.get_bool(row)),
+                            _ => store.push_u64(col, src.get_numeric(row)),
+                        }
+                    }
+                    store.finish_row();
+                }
+            }
+
+            Ok(store)
         }
 
         /// Detect frame boundaries from row group starts.
