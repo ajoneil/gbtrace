@@ -475,7 +475,22 @@ impl ColumnStore {
             }
         }
 
-        // Strategy 1: full-frame pix dumps as boundaries
+        // Strategy 1: frame_num field changes
+        if let Some(fn_col) = self.field_col("frame_num") {
+            let mut boundaries = vec![0u32];
+            for i in 1..self.len {
+                let prev = self.columns[fn_col].get_numeric(i - 1);
+                let cur = self.columns[fn_col].get_numeric(i);
+                if cur != prev {
+                    boundaries.push(i as u32);
+                }
+            }
+            if boundaries.len() > 1 {
+                return boundaries;
+            }
+        }
+
+        // Strategy 2: full-frame pix dumps as boundaries
         if let Some(pix_col) = self.field_col("pix") {
             let expected = 160 * 144;
             let mut boundaries = Vec::new();

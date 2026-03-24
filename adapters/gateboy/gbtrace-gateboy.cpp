@@ -185,10 +185,11 @@ static Profile parse_profile(const std::string &path) {
 
 struct FieldEmitter {
     std::string name;
-    enum Source { CPU_REG8, CPU_REG16, CPU_IME, IO_READ, PIX, PPU_U8, PPU_BOOL } source;
+    enum Source { CPU_REG8, CPU_REG16, CPU_IME, IO_READ, PIX, PPU_U8, PPU_U16, PPU_BOOL } source;
     unsigned short io_addr; // for IO_READ
-    // For PPU_U8/PPU_BOOL: function pointer to read the value
+    // For PPU_U8/PPU_U16/PPU_BOOL: function pointer to read the value
     uint8_t (*read_ppu_u8)(const GateBoy &gb);
+    uint16_t (*read_ppu_u16)();
     bool (*read_ppu_bool)(const GateBoy &gb);
 };
 
@@ -221,6 +222,8 @@ static std::string g_reference_pix;  // loaded from --reference file
 static int g_prev_pix_count = -1;
 
 static bool g_captured_last_pixel = false;
+static uint64_t g_total_pix_captured = 0;  // total pixels ever captured
+static uint16_t g_frame_num = 0;           // increments every 23040 pixels
 
 static void collect_pixel(GateBoy &gb) {
     int pix_count = bit_pack(gb.gb_state.pix_count);
@@ -240,6 +243,7 @@ static void collect_pixel(GateBoy &gb) {
             char shade = '0' + (fb_val & 3);
             g_pix_buf += shade;
             g_frame_ref_buf[lcd_x + lcd_y * 160] = shade;
+            g_total_pix_captured++;
         }
         g_captured_last_pixel = false;
     }
@@ -252,7 +256,9 @@ static void collect_pixel(GateBoy &gb) {
         g_pix_buf += shade;
         g_frame_ref_buf[159 + lcd_y * 160] = shade;
         g_captured_last_pixel = true;
+        g_total_pix_captured++;
     }
+
 }
 
 static bool load_reference(const std::string &path) {
@@ -342,6 +348,11 @@ static const std::unordered_map<std::string, uint8_t(*)(const GateBoy &)> PPU_U8
     {"scan_count",   [](const GateBoy &gb) -> uint8_t { return (uint8_t)bit_pack(gb.gb_state.scan_counter); }},
 };
 
+// Special u16 readers (not gate-level state, adapter-maintained counters)
+static const std::unordered_map<std::string, uint16_t(*)()> PPU_U16_READERS = {
+    {"frame_num", []() -> uint16_t { return g_frame_num; }},
+};
+
 static const std::unordered_map<std::string, bool(*)(const GateBoy &)> PPU_BOOL_READERS = {
     {"rendering", [](const GateBoy &gb) -> bool { return !gb.gb_state.XYMU_RENDERING_LATCHn.state; }},
     {"win_mode",  [](const GateBoy &gb) -> bool { return gb.gb_state.win_ctrl.PYNU_WIN_MODE_LATCHp.state != 0; }},
@@ -381,11 +392,14 @@ static void build_emitters(const Profile &prof) {
         } else if (auto it3 = PPU_U8_READERS.find(field); it3 != PPU_U8_READERS.end()) {
             em.source = FieldEmitter::PPU_U8;
             em.read_ppu_u8 = it3->second;
+        } else if (auto it3b = PPU_U16_READERS.find(field); it3b != PPU_U16_READERS.end()) {
+            em.source = FieldEmitter::PPU_U16;
+            em.read_ppu_u16 = it3b->second;
         } else if (auto it4 = PPU_BOOL_READERS.find(field); it4 != PPU_BOOL_READERS.end()) {
             em.source = FieldEmitter::PPU_BOOL;
             em.read_ppu_bool = it4->second;
         } else {
-            std::fprintf(stderr, "Warning: unknown field '%s', skipping\n", field.c_str());
+            std::fprintf(stderr, "Warning: unknown field '%s' (len=%zu), skipping\n", field.c_str(), field.size());
             continue;
         }
         g_emitters.push_back(em);
@@ -488,6 +502,9 @@ static void emit_entry(FILE *out, GateBoy &gb) {
         case FieldEmitter::PPU_U8:
             std::fprintf(out, "%d", em.read_ppu_u8(gb));
             break;
+        case FieldEmitter::PPU_U16:
+            std::fprintf(out, "%d", em.read_ppu_u16());
+            break;
         case FieldEmitter::PPU_BOOL:
             std::fprintf(out, "%s", em.read_ppu_bool(gb) ? "true" : "false");
             break;
@@ -536,6 +553,9 @@ static void emit_entry_parquet(GateBoy &gb) {
             break;
         case FieldEmitter::PPU_U8:
             gbtrace_writer_set_u8(g_parquet, col, em.read_ppu_u8(gb));
+            break;
+        case FieldEmitter::PPU_U16:
+            gbtrace_writer_set_u16(g_parquet, col, em.read_ppu_u16());
             break;
         case FieldEmitter::PPU_BOOL:
             gbtrace_writer_set_bool(g_parquet, col, em.read_ppu_bool(gb));
@@ -778,6 +798,8 @@ int main(int argc, char *argv[]) {
     bool prev_sc_high = false;
     int frames = 0;
     int64_t phase_count = 0;
+    g_total_pix_captured = 0;
+    g_frame_num = 0;
 
     while (phase_count < total_phases) {
         gb.next_phase(cart_blob);
@@ -866,14 +888,26 @@ int main(int argc, char *argv[]) {
         prev_op_state = reg.op_state;
         prev_op_addr = reg.op_addr;
 
+        // Detect LCD frame boundary from MEDA_VSYNC_OUTn data bit.
+        // Bit 0 goes high at vsync start (once per LCD frame).
+        // We mark the frame boundary at the falling edge (vsync ending)
+        // so the boundary aligns with the start of visible rendering.
+        {
+            bool vsync = gb.gb_state.lcd.MEDA_VSYNC_OUTn.state & 1;
+            static bool prev_vsync = false;
+            if (prev_vsync && !vsync) {
+                // VSYNC ended — new visible frame begins
+                g_frame_num++;
+                if (g_parquet) {
+                    gbtrace_writer_mark_frame(g_parquet);
+                }
+            }
+            prev_vsync = vsync;
+        }
+
         // Track frame boundaries for --frames limit
         if ((phase_count % PHASES_PER_FRAME) == 0) {
             frames++;
-
-            // Signal frame boundary to parquet writer
-            if (g_parquet) {
-                gbtrace_writer_mark_frame(g_parquet);
-            }
 
             // Check reference match at frame boundary (always immediate)
             if (has_reference && check_frame_matches_reference()) {
