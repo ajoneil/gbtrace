@@ -159,7 +159,7 @@ impl ParquetTraceWriter {
         if let Some(ly_idx) = self.ly_col {
             let cur_ly = parse_u8(entry.get(&self.field_names[ly_idx]));
             if let Some(prev) = self.prev_ly {
-                if prev == 153 && cur_ly == 0 {
+                if cur_ly < prev && prev >= 144 {
                     boundary = true;
                 }
             }
@@ -218,7 +218,7 @@ impl ParquetTraceWriter {
         if self.ly_col.is_some() {
             if let Some(cur_ly) = ly {
                 if let Some(prev) = self.prev_ly {
-                    if prev == 153 && cur_ly == 0 {
+                    if cur_ly < prev && prev >= 144 {
                         boundary = true;
                     }
                 }
