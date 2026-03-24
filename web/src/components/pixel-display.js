@@ -176,6 +176,8 @@ export class PixelDisplay extends LitElement {
         this._highlightPixel = null;
         this._drawHighlight();
       }
+      // Restore full frame or scrubbed position when hover ends
+      this._draw();
       return;
     }
     this._ensurePixMap();
@@ -196,10 +198,33 @@ export class PixelDisplay extends LitElement {
     }
     this._drawHighlight();
 
-    // Also update scrubber to hover position
+    // Draw partial frame at hover position (temporary, doesn't change scrubber)
     if (this.hoverIndex >= start) {
-      this._scrubEntry = this.hoverIndex;
-      this._drawPartial();
+      this._drawPartialAt(this.hoverIndex);
+    }
+  }
+
+  /** Draw a partial frame at a specific entry without changing _scrubEntry. */
+  _drawPartialAt(entry) {
+    if (!this.store || !this.tcyclePixels) return;
+    const canvas = this.renderRoot?.querySelector('#canvasA');
+    if (!canvas) return;
+    try {
+      const rgba = this.store.renderPartialFrame(this._frameIndex, entry);
+      if (!rgba) return;
+      const ctx = canvas.getContext('2d');
+      const arr = new Uint8ClampedArray(rgba.buffer || rgba);
+      if (!this._tmpCanvas) {
+        this._tmpCanvas = document.createElement('canvas');
+        this._tmpCanvas.width = LCD_WIDTH;
+        this._tmpCanvas.height = LCD_HEIGHT;
+      }
+      const tmp = this._tmpCanvas.getContext('2d');
+      tmp.putImageData(new ImageData(arr, LCD_WIDTH, LCD_HEIGHT), 0, 0);
+      this._drawCheckerboard(ctx);
+      ctx.drawImage(this._tmpCanvas, 0, 0);
+    } catch (err) {
+      console.error('Failed to render partial frame:', err);
     }
   }
 
