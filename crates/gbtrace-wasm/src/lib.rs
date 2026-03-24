@@ -82,10 +82,22 @@ impl TraceStore {
 
     /// Get frame boundary entry indices as a Uint32Array.
     ///
-    /// Uses `reconstruct_frames` as the single source of truth so that
-    /// frame indices are consistent between the timeline and pixel display.
+    /// Frame boundary entry indices. Uses explicit boundaries from parquet
+    /// metadata when available, otherwise falls back to reconstruct_frames.
     #[wasm_bindgen(js_name = frameBoundaries)]
     pub fn frame_boundaries(&self) -> js_sys::Uint32Array {
+        // Check for explicit boundaries from the store first
+        let explicit = match &self.store {
+            StoreKind::Lazy(s) => s.frame_boundaries(),
+            StoreKind::Eager(s) => s.frame_boundaries(),
+        };
+        if !explicit.is_empty() {
+            let arr = js_sys::Uint32Array::new_with_length(explicit.len() as u32);
+            arr.copy_from(&explicit);
+            return arr;
+        }
+
+        // Fallback to reconstruct_frames
         self.ensure_frames();
         let cache = self.frames_cache.borrow();
         let boundaries: Vec<u32> = cache.as_ref()
