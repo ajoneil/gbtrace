@@ -1109,20 +1109,16 @@ mod lazy {
         /// at ly wraps and full-frame pix dumps).
         pub fn frame_boundaries(&self) -> Vec<u32> {
             // Use explicit boundaries from parquet metadata if available
+            // Use explicit boundaries from parquet metadata if available
             if let Some(ref boundaries) = self.explicit_boundaries {
                 if !boundaries.is_empty() {
                     return boundaries.clone();
                 }
             }
-            // Fallback: decode and scan LY/pix data
-            match self.to_eager() {
-                Ok(eager) => eager.frame_boundaries(),
-                Err(_) => {
-                    (0..self.index.num_row_groups())
-                        .map(|rg| self.index.row_group_start(rg) as u32)
-                        .collect()
-                }
-            }
+            // Fallback to row group starts (cheap, no decoding)
+            (0..self.index.num_row_groups())
+                .map(|rg| self.index.row_group_start(rg) as u32)
+                .collect()
         }
 
         /// Ensure a row group is in the cache, decoding if necessary.
