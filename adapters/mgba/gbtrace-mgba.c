@@ -64,7 +64,7 @@ static bool is_in_list(const char *name, const char **list) {
 
 // --- Profile (minimal TOML parser, matching other adapters) ---
 
-#define MAX_FIELDS 32
+#define MAX_FIELDS 128
 #define MAX_NAME 64
 
 #define MAX_MEMORY_FIELDS 16
@@ -142,8 +142,23 @@ static struct Profile parse_profile(const char *path) {
             strip_quotes(val);
             strncpy(prof.trigger, val, MAX_NAME - 1);
         } else if (val[0] == '[') {
-            char *start = strchr(val, '[');
-            char *end = strchr(val, ']');
+            /* Handle multi-line arrays: accumulate lines until ']' */
+            static char array_buf[8192];
+            strncpy(array_buf, val, sizeof(array_buf) - 1);
+            array_buf[sizeof(array_buf) - 1] = '\0';
+            while (!strchr(array_buf, ']') && fgets(line, sizeof(line), f)) {
+                /* strip comment */
+                char *h = strchr(line, '#');
+                if (h) *h = '\0';
+                trim(line);
+                size_t cur = strlen(array_buf);
+                if (cur + strlen(line) + 2 < sizeof(array_buf)) {
+                    array_buf[cur] = ' ';
+                    strcpy(array_buf + cur + 1, line);
+                }
+            }
+            char *start = strchr(array_buf, '[');
+            char *end = strchr(array_buf, ']');
             if (start && end) {
                 *end = '\0';
                 char *tok = strtok(start + 1, ",");

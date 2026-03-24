@@ -1,0 +1,35 @@
+[profile]
+name = "blargg-ppu"
+description = "Blargg test suite with full state, pixel output, and PPU internals."
+trigger = "tcycle"
+
+[fields]
+cpu = ["pc", "sp", "a", "f", "b", "c", "d", "e", "h", "l"]
+ppu = ["lcdc", "stat", "ly", "lyc", "scy", "scx", "wy", "wx", "bgp", "obp0", "obp1"]
+ppu_internal = [
+    # Sprite store (10 sprites × x, tile/y index, attributes)
+    "oam0_x", "oam0_id", "oam0_attr",
+    "oam1_x", "oam1_id", "oam1_attr",
+    "oam2_x", "oam2_id", "oam2_attr",
+    "oam3_x", "oam3_id", "oam3_attr",
+    "oam4_x", "oam4_id", "oam4_attr",
+    "oam5_x", "oam5_id", "oam5_attr",
+    "oam6_x", "oam6_id", "oam6_attr",
+    "oam7_x", "oam7_id", "oam7_attr",
+    "oam8_x", "oam8_id", "oam8_attr",
+    "oam9_x", "oam9_id", "oam9_attr",
+    # Pixel FIFO contents
+    "bgw_fifo_a", "bgw_fifo_b",
+    "spr_fifo_a", "spr_fifo_b",
+    "mask_pipe", "pal_pipe",
+    # Fetcher state
+    "tfetch_state", "sfetch_state",
+    "tile_temp_a", "tile_temp_b",
+    # Counters and flags
+    "pix_count", "sprite_count", "scan_count",
+    "rendering", "win_mode",
+]
+interrupt = ["if_", "ie", "ime"]
+timer = ["div", "tima", "tma", "tac"]
+serial = ["sb", "sc"]
+pixel = ["pix"]
