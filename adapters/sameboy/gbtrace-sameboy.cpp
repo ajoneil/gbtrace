@@ -23,6 +23,8 @@
 #include <unordered_map>
 #include <vector>
 
+#include "gbtrace.h"
+
 // We define GB_INTERNAL to get full struct access (ime, cycles_since_run, etc.)
 #define GB_INTERNAL
 // Avoid C++ keyword conflict in debugger.h
@@ -157,6 +159,11 @@ static bool g_stop_serial_triggered = false;
 static int g_stop_opcode = -1;
 static bool g_stop_opcode_triggered = false;
 
+// --- Parquet direct writer (FFI) ---
+static GbtraceWriter *g_parquet = nullptr;
+static std::vector<int> g_parquet_cols;
+static int g_parquet_ly_col = -1;
+
 // Pre-computed list of what to emit per entry.
 struct FieldEmitter {
     std::string name;
@@ -263,9 +270,58 @@ static inline int read_reg(GB_gameboy_t *gb, RegisterField::Reg reg) {
     return 0;
 }
 
+// --- Parquet emit ---
+
+static void emit_entry_parquet(GB_gameboy_t *gb, uint16_t address) {
+    // Gather ly and pix_len for boundary check
+    uint8_t ly_val = 255;
+    size_t pix_len = 0;
+    if (g_parquet_ly_col >= 0) {
+        ly_val = GB_safe_read_memory(gb, 0xFF44);
+    }
+    if (g_has_pix) {
+        pix_len = g_pending_pix.size();
+    }
+    gbtrace_writer_check_boundary(g_parquet, ly_val, pix_len);
+
+    // Set all field values
+    for (size_t i = 0; i < g_emitters.size(); i++) {
+        int col = g_parquet_cols[i];
+        if (col < 0) continue;
+        const auto &em = g_emitters[i];
+        switch (em.source) {
+        case FieldEmitter::REGISTER_8:
+            gbtrace_writer_set_u8(g_parquet, col, read_reg(gb, em.reg));
+            break;
+        case FieldEmitter::REGISTER_16:
+            if (em.reg == RegisterField::PC)
+                gbtrace_writer_set_u16(g_parquet, col, address);
+            else
+                gbtrace_writer_set_u16(g_parquet, col, read_reg(gb, em.reg));
+            break;
+        case FieldEmitter::IO_READ:
+            gbtrace_writer_set_u8(g_parquet, col, GB_safe_read_memory(gb, em.io_addr));
+            break;
+        case FieldEmitter::IME:
+            gbtrace_writer_set_bool(g_parquet, col, gb->ime);
+            break;
+        case FieldEmitter::PIX:
+            gbtrace_writer_set_str(g_parquet, col,
+                                   g_pending_pix.c_str(), g_pending_pix.size());
+            g_pending_pix.clear();
+            break;
+        }
+    }
+
+    gbtrace_writer_finish_entry(g_parquet);
+}
+
 // --- Trace callback ---
 
 static void exec_callback(GB_gameboy_t *gb, uint16_t address, uint8_t opcode) {
+    if (g_parquet) {
+        emit_entry_parquet(gb, address);
+    } else {
     bool first = true;
     std::fprintf(g_output, "{");
 
@@ -299,6 +355,7 @@ static void exec_callback(GB_gameboy_t *gb, uint16_t address, uint8_t opcode) {
     }
 
     std::fprintf(g_output, "}\n");
+    } // end JSONL path
 
     // Check opcode stop condition
     if (g_stop_opcode >= 0 && !g_stop_opcode_triggered) {
@@ -488,19 +545,28 @@ int main(int argc, char *argv[]) {
     std::fprintf(stderr, "Profile: %s (%zu fields)\n",
                  g_profile.name.c_str(), g_profile.fields.size());
 
-    // Open output
-    if (output_path.empty() || output_path == "-") {
-        g_output = stdout;
-    } else {
-        g_output = std::fopen(output_path.c_str(), "w");
-        if (!g_output) {
-            std::fprintf(stderr, "Error: cannot open %s for writing\n", output_path.c_str());
-            return 1;
-        }
+    // Detect parquet output mode from file extension
+    bool parquet_mode = false;
+    if (output_path.size() >= 8 &&
+        output_path.substr(output_path.size() - 8) == ".parquet") {
+        parquet_mode = true;
     }
 
-    static char output_buf[64 * 1024];
-    std::setvbuf(g_output, output_buf, _IOFBF, sizeof(output_buf));
+    // Open output (JSONL mode only; parquet mode opens via FFI after header is built)
+    if (!parquet_mode) {
+        if (output_path.empty() || output_path == "-") {
+            g_output = stdout;
+        } else {
+            g_output = std::fopen(output_path.c_str(), "w");
+            if (!g_output) {
+                std::fprintf(stderr, "Error: cannot open %s for writing\n", output_path.c_str());
+                return 1;
+            }
+        }
+
+        static char output_buf[64 * 1024];
+        std::setvbuf(g_output, output_buf, _IOFBF, sizeof(output_buf));
+    }
 
     // Init emulator
     g_gb = GB_init(GB_alloc(), gb_model);
@@ -551,9 +617,42 @@ int main(int argc, char *argv[]) {
     // Reset cycle origin so traces start at cy=0 post-boot
     g_total_8mhz_ticks = 0;
 
-    // Write header and set callback
+    // Write header / init parquet writer
     std::string rom_hash = sha256_file(rom_path);
-    write_header(g_output, g_profile, rom_hash, model, boot_rom_info);
+
+    if (parquet_mode) {
+        // Build header JSON for the FFI writer
+        std::string header_json = "{\"_header\":true,\"format_version\":\"0.1.0\","
+            "\"emulator\":\"sameboy\",\"emulator_version\":\"0.16.x\","
+            "\"rom_sha256\":\"" + rom_hash + "\",\"model\":\"" + model + "\","
+            "\"boot_rom\":\"" + boot_rom_info + "\",\"profile\":\"" + g_profile.name + "\","
+            "\"fields\":[";
+        for (size_t i = 0; i < g_emitters.size(); i++) {
+            if (i > 0) header_json += ",";
+            header_json += "\"" + g_emitters[i].name + "\"";
+        }
+        header_json += "],\"trigger\":\"instruction\"}";
+
+        g_parquet = gbtrace_writer_new(
+            output_path.c_str(), header_json.c_str(), header_json.size());
+        if (!g_parquet) {
+            std::fprintf(stderr, "Error: failed to create parquet writer\n");
+            return 1;
+        }
+
+        // Cache column indices
+        g_parquet_cols.resize(g_emitters.size());
+        for (size_t i = 0; i < g_emitters.size(); i++) {
+            g_parquet_cols[i] = gbtrace_writer_find_field(
+                g_parquet, g_emitters[i].name.c_str());
+        }
+        g_parquet_ly_col = gbtrace_writer_find_field(g_parquet, "ly");
+
+        std::fprintf(stderr, "Output: parquet (direct write)\n");
+    } else {
+        write_header(g_output, g_profile, rom_hash, model, boot_rom_info);
+    }
+
     GB_set_execution_callback(g_gb, exec_callback);
 
     // Run: GB_run executes one CPU step and returns 8MHz ticks consumed.
@@ -646,9 +745,14 @@ int main(int argc, char *argv[]) {
         }
     }
 
-    std::fflush(g_output);
-    if (g_output != stdout) {
-        std::fclose(g_output);
+    if (g_parquet) {
+        gbtrace_writer_close(g_parquet);
+        g_parquet = nullptr;
+    } else {
+        std::fflush(g_output);
+        if (g_output != stdout) {
+            std::fclose(g_output);
+        }
     }
 
     GB_free(g_gb);

@@ -18,23 +18,15 @@ NAME="$(basename "$ROM" .gb)"
 ADAPTER="$(basename "$BIN" | sed 's/gbtrace-//')"
 
 TMP="/tmp/gbtrace_screenshot_${NAME}_${ADAPTER}_$$"
-tmp_pipe="${TMP}.pipe"
 
-cleanup() { rm -f "$tmp_pipe" "${TMP}_trimmed.parquet"; rm -rf "${TMP}_frames"; }
+cleanup() { rm -f "${TMP}_trimmed.parquet"; rm -rf "${TMP}_frames"; }
 trap cleanup EXIT
 
-# Capture + convert via named pipe
-mkfifo "$tmp_pipe"
-
-"$BIN" --rom "$ROM" --profile "$PROFILE" --output "$tmp_pipe" \
+# All adapters write parquet directly via FFI.
+"$BIN" --rom "$ROM" --profile "$PROFILE" --output "${TMP}.parquet" \
     --reference "$REFERENCE" \
     --frames "$MAX_FRAMES" \
-    2>/dev/null &
-adapter_pid=$!
-
-"$CLI" convert "$tmp_pipe" --output "${TMP}.parquet" >/dev/null 2>&1 || true
-
-wait "$adapter_pid" || true
+    2>/dev/null || true
 
 if [[ ! -s "${TMP}.parquet" ]]; then
     printf "%-30s %-10s ERROR (capture)\n" "$NAME" "$ADAPTER"
