@@ -350,10 +350,12 @@ export class TraceDiffTable extends LitElement {
     const partsA = [];
     const partsB = [];
 
-    for (let i = 0; i < entriesA.length; i++) {
+    const len = Math.min(entriesA.length, entriesB.length);
+    for (let i = 0; i < len; i++) {
       const idx = globalStart + i;
       const a = entriesA[i];
       const b = entriesB[i];
+      if (!a || !b) continue;
 
       // Check for any visible field difference
       let anyDiff = false;
