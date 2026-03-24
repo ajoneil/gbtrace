@@ -330,16 +330,16 @@ export class TraceSelector extends LitElement {
       if (present.length === 0) continue;
       present.forEach(f => grouped.add(f));
 
-      const groupHidden = this._hiddenGroups.has(group.name);
       const anyVisible = present.some(f => !hidden.has(f));
+      const groupHidden = this._hiddenGroups.has(group.name) || !anyVisible;
 
       parts.push(html`
-        <span class="ft-group ${!groupHidden && anyVisible ? 'on' : ''}"
+        <span class="ft-group ${anyVisible ? 'on' : ''}"
           @click=${() => this._toggleGroup(group.name)}
         >${group.name}</span>
       `);
 
-      // Show individual field chips only when group is visible
+      // Show individual field chips only when group is expanded
       if (!groupHidden) {
         for (const f of present) {
           parts.push(html`
