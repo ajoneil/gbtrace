@@ -50,8 +50,8 @@ static uint8_t read_reg(const GateBoy& gb, unsigned short addr) {
             //   bits 1-0: PPU mode (from rendering latch, vblank, scan state)
             uint8_t ly = (uint8_t)bit_pack(s.reg_ly);
             bool vblank = ly >= 144;
-            bool rendering = !s.XYMU_RENDERING_LATCHn.state;
-            bool scanning = s.ACYL_SCANNINGp_odd.state;
+            bool rendering = !(s.XYMU_RENDERING_LATCHn.state & 1);
+            bool scanning = s.ACYL_SCANNINGp_odd.state & 1;
 
             uint8_t mode;
             if (vblank) {
@@ -354,7 +354,7 @@ static const std::unordered_map<std::string, uint16_t(*)()> PPU_U16_READERS = {
 };
 
 static const std::unordered_map<std::string, bool(*)(const GateBoy &)> PPU_BOOL_READERS = {
-    {"rendering", [](const GateBoy &gb) -> bool { return !gb.gb_state.XYMU_RENDERING_LATCHn.state; }},
+    {"rendering", [](const GateBoy &gb) -> bool { return !(gb.gb_state.XYMU_RENDERING_LATCHn.state & 1); }},
     {"win_mode",  [](const GateBoy &gb) -> bool { return gb.gb_state.win_ctrl.PYNU_WIN_MODE_LATCHp.state != 0; }},
 };
 
