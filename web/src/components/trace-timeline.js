@@ -310,12 +310,20 @@ export class TraceTimeline extends LitElement {
         </div>
 
         <div class="scrubber-row">
-          <button class="scrub-step" @click=${() => this._step(-1)}>&#9664;</button>
+          <button class="scrub-step"
+            @pointerdown=${() => this._startRepeat(-1)}
+            @pointerup=${this._stopRepeat}
+            @pointerleave=${this._stopRepeat}
+          >&#9664;</button>
           <input type="range" class="scrubber"
             min=${this.viewStart} max=${Math.max(this.viewStart, this.viewEnd - 1)}
             .value=${String(this.currentIndex ?? this.viewStart)}
             @input=${this._onScrub}>
-          <button class="scrub-step" @click=${() => this._step(1)}>&#9654;</button>
+          <button class="scrub-step"
+            @pointerdown=${() => this._startRepeat(1)}
+            @pointerup=${this._stopRepeat}
+            @pointerleave=${this._stopRepeat}
+          >&#9654;</button>
         </div>
       </div>
     `;
@@ -431,6 +439,22 @@ export class TraceTimeline extends LitElement {
       detail: { index },
       bubbles: true, composed: true,
     }));
+  }
+
+  _startRepeat(delta) {
+    this._step(delta);
+    this._repeatDelta = delta;
+    // Initial delay before repeat starts
+    this._repeatTimeout = setTimeout(() => {
+      this._repeatInterval = setInterval(() => this._step(this._repeatDelta), 50);
+    }, 300);
+  }
+
+  _stopRepeat() {
+    clearTimeout(this._repeatTimeout);
+    clearInterval(this._repeatInterval);
+    this._repeatTimeout = null;
+    this._repeatInterval = null;
   }
 
   _changeSync(mode) {
