@@ -889,19 +889,20 @@ int main(int argc, char *argv[]) {
         prev_op_addr = reg.op_addr;
 
         // Detect LCD frame boundary from MEDA_VSYNC_OUTn data bit.
-        // Bit 0 goes high at vsync start (once per LCD frame).
-        // We mark the frame boundary at the falling edge (vsync ending)
-        // so the boundary aligns with the start of visible rendering.
+        // Bit 0 goes high at vsync start (scanline 144 — last visible pixel done).
+        // We mark the frame at the RISING edge (vsync starting) so the boundary
+        // sits between the last pixel of scanline 143 and the vblank period.
+        // The next frame's first pixel (scanline 0) comes after vblank ends.
         {
             bool vsync = gb.gb_state.lcd.MEDA_VSYNC_OUTn.state & 1;
             static bool prev_vsync = false;
-            if (prev_vsync && !vsync) {
-                // VSYNC ended — new visible frame begins
+            if (!prev_vsync && vsync) {
+                // VSYNC started — previous frame is complete
                 g_frame_num++;
                 if (g_parquet) {
                     gbtrace_writer_mark_frame(g_parquet);
                 }
-                // If a stop was requested, now is the time — LCD frame is complete
+                // If a stop was requested, the LCD frame is now complete
                 if (stop_triggered) {
                     stopped_early = true;
                     break;
