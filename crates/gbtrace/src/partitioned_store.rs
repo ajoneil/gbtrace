@@ -260,6 +260,20 @@ impl PartitionedStore {
 
             for (col_idx, ft) in self.field_types.iter().enumerate() {
                 let col = batch.column(col_idx);
+
+                // Capture null bitmap if this column has any nulls
+                if col.null_count() > 0 {
+                    let bm = store.null_bitmaps[col_idx]
+                        .get_or_insert_with(Vec::new);
+                    for i in 0..num_rows {
+                        bm.push(col.is_null(i));
+                    }
+                } else if store.null_bitmaps[col_idx].is_some() {
+                    // Previous batch had nulls, this one doesn't — extend with false
+                    let bm = store.null_bitmaps[col_idx].as_mut().unwrap();
+                    bm.extend(std::iter::repeat(false).take(num_rows));
+                }
+
                 match ft {
                     FieldType::UInt64 => {
                         let arr = col.as_any().downcast_ref::<UInt64Array>().unwrap();
@@ -557,6 +571,15 @@ impl TraceStore for PartitionedStore {
     }
     fn get_bool(&self, col: usize, row: usize) -> bool {
         self.get_bool_named(&self.header.fields[col], row).unwrap_or(false)
+    }
+    fn is_null(&self, col: usize, row: usize) -> bool {
+        let (rg, local) = self.index.locate(row);
+        self.ensure_loaded(rg);
+        let cache = self.cache.borrow();
+        cache.entries.iter()
+            .find(|(k, _)| *k == rg)
+            .map(|(_, s)| s.is_null(col, local))
+            .unwrap_or(false)
     }
 
     fn query_range(&self, condition_str: &str, start: usize, end: usize) -> std::result::Result<Vec<u32>, String> {

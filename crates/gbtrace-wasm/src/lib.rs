@@ -603,6 +603,11 @@ impl TraceStore {
         let mut map = BTreeMap::new();
 
         for (col_idx, field_name) in fields.iter().enumerate() {
+            // Skip null values — absent keys in JS mean "no data"
+            if store.is_null(col_idx, orig_row) {
+                continue;
+            }
+
             let ft = gbtrace::profile::field_type(field_name);
             let val = match ft {
                 FieldType::Bool => JsField::Bool(store.get_bool(col_idx, orig_row)),

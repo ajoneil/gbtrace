@@ -126,4 +126,12 @@ impl<'a> TraceStore for DownsampledStore<'a> {
             false
         }
     }
+
+    fn is_null(&self, col: usize, row: usize) -> bool {
+        if let Some(&orig) = self.index_map.get(row) {
+            self.inner.is_null(col, orig)
+        } else {
+            true
+        }
+    }
 }
