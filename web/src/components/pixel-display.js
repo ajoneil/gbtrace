@@ -113,21 +113,35 @@ export class PixelDisplay extends LitElement {
       this._pixMapFrame = -1;
     }
     if (changed.has('viewStart') || changed.has('frameBoundaries') ||
-        changed.has('store') || changed.has('storeB')) {
+        changed.has('store') || changed.has('storeB') || changed.has('currentIndex')) {
+      const oldFrame = this._frameIndex;
       this._syncFrameIndex();
-      // Wait for DOM update (template may switch between single/compare mode)
-      this.updateComplete.then(() => this._draw());
-    }
-    if (changed.has('currentIndex') && this.tcyclePixels && this.currentIndex != null) {
-      this._updateForCurrentIndex();
+      const frameChanged = this._frameIndex !== oldFrame;
+      const storeChanged = changed.has('store') || changed.has('storeB') ||
+          changed.has('viewStart') || changed.has('frameBoundaries');
+
+      if (frameChanged || storeChanged) {
+        this.updateComplete.then(() => {
+          // For tcycle with a current index, draw partial frame instead of full
+          if (this.tcyclePixels && this.currentIndex != null) {
+            this._updateForCurrentIndex();
+          } else {
+            this._draw();
+          }
+        });
+      } else if (changed.has('currentIndex') && this.tcyclePixels && this.currentIndex != null) {
+        this._updateForCurrentIndex();
+      }
     }
   }
 
   _syncFrameIndex() {
     const bounds = this.frameBoundaries || [];
+    // Use currentIndex to determine frame if available, otherwise viewStart
+    const refIndex = this.currentIndex != null ? this.currentIndex : this.viewStart;
     let frame = 0;
     for (let i = 0; i < bounds.length; i++) {
-      if (bounds[i] <= this.viewStart) frame = i;
+      if (bounds[i] <= refIndex) frame = i;
       else break;
     }
     if (frame !== this._frameIndex) {
