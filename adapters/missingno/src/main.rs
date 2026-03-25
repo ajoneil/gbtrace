@@ -107,6 +107,9 @@ fn main() {
         process::exit(1);
     });
 
+    // Mark entry 0 as a frame boundary so the setup period is included.
+    tracer.mark_frame().unwrap();
+
     let reference_pix = args.reference.as_ref().map(load_reference);
     let is_tcycle = tracer.trigger() == Trigger::Tcycle;
 

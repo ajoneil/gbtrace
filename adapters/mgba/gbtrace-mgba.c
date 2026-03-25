@@ -677,6 +677,9 @@ int main(int argc, char *argv[]) {
         }
         g_parquet_ly_col = gbtrace_writer_find_field(g_parquet, "ly");
 
+        /* Mark entry 0 as a frame boundary */
+        gbtrace_writer_mark_frame(g_parquet);
+
         fprintf(stderr, "Output: parquet (direct write)\n");
     } else {
         write_header(g_output, &g_profile, rom_hash, model, boot_rom_info);
@@ -732,6 +735,9 @@ int main(int argc, char *argv[]) {
         mDebuggerRunFrame(&debugger);
         if (g_has_pix || g_has_reference) {
             capture_mgba_frame();
+        }
+        if (g_parquet) {
+            gbtrace_writer_mark_frame(g_parquet);
         }
 
         /* Check reference match (immediate stop) */

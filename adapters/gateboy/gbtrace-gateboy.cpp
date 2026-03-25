@@ -759,6 +759,9 @@ int main(int argc, char *argv[]) {
         }
         g_parquet_ly_col = gbtrace_writer_find_field(g_parquet, "ly");
 
+        // Mark entry 0 as a frame boundary
+        gbtrace_writer_mark_frame(g_parquet);
+
         std::fprintf(stderr, "Output: parquet (direct write)\n");
     } else {
         write_header(output, profile, rom_hash, boot_rom_info.c_str());
