@@ -73,7 +73,7 @@ const TEST_SUITES = [
   },
 ];
 
-const EMULATORS = ['gateboy', 'gambatte', 'sameboy', 'mgba'];
+const EMULATORS = ['gateboy', 'missingno', 'gambatte', 'sameboy', 'mgba'];
 
 function traceUrl(suite, rom, emulator, status = 'pass') {
   const base = rom.replace('.gb', '');
