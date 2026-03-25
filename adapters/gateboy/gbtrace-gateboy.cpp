@@ -558,8 +558,12 @@ static void emit_entry_parquet(GateBoy &gb) {
             gbtrace_writer_set_u8(g_parquet, col, read_reg(gb, em.io_addr));
             break;
         case FieldEmitter::PIX:
-            gbtrace_writer_set_str(g_parquet, col,
-                                   g_pix_buf.c_str(), g_pix_buf.size());
+            if (g_pix_buf.empty()) {
+                gbtrace_writer_set_null(g_parquet, col);
+            } else {
+                gbtrace_writer_set_str(g_parquet, col,
+                                       g_pix_buf.c_str(), g_pix_buf.size());
+            }
             g_pix_buf.clear();
             break;
         case FieldEmitter::PPU_U8:
@@ -574,12 +578,15 @@ static void emit_entry_parquet(GateBoy &gb) {
         }
     }
 
-    // VRAM write fields
+    // VRAM write fields — null when no write this cycle
     if (g_parquet_vram_addr_col >= 0) {
-        gbtrace_writer_set_u16(g_parquet, g_parquet_vram_addr_col, g_vram_write_addr);
-    }
-    if (g_parquet_vram_data_col >= 0) {
-        gbtrace_writer_set_u8(g_parquet, g_parquet_vram_data_col, g_vram_write_data);
+        if (g_vram_write_addr != 0) {
+            gbtrace_writer_set_u16(g_parquet, g_parquet_vram_addr_col, g_vram_write_addr);
+            gbtrace_writer_set_u8(g_parquet, g_parquet_vram_data_col, g_vram_write_data);
+        } else {
+            gbtrace_writer_set_null(g_parquet, g_parquet_vram_addr_col);
+            gbtrace_writer_set_null(g_parquet, g_parquet_vram_data_col);
+        }
     }
     g_vram_write_addr = 0;
     g_vram_write_data = 0;

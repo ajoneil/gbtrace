@@ -22,7 +22,7 @@ use parquet::file::properties::WriterProperties;
 use crate::entry::TraceEntry;
 use crate::error::{Error, Result};
 use crate::header::TraceHeader;
-use crate::profile::{field_type, FieldType};
+use crate::profile::{field_type, field_nullable, FieldType};
 
 const HEADER_METADATA_KEY: &str = "gbtrace_header";
 const FRAME_BOUNDARIES_KEY: &str = "gbtrace_frame_boundaries";
@@ -53,6 +53,16 @@ impl ColumnBuffer {
             FieldType::UInt8 => Self::UInt8(UInt8Builder::with_capacity(BATCH_SIZE)),
             FieldType::Bool => Self::Bool(BooleanBuilder::with_capacity(BATCH_SIZE)),
             FieldType::Str => Self::Str(StringBuilder::with_capacity(BATCH_SIZE, BATCH_SIZE * 4)),
+        }
+    }
+
+    fn append_null_inner(&mut self) {
+        match self {
+            Self::UInt64(b) => b.append_null(),
+            Self::UInt16(b) => b.append_null(),
+            Self::UInt8(b) => b.append_null(),
+            Self::Bool(b) => b.append_null(),
+            Self::Str(b) => b.append_null(),
         }
     }
 
@@ -117,7 +127,7 @@ impl ParquetTraceWriter {
                     FieldType::Bool => DataType::Boolean,
                     FieldType::Str => DataType::Utf8,
                 };
-                Field::new(name, dt, false)
+                Field::new(name, dt, field_nullable(name))
             })
             .collect();
 
@@ -158,21 +168,32 @@ impl ParquetTraceWriter {
     pub fn write_entry(&mut self, entry: &TraceEntry) -> Result<()> {
         for (i, (name, ft)) in self.field_names.iter().zip(&self.field_types).enumerate() {
             let val = entry.get(name);
+            let nullable = field_nullable(name);
+
+            // Nullable fields with no value → append null
+            if nullable && val.is_none() {
+                self.columns[i].append_null_inner();
+                continue;
+            }
+
             match (&mut self.columns[i], ft) {
                 (ColumnBuffer::UInt64(b), FieldType::UInt64) => {
                     b.append_value(val.and_then(|v| v.as_u64()).unwrap_or(0));
                 }
                 (ColumnBuffer::UInt16(b), FieldType::UInt16) => {
-                    b.append_value(parse_u16(val));
+                    let v = parse_u16(val);
+                    if nullable && v == 0 { b.append_null(); } else { b.append_value(v); }
                 }
                 (ColumnBuffer::UInt8(b), FieldType::UInt8) => {
-                    b.append_value(parse_u8(val));
+                    let v = parse_u8(val);
+                    if nullable && v == 0 { b.append_null(); } else { b.append_value(v); }
                 }
                 (ColumnBuffer::Bool(b), FieldType::Bool) => {
                     b.append_value(val.and_then(|v| v.as_bool()).unwrap_or(false));
                 }
                 (ColumnBuffer::Str(b), FieldType::Str) => {
-                    b.append_value(val.and_then(|v| v.as_str()).unwrap_or(""));
+                    let s = val.and_then(|v| v.as_str()).unwrap_or("");
+                    if nullable && s.is_empty() { b.append_null(); } else { b.append_value(s); }
                 }
                 _ => unreachable!(),
             }
@@ -230,6 +251,18 @@ impl ParquetTraceWriter {
     pub fn append_str(&mut self, col: usize, val: &str) {
         if let ColumnBuffer::Str(b) = &mut self.columns[col] {
             b.append_value(val);
+        }
+    }
+
+    /// Append a null value to the given column index.
+    /// Only valid for nullable columns (pix, vram_addr, vram_data).
+    pub fn append_null(&mut self, col: usize) {
+        match &mut self.columns[col] {
+            ColumnBuffer::UInt64(b) => b.append_null(),
+            ColumnBuffer::UInt16(b) => b.append_null(),
+            ColumnBuffer::UInt8(b) => b.append_null(),
+            ColumnBuffer::Bool(b) => b.append_null(),
+            ColumnBuffer::Str(b) => b.append_null(),
         }
     }
 

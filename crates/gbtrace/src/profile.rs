@@ -113,6 +113,13 @@ pub fn field_type(name: &str) -> FieldType {
     }
 }
 
+/// Whether a field should be nullable in the parquet schema.
+/// Sparse fields (pixel output, VRAM writes) benefit from null
+/// representation instead of zero/empty defaults.
+pub fn field_nullable(name: &str) -> bool {
+    matches!(name, "pix" | "vram_addr" | "vram_data")
+}
+
 fn parse_hex_addr(s: &str) -> std::result::Result<u16, String> {
     let s = s.strip_prefix("0x").or_else(|| s.strip_prefix("0X")).unwrap_or(s);
     u16::from_str_radix(s, 16).map_err(|_| format!("invalid hex address: {s}"))

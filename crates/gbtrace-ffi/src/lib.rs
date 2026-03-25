@@ -175,6 +175,15 @@ pub unsafe extern "C" fn gbtrace_writer_set_bool(
     (*w).writer.append_bool(field, value);
 }
 
+/// Append a null value to a nullable column (pix, vram_addr, vram_data).
+#[no_mangle]
+pub unsafe extern "C" fn gbtrace_writer_set_null(
+    w: *mut GbtraceWriter,
+    field: usize,
+) {
+    (*w).writer.append_null(field);
+}
+
 /// Set a string field value and append it to the column buffer.
 /// `ptr` and `len` describe the UTF-8 string (not null-terminated).
 #[no_mangle]
