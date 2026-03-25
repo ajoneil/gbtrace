@@ -33,6 +33,8 @@ pub struct TraceStore {
     /// Optional downsampling index: maps downsampled row → original row.
     /// When set, all accessors use this mapping transparently.
     downsample_map: Option<Vec<usize>>,
+    /// Cached VRAM reconstruction state (built lazily on first access).
+    vram_cache: Option<gbtrace::vram::VramCache>,
 }
 
 #[wasm_bindgen]
@@ -53,7 +55,7 @@ impl TraceStore {
                     .map_err(|e| JsError::new(&format!("{e}")))?
             )
         };
-        Ok(TraceStore { store, rom: None, original_bytes: Some(data.to_vec()), downsample_map: None })
+        Ok(TraceStore { store, rom: None, original_bytes: Some(data.to_vec()), downsample_map: None, vram_cache: None })
     }
 
     /// Enable instruction-level downsampling. Picks one entry per PC change.
@@ -476,6 +478,94 @@ impl TraceStore {
             .collect();
         Ok(to_js(&mnemonics)?)
     }
+    // --- VRAM reconstruction ---
+
+    /// Whether this trace has VRAM write tracking data.
+    #[wasm_bindgen(js_name = hasVramData)]
+    pub fn has_vram_data(&self) -> bool {
+        self.store.has_field("vram_addr") && self.store.has_field("vram_data")
+    }
+
+    /// Build the VRAM cache (scans the entire trace once).
+    /// Call this once after loading; subsequent vram methods use the cache.
+    #[wasm_bindgen(js_name = buildVramCache)]
+    pub fn build_vram_cache(&mut self) {
+        if self.vram_cache.is_none() {
+            self.vram_cache = gbtrace::vram::VramCache::build(&*self.store);
+        }
+    }
+
+    /// Render the 384-tile sheet at a specific entry as RGBA (128×192×4 bytes).
+    #[wasm_bindgen(js_name = renderTileSheet)]
+    pub fn render_tile_sheet(&mut self, entry: usize) -> Result<JsValue, JsError> {
+        self.build_vram_cache();
+        let cache = match &self.vram_cache {
+            Some(c) => c,
+            None => return Ok(JsValue::NULL),
+        };
+        let entry = self.map_row(entry);
+        let snap = match cache.at_entry(&*self.store, entry) {
+            Some(s) => s,
+            None => return Ok(JsValue::NULL),
+        };
+        const PALETTE: [(u8, u8, u8); 4] = [
+            (0xe0, 0xf8, 0xd0), (0x88, 0xc0, 0x70),
+            (0x34, 0x68, 0x56), (0x08, 0x18, 0x20),
+        ];
+        let rgba = gbtrace::vram::render_tile_sheet(&snap.data, &PALETTE);
+        Ok(js_sys::Uint8ClampedArray::from(&rgba[..]).into())
+    }
+
+    /// Render a 32×32 tilemap at a specific entry as RGBA (256×256×4 bytes).
+    /// `map_select`: 0 for BG map (0x9800), 1 for window map (0x9C00).
+    #[wasm_bindgen(js_name = renderTilemap)]
+    pub fn render_tilemap(&mut self, entry: usize, map_select: u8) -> Result<JsValue, JsError> {
+        self.build_vram_cache();
+        let cache = match &self.vram_cache {
+            Some(c) => c,
+            None => return Ok(JsValue::NULL),
+        };
+        let entry = self.map_row(entry);
+        let snap = match cache.at_entry(&*self.store, entry) {
+            Some(s) => s,
+            None => return Ok(JsValue::NULL),
+        };
+
+        // Read LCDC to determine tile data addressing mode
+        let lcdc = self.store.get_numeric(
+            self.store.field_col("lcdc").unwrap_or(0), entry
+        ) as u8;
+        let signed_addressing = (lcdc & 0x10) == 0; // bit 4: 0=signed, 1=unsigned
+
+        let tilemap_base = if map_select == 0 {
+            if (lcdc & 0x08) != 0 { 0x1C00 } else { 0x1800 } // bit 3: BG tilemap select
+        } else {
+            if (lcdc & 0x40) != 0 { 0x1C00 } else { 0x1800 } // bit 6: window tilemap select
+        };
+
+        const PALETTE: [(u8, u8, u8); 4] = [
+            (0xe0, 0xf8, 0xd0), (0x88, 0xc0, 0x70),
+            (0x34, 0x68, 0x56), (0x08, 0x18, 0x20),
+        ];
+        let rgba = gbtrace::vram::render_tilemap(&snap.data, tilemap_base, signed_addressing, &PALETTE);
+        Ok(js_sys::Uint8ClampedArray::from(&rgba[..]).into())
+    }
+
+    /// Get raw VRAM bytes at a specific entry (8192 bytes).
+    #[wasm_bindgen(js_name = getVramAt)]
+    pub fn get_vram_at(&mut self, entry: usize) -> Result<JsValue, JsError> {
+        self.build_vram_cache();
+        let cache = match &self.vram_cache {
+            Some(c) => c,
+            None => return Ok(JsValue::NULL),
+        };
+        let entry = self.map_row(entry);
+        let snap = match cache.at_entry(&*self.store, entry) {
+            Some(s) => s,
+            None => return Ok(JsValue::NULL),
+        };
+        Ok(js_sys::Uint8Array::from(&snap.data[..]).into())
+    }
 }
 
 // Private helpers
@@ -580,7 +670,7 @@ pub fn prepare_for_diff(a: TraceStore, b: TraceStore, sync: Option<String>) -> R
         .map_err(|e| JsError::new(&format!("{e}")))?;
 
     let arr = js_sys::Array::new();
-    arr.push(&JsValue::from(TraceStore { store: Box::new(new_a), rom: rom_a, original_bytes: bytes_a, downsample_map: None }));
-    arr.push(&JsValue::from(TraceStore { store: Box::new(new_b), rom: rom_b, original_bytes: bytes_b, downsample_map: None }));
+    arr.push(&JsValue::from(TraceStore { store: Box::new(new_a), rom: rom_a, original_bytes: bytes_a, downsample_map: None, vram_cache: None }));
+    arr.push(&JsValue::from(TraceStore { store: Box::new(new_b), rom: rom_b, original_bytes: bytes_b, downsample_map: None, vram_cache: None }));
     Ok(arr)
 }
