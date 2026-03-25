@@ -144,9 +144,10 @@ impl TraceStore {
         self.store.has_field("pix")
     }
 
-    /// Whether this is a T-cycle level trace with per-pixel pix data.
-    #[wasm_bindgen(js_name = isTcyclePixels)]
-    pub fn is_tcycle_pixels(&self) -> bool {
+    /// Whether this trace has per-entry pixel data (not full-frame dumps).
+    /// Returns true even when downsampled, since the underlying data has pixels.
+    #[wasm_bindgen(js_name = hasPerEntryPixels)]
+    pub fn has_per_entry_pixels(&self) -> bool {
         if !self.store.has_field("pix") { return false; }
         self.store.header().trigger == gbtrace::header::Trigger::Tcycle
     }

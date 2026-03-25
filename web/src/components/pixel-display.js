@@ -9,7 +9,7 @@ const SCALE = 2;
  *
  * Single mode: one canvas showing the current frame.
  * Compare mode (storeB set): three canvases — A | diff | B.
- * T-cycle mode (tcyclePixels): renders partial frames at the given
+ * T-cycle mode (perEntryPixels): renders partial frames at the given
  * currentIndex and supports pixel crosshair highlighting.
  */
 export class PixelDisplay extends LitElement {
@@ -20,7 +20,7 @@ export class PixelDisplay extends LitElement {
     nameB: { type: String },
     frameBoundaries: { type: Array },
     viewStart: { type: Number },
-    tcyclePixels: { type: Boolean },
+    perEntryPixels: { type: Boolean },
     currentIndex: { type: Number },
     _frameIndex: { state: true },
     _frameCountA: { state: true },
@@ -97,7 +97,7 @@ export class PixelDisplay extends LitElement {
     this.nameB = '';
     this.frameBoundaries = [];
     this.viewStart = 0;
-    this.tcyclePixels = false;
+    this.perEntryPixels = false;
     this.currentIndex = null;
     this._frameIndex = 0;
     this._frameCountA = 0;
@@ -123,14 +123,13 @@ export class PixelDisplay extends LitElement {
 
       if (frameChanged || storeChanged) {
         this.updateComplete.then(() => {
-          // For tcycle with a current index, draw partial frame instead of full
-          if (this.tcyclePixels && this.currentIndex != null) {
+          if (this.perEntryPixels && this.currentIndex != null) {
             this._updateForCurrentIndex();
           } else {
             this._draw();
           }
         });
-      } else if (changed.has('currentIndex') && this.tcyclePixels && this.currentIndex != null) {
+      } else if (changed.has('currentIndex') && this.perEntryPixels && this.currentIndex != null) {
         this._updateForCurrentIndex();
       }
     }
@@ -161,7 +160,7 @@ export class PixelDisplay extends LitElement {
   }
 
   _ensurePixMap() {
-    if (this._pixMapFrame === this._frameIndex || !this.store || !this.tcyclePixels) return;
+    if (this._pixMapFrame === this._frameIndex || !this.store || !this.perEntryPixels) return;
     try {
       this._pixMap = this.store.buildPixelPositionMap(this._frameIndex);
       this._reversePixMap = this.store.buildReversePixelMap(this._frameIndex);
@@ -173,7 +172,7 @@ export class PixelDisplay extends LitElement {
   }
 
   _updateForCurrentIndex() {
-    if (!this.tcyclePixels || this.currentIndex == null) {
+    if (!this.perEntryPixels || this.currentIndex == null) {
       if (this._highlightPixel) {
         this._highlightPixel = null;
         this._drawHighlight();
@@ -219,7 +218,7 @@ export class PixelDisplay extends LitElement {
 
   /** Draw a partial frame at a specific entry index. */
   _drawPartialAt(entry) {
-    if (!this.store || !this.tcyclePixels) return;
+    if (!this.store || !this.perEntryPixels) return;
     const canvas = this.renderRoot?.querySelector('#canvasA');
     if (!canvas) return;
     try {
@@ -355,14 +354,12 @@ export class PixelDisplay extends LitElement {
 
   _onCanvasMouseMove(e) {
     const pos = this._canvasToLcd(e);
-    if (!pos) { console.log('[pix] mousemove: no lcd pos', e.target.tagName, e.target.id); return; }
+    if (!pos) return;
     const entry = this._entryAtPixel(pos.x, pos.y);
     if (entry != null) {
       this.dispatchEvent(new CustomEvent('hover-index', {
         detail: { index: entry }, bubbles: true, composed: true,
       }));
-    } else {
-      console.log(`[pix] mousemove: no entry at (${pos.x},${pos.y}), reversePixMap=${!!this._reversePixMap}, pixMapFrame=${this._pixMapFrame}, frameIndex=${this._frameIndex}`);
     }
   }
 
@@ -374,10 +371,8 @@ export class PixelDisplay extends LitElement {
 
   _onCanvasClick(e) {
     const pos = this._canvasToLcd(e);
-    console.log('[pix] click:', pos, 'tcycle:', this.tcyclePixels, 'storeB:', !!this.storeB, 'target:', e.target.tagName, e.target.id);
     if (!pos) return;
     const entry = this._entryAtPixel(pos.x, pos.y);
-    console.log('[pix] click entry:', entry, 'reversePixMap:', !!this._reversePixMap, 'pixMapFrame:', this._pixMapFrame);
     if (entry != null) {
       this.dispatchEvent(new CustomEvent('current-index', {
         detail: { index: entry }, bubbles: true, composed: true,
@@ -388,8 +383,7 @@ export class PixelDisplay extends LitElement {
   _draw() {
     const fi = this._frameIndex;
     if (this.storeB) {
-      // In compare mode with tcycle data and a current index, draw partial on A
-      if (this.tcyclePixels && this.currentIndex != null) {
+      if (this.perEntryPixels && this.currentIndex != null) {
         this._drawPartialAt(this.currentIndex);
       } else {
         this._renderToCanvas('canvasA', this.store, fi);
@@ -399,7 +393,7 @@ export class PixelDisplay extends LitElement {
       const rawA = this.store?.renderFrame(fi);
       const rgbaA = rawA ? new Uint8ClampedArray(rawA.buffer || rawA) : null;
       if (rgbaA && rgbaB) this._renderDiff(rgbaA, rgbaB);
-    } else if (this.currentIndex != null && this.tcyclePixels) {
+    } else if (this.currentIndex != null && this.perEntryPixels) {
       this._drawPartialAt(this.currentIndex);
     } else {
       this._renderToCanvas('canvasA', this.store, fi);
@@ -417,16 +411,16 @@ export class PixelDisplay extends LitElement {
             <span class="frame-info">frame ${this._frameIndex + 1} / ${total}</span>
           </div>
           <div class="compare-row"
-            @mousemove=${this.tcyclePixels ? this._onCanvasMouseMove : null}
-            @mouseleave=${this.tcyclePixels ? this._onCanvasMouseLeave : null}
-            @click=${this.tcyclePixels ? this._onCanvasClick : null}
-            style="${this.tcyclePixels ? 'cursor:crosshair;' : ''}">
+            @mousemove=${this.perEntryPixels ? this._onCanvasMouseMove : null}
+            @mouseleave=${this.perEntryPixels ? this._onCanvasMouseLeave : null}
+            @click=${this.perEntryPixels ? this._onCanvasClick : null}
+            style="${this.perEntryPixels ? 'cursor:crosshair;' : ''}">
             <div class="compare-panel">
               <span class="compare-label a">${this.nameA || 'A'}</span>
               <div class="canvas-wrap">
                 <canvas id="canvasA" width=${LCD_WIDTH} height=${LCD_HEIGHT}
                   style="width: ${LCD_WIDTH * SCALE}px; height: ${LCD_HEIGHT * SCALE}px;"></canvas>
-                ${this.tcyclePixels ? html`
+                ${this.perEntryPixels ? html`
                   <canvas class="highlight-overlay" width=${LCD_WIDTH} height=${LCD_HEIGHT}
                     style="width: ${LCD_WIDTH * SCALE}px; height: ${LCD_HEIGHT * SCALE}px;"></canvas>
                 ` : ''}
@@ -454,13 +448,13 @@ export class PixelDisplay extends LitElement {
           <span class="frame-info">frame ${this._frameIndex + 1} / ${total}</span>
         </div>
         <div class="canvas-wrap"
-          @mousemove=${this.tcyclePixels ? this._onCanvasMouseMove : null}
-          @mouseleave=${this.tcyclePixels ? this._onCanvasMouseLeave : null}
-          @click=${this.tcyclePixels ? this._onCanvasClick : null}
-          style="${this.tcyclePixels ? 'cursor:crosshair;' : ''}">
+          @mousemove=${this.perEntryPixels ? this._onCanvasMouseMove : null}
+          @mouseleave=${this.perEntryPixels ? this._onCanvasMouseLeave : null}
+          @click=${this.perEntryPixels ? this._onCanvasClick : null}
+          style="${this.perEntryPixels ? 'cursor:crosshair;' : ''}">
           <canvas id="canvasA" width=${LCD_WIDTH} height=${LCD_HEIGHT}
             style="width: ${LCD_WIDTH * SCALE}px; height: ${LCD_HEIGHT * SCALE}px;"></canvas>
-          ${this.tcyclePixels ? html`
+          ${this.perEntryPixels ? html`
             <canvas class="highlight-overlay" width=${LCD_WIDTH} height=${LCD_HEIGHT}
               style="width: ${LCD_WIDTH * SCALE}px; height: ${LCD_HEIGHT * SCALE}px;"></canvas>
           ` : ''}
