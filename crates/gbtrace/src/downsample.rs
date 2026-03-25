@@ -16,6 +16,11 @@ pub struct DownsampledStore<'a> {
 }
 
 impl<'a> DownsampledStore<'a> {
+    /// Create a downsampled view from a pre-built index map.
+    pub fn from_map(inner: &'a dyn TraceStore, index_map: Vec<usize>) -> Self {
+        Self { inner, index_map }
+    }
+
     /// Create a downsampled view by picking entries where PC changes.
     pub fn new(inner: &'a dyn TraceStore) -> Self {
         let pc_col = inner.field_col("pc");

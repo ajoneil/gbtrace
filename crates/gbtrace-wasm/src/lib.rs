@@ -165,7 +165,12 @@ impl TraceStore {
             Some(r) => r,
             None => return Ok(JsValue::NULL),
         };
-        let frame = framebuffer::reconstruct_partial_frame(&*self.store, start, end);
+        let frame = if let Some(ref ds_map) = self.downsample_map {
+            let ds = gbtrace::downsample::DownsampledStore::from_map(&*self.store, ds_map.clone());
+            framebuffer::reconstruct_partial_frame_downsampled(&ds, start, end)
+        } else {
+            framebuffer::reconstruct_partial_frame(&*self.store, start, end)
+        };
         Ok(js_sys::Uint8ClampedArray::from(&frame.to_rgba()[..]).into())
     }
 
@@ -178,7 +183,12 @@ impl TraceStore {
             Some(r) => r,
             None => return Ok(JsValue::NULL),
         };
-        let frame = framebuffer::reconstruct_partial_frame(&*self.store, start, stop_entry);
+        let frame = if let Some(ref ds_map) = self.downsample_map {
+            let ds = gbtrace::downsample::DownsampledStore::from_map(&*self.store, ds_map.clone());
+            framebuffer::reconstruct_partial_frame_downsampled(&ds, start, stop_entry)
+        } else {
+            framebuffer::reconstruct_partial_frame(&*self.store, start, stop_entry)
+        };
         Ok(js_sys::Uint8ClampedArray::from(&frame.to_rgba()[..]).into())
     }
 
@@ -209,7 +219,12 @@ impl TraceStore {
             Some(r) => r,
             None => return Ok(JsValue::NULL),
         };
-        let map = framebuffer::build_pixel_position_map(&*self.store, frame_start, frame_end);
+        let map = if let Some(ref ds_map) = self.downsample_map {
+            let ds = gbtrace::downsample::DownsampledStore::from_map(&*self.store, ds_map.clone());
+            framebuffer::build_pixel_position_map_downsampled(&ds, frame_start, frame_end)
+        } else {
+            framebuffer::build_pixel_position_map(&*self.store, frame_start, frame_end)
+        };
         let packed: Vec<u32> = map.iter().map(|&(x, y)| {
             if x == 0xFFFF { 0xFFFFFFFF } else { ((x as u32) << 16) | (y as u32) }
         }).collect();
@@ -227,23 +242,12 @@ impl TraceStore {
             Some(r) => r,
             None => return Ok(JsValue::NULL),
         };
-        let mut rmap = framebuffer::build_reverse_pixel_map(&*self.store, frame_start, frame_end);
-
-        // If downsampled, convert raw entry indices to downsampled indices.
-        // The downsample map is sorted, so binary search gives the closest
-        // instruction boundary for each raw pixel entry.
-        if let Some(ref ds_map) = self.downsample_map {
-            for val in rmap.iter_mut() {
-                if *val == u32::MAX { continue; }
-                let raw = *val as usize;
-                // Find the downsampled index whose raw index is <= raw.
-                // This is the instruction that contains this T-cycle.
-                match ds_map.binary_search(&raw) {
-                    Ok(di) => *val = di as u32,
-                    Err(di) => *val = di.saturating_sub(1) as u32,
-                }
-            }
-        }
+        let rmap = if let Some(ref ds_map) = self.downsample_map {
+            let ds = gbtrace::downsample::DownsampledStore::from_map(&*self.store, ds_map.clone());
+            framebuffer::build_reverse_pixel_map_downsampled(&ds, frame_start, frame_end)
+        } else {
+            framebuffer::build_reverse_pixel_map(&*self.store, frame_start, frame_end)
+        };
 
         let arr = js_sys::Uint32Array::new_with_length(rmap.len() as u32);
         arr.copy_from(&rmap);
