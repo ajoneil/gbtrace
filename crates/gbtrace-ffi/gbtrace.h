@@ -66,6 +66,9 @@ void gbtrace_writer_set_bool(GbtraceWriter *w, size_t field, bool value);
 void gbtrace_writer_set_str(GbtraceWriter *w, size_t field,
                              const char *ptr, size_t len);
 
+/* Append a null value for a nullable field (pix, vram_addr, vram_data). */
+void gbtrace_writer_set_null(GbtraceWriter *w, size_t field);
+
 /* Mark a frame boundary at the current entry position.
  * Call at vblank. Writes boundary to metadata and flushes row group.
  * Returns 0 on success, -1 on error. */
