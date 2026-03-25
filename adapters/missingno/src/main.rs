@@ -176,15 +176,20 @@ fn main() {
                 prev_sc_high = sc_high;
             }
 
-            // Reference screenshot check (at frame boundaries)
-            if new_screen {
-                if let Some(ref reference) = reference_pix {
-                    let current = framebuffer_to_pix(&gb);
-                    if current == *reference {
-                        eprintln!("Reference match at frame {}", frame_count + 1);
+        }
+
+        // Reference screenshot check runs on every frame boundary,
+        // even after other stop conditions fire (the screen may not
+        // have updated yet when serial/opcode triggers).
+        if new_screen {
+            if let Some(ref reference) = reference_pix {
+                let current = framebuffer_to_pix(&gb);
+                if current == *reference {
+                    if !stop_triggered {
                         stop_triggered = true;
                         remaining_extra = Some(args.extra_frames);
                     }
+                    eprintln!("Reference match at frame {}", frame_count + 1);
                 }
             }
         }
