@@ -9,10 +9,10 @@ on:
         type: choice
         options: [all, gbmicrotest, blargg, mooneye, dmg-acid2]
       emulator:
-        description: "Emulator (all, gambatte, sameboy, mgba, gateboy)"
+        description: "Emulator (all, gambatte, sameboy, mgba, gateboy, missingno)"
         default: "all"
         type: choice
-        options: [all, gambatte, sameboy, mgba, gateboy]
+        options: [all, gambatte, sameboy, mgba, gateboy, missingno]
 
 jobs:
   matrix-setup:
@@ -23,7 +23,7 @@ jobs:
       - id: set
         run: |
           SUITES='["gbmicrotest","blargg","mooneye","dmg-acid2"]'
-          EMUS='["gambatte","sameboy","mgba","gateboy"]'
+          EMUS='["gambatte","sameboy","mgba","gateboy","missingno"]'
 
           if [ "${{ inputs.suite }}" != "" ] && [ "${{ inputs.suite }}" != "all" ]; then
             SUITES='["${{ inputs.suite }}"]'
