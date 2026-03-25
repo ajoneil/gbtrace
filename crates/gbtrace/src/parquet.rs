@@ -78,26 +78,18 @@ impl ColumnBuffer {
 
 /// Writes trace entries to a Parquet file with native integer types.
 ///
-/// When the trace includes an `ly` field, row groups are flushed at frame
-/// boundaries (when `ly` wraps from 153→0). When the trace includes full-frame
-/// `pix` dumps (23040 chars), each dump also starts a new row group.
-/// This allows readers to decode individual frames on demand.
+/// Frame boundaries are only created by explicit `mark_frame()` calls.
+/// Row groups are flushed at frame boundaries and when they exceed
+/// `MAX_ROW_GROUP_SIZE`. Readers can discover frames from `frame_num`
+/// changes or LY wraps if no explicit boundaries are present.
 pub struct ParquetTraceWriter {
     writer: ArrowWriter<File>,
     schema: Arc<Schema>,
     columns: Vec<ColumnBuffer>,
     field_names: Vec<String>,
     field_types: Vec<FieldType>,
-    /// Column index of the `ly` field, if present.
-    ly_col: Option<usize>,
-    /// Column index of the `pix` field, if present.
-    pix_col: Option<usize>,
-    /// Previous value of `ly`, for detecting frame boundaries.
-    prev_ly: Option<u8>,
-    /// Explicit frame boundary indices signalled by the adapter.
+    /// Explicit frame boundary indices signalled by mark_frame().
     frame_boundaries: Vec<u64>,
-    /// When true, mark_frame() has been called — suppress auto LY detection.
-    manual_frames: bool,
     /// Total entries written so far.
     entries_written: u64,
     /// Rows written since the last `writer.flush()` (row group start).
@@ -145,20 +137,13 @@ impl ParquetTraceWriter {
         let writer = ArrowWriter::try_new(file, schema.clone(), Some(props))?;
         let columns: Vec<ColumnBuffer> = field_types.iter().map(|ft| ColumnBuffer::new(*ft)).collect();
 
-        let ly_col = field_names.iter().position(|n| n == "ly");
-        let pix_col = field_names.iter().position(|n| n == "pix");
-
         Ok(Self {
             writer,
             schema,
             columns,
             field_names,
             field_types,
-            ly_col,
-            pix_col,
-            prev_ly: None,
             frame_boundaries: Vec::new(),
-            manual_frames: false,
             entries_written: 0,
             rows_in_current_group: 0,
         })
@@ -166,39 +151,10 @@ impl ParquetTraceWriter {
 
     /// Write a single trace entry. Entries are buffered and flushed in batches.
     ///
-    /// When the trace includes `ly`, a new row group is started at each frame
-    /// boundary (ly wraps 153→0). Otherwise, row groups are flushed every
-    /// BATCH_SIZE entries.
+    /// Frame boundaries are only created by explicit `mark_frame()` calls.
+    /// Readers can discover frames from `frame_num` or LY changes if no
+    /// explicit boundaries are present.
     pub fn write_entry(&mut self, entry: &TraceEntry) -> Result<()> {
-        // Detect frame boundary before appending (so the new frame starts
-        // a fresh row group). Skip auto-detection when mark_frame() is being
-        // used — the adapter owns boundary placement.
-        if !self.manual_frames {
-            let mut boundary = false;
-            if let Some(ly_idx) = self.ly_col {
-                let cur_ly = parse_u8(entry.get(&self.field_names[ly_idx]));
-                if let Some(prev) = self.prev_ly {
-                    if cur_ly < prev && prev >= 144 {
-                        boundary = true;
-                    }
-                }
-                self.prev_ly = Some(cur_ly);
-            }
-            if let Some(pix_idx) = self.pix_col {
-                if let Some(val) = entry.get(&self.field_names[pix_idx]) {
-                    if let Some(s) = val.as_str() {
-                        if s.len() == 160 * 144 {
-                            boundary = true;
-                        }
-                    }
-                }
-            }
-            if boundary {
-                self.flush_row_group()?;
-                self.frame_boundaries.push(self.entries_written);
-            }
-        }
-
         for (i, (name, ft)) in self.field_names.iter().zip(&self.field_types).enumerate() {
             let val = entry.get(name);
             match (&mut self.columns[i], ft) {
@@ -235,28 +191,9 @@ impl ParquetTraceWriter {
 
     // --- Direct typed access for FFI (bypasses TraceEntry) ---
 
-    /// Signal a frame boundary check with the given ly and pix_len values.
-    /// Call this BEFORE appending column values for the entry.
-    /// If a boundary is detected, the current batch is flushed.
-    pub fn check_boundary(&mut self, ly: Option<u8>, pix_len: usize) -> Result<()> {
-        let mut boundary = false;
-        if self.ly_col.is_some() {
-            if let Some(cur_ly) = ly {
-                if let Some(prev) = self.prev_ly {
-                    if cur_ly < prev && prev >= 144 {
-                        boundary = true;
-                    }
-                }
-                self.prev_ly = Some(cur_ly);
-            }
-        }
-        if self.pix_col.is_some() && pix_len == 160 * 144 {
-            boundary = true;
-        }
-        if boundary {
-            self.flush_row_group()?;
-            self.frame_boundaries.push(self.entries_written);
-        }
+    /// Legacy boundary check — retained for FFI compatibility.
+    /// Frame boundaries are now only created by explicit `mark_frame()` calls.
+    pub fn check_boundary(&mut self, _ly: Option<u8>, _pix_len: usize) -> Result<()> {
         Ok(())
     }
 
@@ -312,7 +249,6 @@ impl ParquetTraceWriter {
     /// Call this at vblank — the current entry index becomes a frame start.
     /// Also flushes the current batch to start a new row group.
     pub fn mark_frame(&mut self) -> Result<()> {
-        self.manual_frames = true;
         self.frame_boundaries.push(self.entries_written);
         self.flush_row_group()?;
         Ok(())
