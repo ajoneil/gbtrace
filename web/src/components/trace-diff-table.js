@@ -452,7 +452,12 @@ export class TraceDiffTable extends LitElement {
     const shared = this.renderRoot?.querySelector('#shared-panel');
     if (!panelA) return;
     this._renderedStart = -1;
-    const scrollTop = this._entryToScroll(index, panelA);
+    // Offset by a few rows so the target isn't hidden under the sticky header
+    const vs = this.viewStart || 0;
+    const relIndex = Math.max(0, index - vs);
+    const offsetRows = 3;
+    const targetIndex = Math.max(0, relIndex - offsetRows);
+    const scrollTop = this._entryToScroll(targetIndex, panelA);
     panelA.scrollTop = scrollTop;
     if (panelB) panelB.scrollTop = scrollTop;
     if (shared) shared.scrollTop = scrollTop;
