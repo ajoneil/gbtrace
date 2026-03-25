@@ -33,6 +33,8 @@ pub trait TraceStore {
     fn get_str(&self, col: usize, row: usize) -> String;
     fn get_numeric(&self, col: usize, row: usize) -> u64;
     fn get_bool(&self, col: usize, row: usize) -> bool;
+    /// Whether the value at (col, row) is null.
+    fn is_null(&self, col: usize, row: usize) -> bool;
 
     // Convenience accessors by field name (default implementations)
     fn get_numeric_named(&self, name: &str, row: usize) -> Option<u64> {
@@ -178,6 +180,9 @@ pub struct ColumnStore {
     /// Explicit frame boundary entry indices (from parquet metadata).
     /// If set, these take priority over LY/pix-based detection.
     pub explicit_boundaries: Option<Vec<u32>>,
+    /// Null bitmaps for nullable columns. `null_bitmaps[col][row]` is true
+    /// if that cell is null. Only populated for columns that have nulls.
+    pub null_bitmaps: Vec<Option<Vec<bool>>>,
 }
 
 impl ColumnStore {
@@ -189,6 +194,7 @@ impl ColumnStore {
             .enumerate()
             .map(|(i, f)| (f.clone(), i))
             .collect();
+        let ncols = header.fields.len();
         let columns = header
             .fields
             .iter()
@@ -200,6 +206,7 @@ impl ColumnStore {
             field_index,
             len: 0,
             explicit_boundaries: None,
+            null_bitmaps: vec![None; ncols],
         }
     }
 
@@ -815,6 +822,12 @@ impl TraceStore for ColumnStore {
     }
     fn get_bool(&self, col: usize, row: usize) -> bool {
         self.columns[col].get_bool(row)
+    }
+    fn is_null(&self, col: usize, row: usize) -> bool {
+        self.null_bitmaps.get(col)
+            .and_then(|bm| bm.as_ref())
+            .map(|bm| bm.get(row).copied().unwrap_or(false))
+            .unwrap_or(false)
     }
 
     fn eval_condition_trait(&self, cond: &crate::query::Condition, row: usize) -> bool {
