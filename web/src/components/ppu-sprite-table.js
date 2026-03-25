@@ -148,7 +148,9 @@ export class PpuSpriteTable extends LitElement {
           const xf = (s.attr >> 1) & 1;
           const pal = s.attr & 1;
           return html`
-            <tr class="${active ? '' : 'inactive'}">
+            <tr class="${active ? '' : 'inactive'}"
+                @mouseenter=${() => this._onSpriteHover(s.i)}
+                @mouseleave=${() => this._onSpriteHover(-1)}>
               <td>${s.i}</td>
               <td>${s.x}</td>
               <td>${this._hex(s.id)}</td>
@@ -195,6 +197,12 @@ export class PpuSpriteTable extends LitElement {
         </div>
       </div>
     `;
+  }
+
+  _onSpriteHover(idx) {
+    this.dispatchEvent(new CustomEvent('sprite-hover', {
+      detail: { index: idx }, bubbles: true, composed: true,
+    }));
   }
 
   _hex(v) {
