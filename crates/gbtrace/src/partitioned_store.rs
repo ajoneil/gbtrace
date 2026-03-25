@@ -555,6 +555,20 @@ impl TraceStore for PartitionedStore {
     fn get_bool(&self, col: usize, row: usize) -> bool {
         self.get_bool_named(&self.header.fields[col], row).unwrap_or(false)
     }
+
+    fn query_range(&self, condition_str: &str, start: usize, end: usize) -> std::result::Result<Vec<u32>, String> {
+        PartitionedStore::query_range(self, condition_str, start, end)
+    }
+
+    fn field_summary(
+        &self,
+        field: &str,
+        start: usize,
+        end: usize,
+        buckets: usize,
+    ) -> std::result::Result<Vec<f64>, String> {
+        PartitionedStore::field_summary(self, field, start, end, buckets)
+    }
 }
 
 /// Load a partitioned store from in-memory parquet bytes (for WASM).

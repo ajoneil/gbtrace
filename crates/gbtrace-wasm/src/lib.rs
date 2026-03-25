@@ -1,4 +1,4 @@
-use gbtrace::column_store::{ColumnStore, PartitionedStore};
+use gbtrace::column_store::ColumnStore;
 use gbtrace::disasm;
 use gbtrace::framebuffer;
 use gbtrace::profile::FieldType;
@@ -20,19 +20,13 @@ fn to_js(value: &impl serde::Serialize) -> Result<JsValue, JsError> {
     Ok(value.serialize(&serializer)?)
 }
 
-/// Either a lazy (on-demand row group) or eager (fully decoded) store.
-enum StoreKind {
-    Lazy(PartitionedStore),
-    Eager(ColumnStore),
-}
-
 /// In-memory trace store for the browser.
 ///
 /// Parquet files are loaded lazily — only a few row groups (frames) are
 /// decoded at a time. JSONL files and post-diff stores are loaded eagerly.
 #[wasm_bindgen]
 pub struct TraceStore {
-    store: StoreKind,
+    store: Box<dyn gbtrace::column_store::TraceStore>,
     rom: Option<Vec<u8>>,
     /// Original bytes for re-loading when sync changes.
     original_bytes: Option<Vec<u8>>,
@@ -48,13 +42,13 @@ impl TraceStore {
     pub fn from_bytes(data: &[u8]) -> Result<TraceStore, JsError> {
         const PARQUET_MAGIC: &[u8] = b"PAR1";
 
-        let store = if data.len() >= 4 && &data[..4] == PARQUET_MAGIC {
-            StoreKind::Lazy(
+        let store: Box<dyn gbtrace::column_store::TraceStore> = if data.len() >= 4 && &data[..4] == PARQUET_MAGIC {
+            Box::new(
                 gbtrace::column_store::load_partitioned_store_from_bytes(data)
                     .map_err(|e| JsError::new(&format!("{e}")))?
             )
         } else {
-            StoreKind::Eager(
+            Box::new(
                 gbtrace::column_store::load_column_store_from_bytes(data)
                     .map_err(|e| JsError::new(&format!("{e}")))?
             )
@@ -67,7 +61,7 @@ impl TraceStore {
     /// The downsampled view is transparent to all other methods.
     #[wasm_bindgen(js_name = enableDownsampling)]
     pub fn enable_downsampling(&mut self) {
-        let store = self.as_trait();
+        let store = &*self.store;
         let pc_col = store.field_col("pc");
         let mut map = Vec::new();
         if let Some(pc) = pc_col {
@@ -101,11 +95,7 @@ impl TraceStore {
 
     /// Return the trace header as a JS object.
     pub fn header(&self) -> Result<JsValue, JsError> {
-        let h = match &self.store {
-            StoreKind::Lazy(s) => s.header(),
-            StoreKind::Eager(s) => s.header(),
-        };
-        Ok(to_js(h)?)
+        Ok(to_js(self.store.header())?)
     }
 
     /// Number of entries in the trace.
@@ -120,7 +110,7 @@ impl TraceStore {
     /// metadata when available, otherwise falls back to reconstruct_frames.
     #[wasm_bindgen(js_name = frameBoundaries)]
     pub fn frame_boundaries(&self) -> js_sys::Uint32Array {
-        let orig_boundaries = self.as_trait().frame_boundaries();
+        let orig_boundaries = self.store.frame_boundaries();
 
         let boundaries = if let Some(ref map) = self.downsample_map {
             // Map original boundaries to downsampled indices
@@ -143,10 +133,7 @@ impl TraceStore {
     /// Get the field names from the header (excludes internal fields like `pix`).
     #[wasm_bindgen(js_name = fieldNames)]
     pub fn field_names(&self) -> Result<JsValue, JsError> {
-        let fields = match &self.store {
-            StoreKind::Lazy(s) => &s.header().fields,
-            StoreKind::Eager(s) => &s.header().fields,
-        };
+        let fields = &self.store.header().fields;
         let filtered: Vec<&String> = fields.iter().filter(|f| f.as_str() != "pix").collect();
         Ok(to_js(&filtered)?)
     }
@@ -154,28 +141,20 @@ impl TraceStore {
     /// Whether this trace has pixel data (a `pix` column).
     #[wasm_bindgen(js_name = hasPixels)]
     pub fn has_pixels(&self) -> bool {
-        self.has_field("pix")
+        self.store.has_field("pix")
     }
 
     /// Whether this is a T-cycle level trace with per-pixel pix data.
     #[wasm_bindgen(js_name = isTcyclePixels)]
     pub fn is_tcycle_pixels(&self) -> bool {
-        if !self.has_field("pix") { return false; }
-        let header = match &self.store {
-            StoreKind::Lazy(s) => s.header(),
-            StoreKind::Eager(s) => s.header(),
-        };
-        header.trigger == gbtrace::header::Trigger::Tcycle
+        if !self.store.has_field("pix") { return false; }
+        self.store.header().trigger == gbtrace::header::Trigger::Tcycle
     }
 
     /// Number of reconstructed pixel frames.
     #[wasm_bindgen(js_name = frameCount)]
     pub fn frame_count(&self) -> usize {
-        let store: &dyn gbtrace::column_store::TraceStore = match &self.store {
-            StoreKind::Lazy(s) => s,
-            StoreKind::Eager(s) => s,
-        };
-        store.frame_boundaries().len()
+        self.store.frame_boundaries().len()
     }
 
     /// Render a complete frame as RGBA pixel data (160×144×4 = 92160 bytes).
@@ -186,11 +165,7 @@ impl TraceStore {
             Some(r) => r,
             None => return Ok(JsValue::NULL),
         };
-        let store: &dyn gbtrace::column_store::TraceStore = match &self.store {
-            StoreKind::Lazy(s) => s,
-            StoreKind::Eager(s) => s,
-        };
-        let frame = framebuffer::reconstruct_partial_frame(store, start, end);
+        let frame = framebuffer::reconstruct_partial_frame(&*self.store, start, end);
         Ok(js_sys::Uint8ClampedArray::from(&frame.to_rgba()[..]).into())
     }
 
@@ -203,11 +178,7 @@ impl TraceStore {
             Some(r) => r,
             None => return Ok(JsValue::NULL),
         };
-        let store: &dyn gbtrace::column_store::TraceStore = match &self.store {
-            StoreKind::Lazy(s) => s,
-            StoreKind::Eager(s) => s,
-        };
-        let frame = framebuffer::reconstruct_partial_frame(store, start, stop_entry);
+        let frame = framebuffer::reconstruct_partial_frame(&*self.store, start, stop_entry);
         Ok(js_sys::Uint8ClampedArray::from(&frame.to_rgba()[..]).into())
     }
 
@@ -215,14 +186,11 @@ impl TraceStore {
     /// Each byte is 0-3 (pixel shade) or 255 (no pixel at this entry).
     #[wasm_bindgen(js_name = pixRange)]
     pub fn pix_range(&self, start: usize, count: usize) -> Result<JsValue, JsError> {
-        if !self.has_field("pix") { return Ok(JsValue::NULL); }
+        if !self.store.has_field("pix") { return Ok(JsValue::NULL); }
         let mut result = vec![255u8; count];
         let end = (start + count).min(self.entry_count());
         for i in start..end {
-            let pix_val = match &self.store {
-                StoreKind::Eager(s) => s.get_str_named("pix", i).unwrap_or("").to_string(),
-                StoreKind::Lazy(s) => s.get_str_named("pix", i).unwrap_or_default(),
-            };
+            let pix_val = self.store.get_str_named("pix", i).unwrap_or_default();
             if pix_val.len() == 1 {
                 let ch = pix_val.as_bytes()[0];
                 if ch >= b'0' && ch <= b'3' {
@@ -241,11 +209,7 @@ impl TraceStore {
             Some(r) => r,
             None => return Ok(JsValue::NULL),
         };
-        let store: &dyn gbtrace::column_store::TraceStore = match &self.store {
-            StoreKind::Lazy(s) => s,
-            StoreKind::Eager(s) => s,
-        };
-        let map = framebuffer::build_pixel_position_map(store, frame_start, frame_end);
+        let map = framebuffer::build_pixel_position_map(&*self.store, frame_start, frame_end);
         let packed: Vec<u32> = map.iter().map(|&(x, y)| {
             if x == 0xFFFF { 0xFFFFFFFF } else { ((x as u32) << 16) | (y as u32) }
         }).collect();
@@ -263,11 +227,7 @@ impl TraceStore {
             Some(r) => r,
             None => return Ok(JsValue::NULL),
         };
-        let store: &dyn gbtrace::column_store::TraceStore = match &self.store {
-            StoreKind::Lazy(s) => s,
-            StoreKind::Eager(s) => s,
-        };
-        let mut rmap = framebuffer::build_reverse_pixel_map(store, frame_start, frame_end);
+        let mut rmap = framebuffer::build_reverse_pixel_map(&*self.store, frame_start, frame_end);
 
         // If downsampled, convert raw entry indices to downsampled indices.
         // The downsample map is sorted, so binary search gives the closest
@@ -314,10 +274,7 @@ impl TraceStore {
     /// Find matching entry indices within a range.
     #[wasm_bindgen(js_name = queryRange)]
     pub fn query_range(&self, condition_str: &str, start: usize, end: usize) -> Result<js_sys::Uint32Array, JsError> {
-        let indices = match &self.store {
-            StoreKind::Lazy(s) => s.query_range(condition_str, start, end).map_err(|e| JsError::new(&e))?,
-            StoreKind::Eager(s) => s.query_range(condition_str, start, end).map_err(|e| JsError::new(&e))?,
-        };
+        let indices = self.store.query_range(condition_str, start, end).map_err(|e| JsError::new(&e))?;
         let arr = js_sys::Uint32Array::new_with_length(indices.len() as u32);
         arr.copy_from(&indices);
         Ok(arr)
@@ -332,49 +289,8 @@ impl TraceStore {
         end: usize,
         buckets: usize,
     ) -> Result<js_sys::Float64Array, JsError> {
-        let out = match &self.store {
-            StoreKind::Lazy(s) => {
-                s.field_summary(field, start, end, buckets)
-                    .map_err(|e| JsError::new(&e))?
-            }
-            StoreKind::Eager(s) => {
-                let col_idx = s.field_col(field)
-                    .ok_or_else(|| JsError::new(&format!("unknown field: {field}")))?;
-                let col = s.column(col_idx);
-                let total = s.entry_count();
-                let end = end.min(total);
-                let start = start.min(end);
-                let range = end - start;
-
-                if range == 0 || buckets == 0 {
-                    Vec::new()
-                } else {
-                    let mut out = Vec::with_capacity(buckets * 2);
-                    for b in 0..buckets {
-                        let b_start = start + (b * range) / buckets;
-                        let b_end = start + ((b + 1) * range) / buckets;
-                        if b_start >= b_end {
-                            let v = if b_start > 0 {
-                                col.get_numeric(b_start.min(total - 1)) as f64
-                            } else { 0.0 };
-                            out.push(v);
-                            out.push(v);
-                            continue;
-                        }
-                        let mut min = f64::MAX;
-                        let mut max = f64::MIN;
-                        for i in b_start..b_end {
-                            let v = col.get_numeric(i) as f64;
-                            if v < min { min = v; }
-                            if v > max { max = v; }
-                        }
-                        out.push(min);
-                        out.push(max);
-                    }
-                    out
-                }
-            }
-        };
+        let out = self.store.field_summary(field, start, end, buckets)
+            .map_err(|e| JsError::new(&e))?;
 
         let arr = js_sys::Float64Array::new_with_length(out.len() as u32);
         arr.copy_from(&out);
@@ -393,8 +309,8 @@ impl TraceStore {
         let mut indices = Vec::new();
 
         for i in 0..len {
-            let a = self.get_numeric_named(field, i);
-            let b = other.get_numeric_named(field, i);
+            let a = self.store.get_numeric_named(field, i);
+            let b = other.store.get_numeric_named(field, i);
             if a != b {
                 indices.push(i as u32);
             }
@@ -413,24 +329,21 @@ impl TraceStore {
         let end = end.min(max_len);
         let len = if end > start { end - start } else { 0 };
 
-        let fields = match &self.store {
-            StoreKind::Lazy(s) => s.header().fields.clone(),
-            StoreKind::Eager(s) => s.header().fields.clone(),
-        };
+        let fields = self.store.header().fields.clone();
 
         let mut field_counts: Vec<(String, u64)> = Vec::new();
         let mut any_diff_count: usize = 0;
         let mut any_diff_flags = vec![false; len];
 
         for name in &fields {
-            let has_a = self.has_field(name);
-            let has_b = other.has_field(name);
+            let has_a = self.store.has_field(name);
+            let has_b = other.store.has_field(name);
             if !has_a || !has_b { continue; }
 
             let mut count = 0u64;
             for i in 0..len {
                 let row = start + i;
-                if self.get_numeric_named(name, row) != other.get_numeric_named(name, row) {
+                if self.store.get_numeric_named(name, row) != other.store.get_numeric_named(name, row) {
                     count += 1;
                     any_diff_flags[i] = true;
                 }
@@ -471,21 +384,18 @@ impl TraceStore {
     #[wasm_bindgen(js_name = diffAll)]
     pub fn diff_all(&self, other: &TraceStore) -> Result<js_sys::Uint32Array, JsError> {
         let len = self.entry_count().min(other.entry_count());
-        let fields = match &self.store {
-            StoreKind::Lazy(s) => s.header().fields.clone(),
-            StoreKind::Eager(s) => s.header().fields.clone(),
-        };
+        let fields = self.store.header().fields.clone();
 
         // Collect field names present in both
         let common_fields: Vec<&str> = fields.iter()
-            .filter(|n| self.has_field(n) && other.has_field(n))
+            .filter(|n| self.store.has_field(n) && other.store.has_field(n))
             .map(|n| n.as_str())
             .collect();
 
         let mut indices = Vec::new();
         for row in 0..len {
             for &name in &common_fields {
-                if self.get_numeric_named(name, row) != other.get_numeric_named(name, row) {
+                if self.store.get_numeric_named(name, row) != other.store.get_numeric_named(name, row) {
                     indices.push(row as u32);
                     break;
                 }
@@ -537,10 +447,7 @@ impl TraceStore {
         let end = (start + count).min(self.entry_count());
         let mnemonics: Vec<String> = (start..end)
             .map(|i| {
-                let pc = match &self.store {
-                    StoreKind::Lazy(s) => s.get_u16_named("pc", i).unwrap_or(0),
-                    StoreKind::Eager(s) => s.get_u16_named("pc", i).unwrap_or(0),
-                };
+                let pc = self.store.get_numeric_named("pc", i).unwrap_or(0) as u16;
                 disasm::disassemble(rom, pc).0
             })
             .collect();
@@ -550,14 +457,6 @@ impl TraceStore {
 
 // Private helpers
 impl TraceStore {
-    /// Get a reference to the underlying store as a trait object.
-    fn as_trait(&self) -> &dyn gbtrace::column_store::TraceStore {
-        match &self.store {
-            StoreKind::Lazy(s) => s,
-            StoreKind::Eager(s) => s,
-        }
-    }
-
     /// Map a row index through the downsample map (if any).
     fn map_row(&self, row: usize) -> usize {
         match &self.downsample_map {
@@ -570,16 +469,13 @@ impl TraceStore {
     fn effective_entry_count(&self) -> usize {
         match &self.downsample_map {
             Some(map) => map.len(),
-            None => self.as_trait().entry_count(),
+            None => self.store.entry_count(),
         }
     }
 
     /// Get the entry range (start, end) for a frame by index.
     fn frame_entry_range(&self, frame_index: usize) -> Option<(usize, usize)> {
-        let boundaries = match &self.store {
-            StoreKind::Lazy(s) => s.frame_boundaries(),
-            StoreKind::Eager(s) => s.frame_boundaries(),
-        };
+        let boundaries = self.store.frame_boundaries();
         if frame_index >= boundaries.len() {
             return None;
         }
@@ -587,16 +483,13 @@ impl TraceStore {
         let end = if frame_index + 1 < boundaries.len() {
             boundaries[frame_index + 1] as usize
         } else {
-            match &self.store {
-                StoreKind::Lazy(s) => s.entry_count(),
-                StoreKind::Eager(s) => s.entry_count(),
-            }
+            self.store.entry_count()
         };
         Some((start, end))
     }
 
     fn row_to_map(&self, index: usize) -> BTreeMap<String, JsField> {
-        let store = self.as_trait();
+        let store = &*self.store;
         let orig_row = self.map_row(index);
         let fields = store.header().fields.clone();
         let mut map = BTreeMap::new();
@@ -624,21 +517,19 @@ impl TraceStore {
         }
         map
     }
+}
 
-    fn get_numeric_named(&self, name: &str, row: usize) -> Option<u64> {
-        match &self.store {
-            StoreKind::Lazy(s) => s.get_numeric_named(name, row),
-            StoreKind::Eager(s) => s.get_numeric_named(name, row),
-        }
+/// Helper: load bytes as an eager ColumnStore.
+fn load_eager_from_bytes(data: &[u8]) -> Result<ColumnStore, JsError> {
+    const PARQUET_MAGIC: &[u8] = b"PAR1";
+    if data.len() >= 4 && &data[..4] == PARQUET_MAGIC {
+        let ps = gbtrace::column_store::load_partitioned_store_from_bytes(data)
+            .map_err(|e| JsError::new(&format!("{e}")))?;
+        ps.to_eager().map_err(|e| JsError::new(&format!("{e}")))
+    } else {
+        gbtrace::column_store::load_column_store_from_bytes(data)
+            .map_err(|e| JsError::new(&format!("{e}")))
     }
-
-    fn has_field(&self, name: &str) -> bool {
-        match &self.store {
-            StoreKind::Lazy(s) => s.field_col(name).is_some(),
-            StoreKind::Eager(s) => s.field_col(name).is_some(),
-        }
-    }
-
 }
 
 /// Prepare two TraceStores for comparison with a sync condition.
@@ -651,14 +542,14 @@ pub fn prepare_for_diff(a: TraceStore, b: TraceStore, sync: Option<String>) -> R
     let bytes_a = a.original_bytes;
     let bytes_b = b.original_bytes;
 
-    // Convert to eager stores for diff preparation
-    let store_a = match a.store {
-        StoreKind::Eager(s) => s,
-        StoreKind::Lazy(s) => s.to_eager().map_err(|e| JsError::new(&format!("{e}")))?,
+    // Reload as eager stores from original bytes for diff preparation
+    let store_a = match &bytes_a {
+        Some(data) => load_eager_from_bytes(data)?,
+        None => return Err(JsError::new("store A has no original bytes for diff reload")),
     };
-    let store_b = match b.store {
-        StoreKind::Eager(s) => s,
-        StoreKind::Lazy(s) => s.to_eager().map_err(|e| JsError::new(&format!("{e}")))?,
+    let store_b = match &bytes_b {
+        Some(data) => load_eager_from_bytes(data)?,
+        None => return Err(JsError::new("store B has no original bytes for diff reload")),
     };
 
     let sync_str = sync.as_deref();
@@ -666,7 +557,7 @@ pub fn prepare_for_diff(a: TraceStore, b: TraceStore, sync: Option<String>) -> R
         .map_err(|e| JsError::new(&format!("{e}")))?;
 
     let arr = js_sys::Array::new();
-    arr.push(&JsValue::from(TraceStore { store: StoreKind::Eager(new_a), rom: rom_a, original_bytes: bytes_a, downsample_map: None }));
-    arr.push(&JsValue::from(TraceStore { store: StoreKind::Eager(new_b), rom: rom_b, original_bytes: bytes_b, downsample_map: None }));
+    arr.push(&JsValue::from(TraceStore { store: Box::new(new_a), rom: rom_a, original_bytes: bytes_a, downsample_map: None }));
+    arr.push(&JsValue::from(TraceStore { store: Box::new(new_b), rom: rom_b, original_bytes: bytes_b, downsample_map: None }));
     Ok(arr)
 }
