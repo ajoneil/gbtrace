@@ -6,6 +6,7 @@
 //! with scanline boundaries detected from `ly` changes.
 
 use crate::column_store::TraceStore;
+use crate::downsample::DownsampledStore;
 
 pub const LCD_WIDTH: usize = 160;
 pub const LCD_HEIGHT: usize = 144;
@@ -246,4 +247,68 @@ pub fn build_reverse_pixel_map(
     }
 
     rmap
+}
+
+/// Build a reverse pixel map for a downsampled store.
+/// Operates on the inner (full-resolution) store but returns downsampled indices.
+pub fn build_reverse_pixel_map_downsampled(
+    ds: &DownsampledStore,
+    frame_start: usize,
+    frame_end: usize,
+) -> Vec<u32> {
+    // Get the raw frame range from the inner store
+    let inner = ds.inner();
+    let raw_start = ds.original_index(frame_start).unwrap_or(0);
+    let raw_end = if frame_end < ds.entry_count() {
+        ds.original_index(frame_end).unwrap_or(inner.entry_count())
+    } else {
+        inner.entry_count()
+    };
+
+    // Build the raw reverse map
+    let raw_rmap = build_reverse_pixel_map(inner, raw_start, raw_end);
+
+    // Remap raw indices to downsampled indices
+    raw_rmap.iter().map(|&raw_idx| {
+        if raw_idx == u32::MAX { return u32::MAX; }
+        ds.downsampled_index(raw_idx as usize)
+            .map(|di| di as u32)
+            .unwrap_or(u32::MAX)
+    }).collect()
+}
+
+/// Build a pixel position map for a downsampled store.
+/// Operates on the inner (full-resolution) store but returns a map indexed
+/// by downsampled entry offset within the frame.
+pub fn build_pixel_position_map_downsampled(
+    ds: &DownsampledStore,
+    frame_start: usize,
+    frame_end: usize,
+) -> Vec<(u16, u16)> {
+    let raw_start = ds.original_index(frame_start).unwrap_or(0);
+    let raw_end = if frame_end < ds.entry_count() {
+        ds.original_index(frame_end).unwrap_or(ds.inner().entry_count())
+    } else {
+        ds.inner().entry_count()
+    };
+
+    // Build the raw map (indexed by raw entry offset)
+    let raw_map = build_pixel_position_map(ds.inner(), raw_start, raw_end);
+
+    // Remap: for each downsampled entry in [frame_start..frame_end],
+    // find the last pixel position from any of its T-cycles
+    let ds_count = frame_end.saturating_sub(frame_start);
+    let mut result = vec![(0xFFFFu16, 0xFFFFu16); ds_count];
+
+    for (raw_offset, &pos) in raw_map.iter().enumerate() {
+        if pos.0 == 0xFFFF { continue; }
+        let raw_idx = raw_start + raw_offset;
+        if let Some(di) = ds.downsampled_index(raw_idx) {
+            if di >= frame_start && di < frame_end {
+                result[di - frame_start] = pos;
+            }
+        }
+    }
+
+    result
 }

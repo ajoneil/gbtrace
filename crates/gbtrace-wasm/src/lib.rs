@@ -1,4 +1,4 @@
-use gbtrace::column_store::{ColumnData, ColumnStore, LazyColumnStore};
+use gbtrace::column_store::{ColumnData, ColumnStore, PartitionedStore};
 use gbtrace::disasm;
 use gbtrace::framebuffer::{self, Frame};
 use gbtrace::profile::FieldType;
@@ -23,7 +23,7 @@ fn to_js(value: &impl serde::Serialize) -> Result<JsValue, JsError> {
 
 /// Either a lazy (on-demand row group) or eager (fully decoded) store.
 enum StoreKind {
-    Lazy(LazyColumnStore),
+    Lazy(PartitionedStore),
     Eager(ColumnStore),
 }
 
@@ -53,7 +53,7 @@ impl TraceStore {
 
         let store = if data.len() >= 4 && &data[..4] == PARQUET_MAGIC {
             StoreKind::Lazy(
-                gbtrace::column_store::load_lazy_column_store_from_bytes(data)
+                gbtrace::column_store::load_partitioned_store_from_bytes(data)
                     .map_err(|e| JsError::new(&format!("{e}")))?
             )
         } else {
@@ -272,7 +272,24 @@ impl TraceStore {
             StoreKind::Lazy(s) => s,
             StoreKind::Eager(s) => s,
         };
-        let rmap = framebuffer::build_reverse_pixel_map(store, frame_start, frame_end);
+        let mut rmap = framebuffer::build_reverse_pixel_map(store, frame_start, frame_end);
+
+        // If downsampled, convert raw entry indices to downsampled indices.
+        // The downsample map is sorted, so binary search gives the closest
+        // instruction boundary for each raw pixel entry.
+        if let Some(ref ds_map) = self.downsample_map {
+            for val in rmap.iter_mut() {
+                if *val == u32::MAX { continue; }
+                let raw = *val as usize;
+                // Find the downsampled index whose raw index is <= raw.
+                // This is the instruction that contains this T-cycle.
+                match ds_map.binary_search(&raw) {
+                    Ok(di) => *val = di as u32,
+                    Err(di) => *val = di.saturating_sub(1) as u32,
+                }
+            }
+        }
+
         let arr = js_sys::Uint32Array::new_with_length(rmap.len() as u32);
         arr.copy_from(&rmap);
         Ok(arr.into())
