@@ -72,6 +72,7 @@ export class TraceDiffTable extends LitElement {
     hiddenFields: { type: Object },
     viewStart: { type: Number },
     viewEnd: { type: Number },
+    currentIndex: { type: Number },
     _pcMatches: { state: true },
   };
 
@@ -117,7 +118,9 @@ export class TraceDiffTable extends LitElement {
       this._renderedStart = -1;
       this._checkPcMatch();
     }
-    if (changed.has('storeA') || changed.has('storeB') || changed.has('fields') || changed.has('highlightIndices') || changed.has('hiddenFields') || changed.has('_pcMatches') || changed.has('viewStart') || changed.has('viewEnd')) {
+    if (changed.has('storeA') || changed.has('storeB') || changed.has('fields') || changed.has('highlightIndices') || changed.has('hiddenFields') || changed.has('_pcMatches') || changed.has('viewStart') || changed.has('viewEnd') || changed.has('currentIndex')) {
+      // Force re-render when currentIndex changes (bypass start/count cache check)
+      if (changed.has('currentIndex')) this._renderedStart = -1;
       this.updateComplete.then(() => {
         this._renderRows();
       });
@@ -363,9 +366,11 @@ export class TraceDiffTable extends LitElement {
         if (c.type === 'field' && a[c.name] !== b[c.name]) { anyDiff = true; break; }
       }
 
-      const hlBg = hl?.has(idx) ? 'background:var(--accent-subtle);' : '';
-      const diffBg = anyDiff ? 'background:rgba(248,81,73,0.06);' : '';
-      const bg = hlBg || diffBg;
+      const isCurrent = this.currentIndex != null && idx === this.currentIndex;
+      const currentBg = isCurrent ? 'background:rgba(88,166,255,0.09);border-left:3px solid var(--accent);' : 'border-left:3px solid transparent;';
+      const hlBg = !isCurrent && hl?.has(idx) ? 'background:var(--accent-subtle);' : '';
+      const diffBg = !isCurrent && !hlBg && anyDiff ? 'background:rgba(248,81,73,0.06);' : '';
+      const bg = currentBg + (hlBg || diffBg);
       const rowStart = `<div data-idx="${idx}" style="display:flex;height:${ROW_HEIGHT}px;align-items:center;border-bottom:1px solid var(--bg);${bg}">`;
 
       // Shared panel — iterate sharedCols
@@ -424,12 +429,19 @@ export class TraceDiffTable extends LitElement {
         const idx = parseInt(row.dataset.idx, 10);
         row.addEventListener('mouseenter', () => this._emitHover(idx));
         row.addEventListener('mouseleave', () => this._emitHover(null));
+        row.addEventListener('click', () => this._emitCurrent(idx));
       }
     }
   }
 
   _emitHover(index) {
     this.dispatchEvent(new CustomEvent('hover-index', {
+      detail: { index }, bubbles: true, composed: true,
+    }));
+  }
+
+  _emitCurrent(index) {
+    this.dispatchEvent(new CustomEvent('current-index', {
       detail: { index }, bubbles: true, composed: true,
     }));
   }
