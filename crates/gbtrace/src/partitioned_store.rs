@@ -16,7 +16,10 @@ use crate::header::TraceHeader;
 use crate::profile::{field_type, FieldType};
 use crate::query::Condition;
 
-const LRU_CAPACITY: usize = 3;
+/// Number of decoded row group chunks to keep in memory. With 64K-row
+/// chunks, 8 chunks ≈ 512K rows — enough to cover several frames of
+/// T-cycle data without thrashing during scrubbing.
+const LRU_CAPACITY: usize = 8;
 
 /// Index mapping global row indices to row groups.
 struct RowGroupIndex {

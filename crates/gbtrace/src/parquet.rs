@@ -28,9 +28,10 @@ const HEADER_METADATA_KEY: &str = "gbtrace_header";
 const FRAME_BOUNDARIES_KEY: &str = "gbtrace_frame_boundaries";
 const BATCH_SIZE: usize = 65536;
 /// Maximum rows per row group before forcing a flush, even without a
-/// frame boundary. Prevents huge row groups during PPU-off or other
-/// periods where no boundary is detected. ~3 frames of T-cycle data.
-const MAX_ROW_GROUP_SIZE: usize = 200_000;
+/// frame boundary. 64K balances compression efficiency (~1.3x overhead
+/// vs monolithic) against lazy loading granularity (~1 frame of T-cycle
+/// data per chunk).
+const MAX_ROW_GROUP_SIZE: usize = 65536;
 
 // ---------------------------------------------------------------------------
 // Writer
