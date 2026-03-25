@@ -1,0 +1,12 @@
+[package]
+name = "gbtrace-missingno"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "gbtrace-missingno"
+path = "src/main.rs"
+
+[dependencies]
+missingno-gmb = { path = "../../../missingno/crates/missingno-gmb", features = ["gbtrace"] }
+clap = { version = "4", features = ["derive"] }

@@ -1,3 +1,4 @@
 [workspace]
 resolver = "2"
 members = ["crates/gbtrace", "crates/gbtrace-cli", "crates/gbtrace-wasm", "crates/gbtrace-ffi"]
+exclude = ["adapters/missingno"]
