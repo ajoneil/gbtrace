@@ -30,6 +30,7 @@ interrupt = ["if_", "ie", "ime"]
 timer = ["div", "tima", "tma", "tac"]
 serial = ["sb", "sc"]
 pixel = ["pix"]
+vram = ["vram_addr", "vram_data"]
 
 [fields.memory]
 test_result = "FF80"
