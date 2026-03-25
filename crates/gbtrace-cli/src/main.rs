@@ -231,7 +231,7 @@ fn cmd_info(path: &PathBuf) -> i32 {
 // ---------------------------------------------------------------------------
 
 fn cmd_frames(path: &PathBuf) -> i32 {
-    let store = match gbtrace::column_store::load_column_store(path) {
+    let store = match gbtrace::column_store::open_trace_store(path) {
         Ok(s) => s,
         Err(e) => {
             eprintln!("Error: {e}");
@@ -369,6 +369,16 @@ fn cmd_convert(input: &PathBuf, output: Option<PathBuf>) -> i32 {
     };
 
     let header = reader.header().clone();
+
+    // Extract frame boundaries from the source for preservation during convert.
+    let frame_boundaries: Vec<u64> = if input.extension().is_some_and(|e| e == "parquet") {
+        gbtrace::column_store::open_trace_store(input)
+            .map(|store| store.frame_boundaries().iter().map(|&b| b as u64).collect())
+            .unwrap_or_default()
+    } else {
+        vec![]
+    };
+
     let is_parquet_output = output.extension().is_some_and(|e| e == "parquet");
 
     if is_parquet_output {
@@ -381,9 +391,17 @@ fn cmd_convert(input: &PathBuf, output: Option<PathBuf>) -> i32 {
         };
 
         let mut count: u64 = 0;
+        let mut boundary_idx = 0;
         for result in reader {
             match result {
                 Ok(entry) => {
+                    // Mark frame boundaries at the correct positions
+                    while boundary_idx < frame_boundaries.len()
+                        && frame_boundaries[boundary_idx] == count
+                    {
+                        let _ = writer.mark_frame();
+                        boundary_idx += 1;
+                    }
                     if let Err(e) = writer.write_entry(&entry) {
                         eprintln!("Error writing entry {count}: {e}");
                         return 1;
