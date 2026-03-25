@@ -387,7 +387,7 @@ export class AppShell extends LitElement {
               .frameBoundaries=${this._frameBoundaries}
               .frameBoundariesB=${this._frameBoundariesB}
               .viewStart=${this._viewStart}
-              .tcyclePixels=${isTcycle && !this._storeB}
+              .tcyclePixels=${isTcycle}
               .currentIndex=${this._effectiveIndex}
             ></pixel-display>
           </div>

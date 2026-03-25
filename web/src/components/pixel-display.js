@@ -204,6 +204,16 @@ export class PixelDisplay extends LitElement {
     // Draw partial frame at current index
     if (this.currentIndex >= start) {
       this._drawPartialAt(this.currentIndex);
+      // In compare mode, also update B and diff
+      if (this.storeB) {
+        const fi = this._frameIndex;
+        this._renderToCanvas('canvasB', this.storeB, fi);
+        const rawA = this.store?.renderFrame(fi);
+        const rgbaA = rawA ? new Uint8ClampedArray(rawA.buffer || rawA) : null;
+        const rgbaB = this.storeB?.renderFrame(fi);
+        const arrB = rgbaB ? new Uint8ClampedArray(rgbaB.buffer || rgbaB) : null;
+        if (rgbaA && arrB) this._renderDiff(rgbaA, arrB);
+      }
     }
   }
 
@@ -325,7 +335,8 @@ export class PixelDisplay extends LitElement {
   }
 
   _canvasToLcd(e) {
-    const canvas = this.renderRoot?.querySelector('#canvasA');
+    // Find the nearest canvas element from the event target
+    const canvas = e.target.closest('canvas') || this.renderRoot?.querySelector('#canvasA');
     if (!canvas) return null;
     const rect = canvas.getBoundingClientRect();
     const x = Math.floor((e.clientX - rect.left) / SCALE);
@@ -373,9 +384,17 @@ export class PixelDisplay extends LitElement {
   _draw() {
     const fi = this._frameIndex;
     if (this.storeB) {
-      const rgbaA = this._renderToCanvas('canvasA', this.store, fi);
+      // In compare mode with tcycle data and a current index, draw partial on A
+      if (this.tcyclePixels && this.currentIndex != null) {
+        this._drawPartialAt(this.currentIndex);
+      } else {
+        this._renderToCanvas('canvasA', this.store, fi);
+      }
       const rgbaB = this._renderToCanvas('canvasB', this.storeB, fi);
-      this._renderDiff(rgbaA, rgbaB);
+      // Diff uses the full frame from A vs B
+      const rawA = this.store?.renderFrame(fi);
+      const rgbaA = rawA ? new Uint8ClampedArray(rawA.buffer || rawA) : null;
+      if (rgbaA && rgbaB) this._renderDiff(rgbaA, rgbaB);
     } else if (this.currentIndex != null && this.tcyclePixels) {
       this._drawPartialAt(this.currentIndex);
     } else {
@@ -393,11 +412,21 @@ export class PixelDisplay extends LitElement {
             <span class="pixel-title">pixels</span>
             <span class="frame-info">frame ${this._frameIndex + 1} / ${total}</span>
           </div>
-          <div class="compare-row">
+          <div class="compare-row"
+            @mousemove=${this.tcyclePixels ? this._onCanvasMouseMove : null}
+            @mouseleave=${this.tcyclePixels ? this._onCanvasMouseLeave : null}
+            @click=${this.tcyclePixels ? this._onCanvasClick : null}
+            style="${this.tcyclePixels ? 'cursor:crosshair;' : ''}">
             <div class="compare-panel">
               <span class="compare-label a">${this.nameA || 'A'}</span>
-              <canvas id="canvasA" width=${LCD_WIDTH} height=${LCD_HEIGHT}
-                style="width: ${LCD_WIDTH * SCALE}px; height: ${LCD_HEIGHT * SCALE}px;"></canvas>
+              <div class="canvas-wrap">
+                <canvas id="canvasA" width=${LCD_WIDTH} height=${LCD_HEIGHT}
+                  style="width: ${LCD_WIDTH * SCALE}px; height: ${LCD_HEIGHT * SCALE}px;"></canvas>
+                ${this.tcyclePixels ? html`
+                  <canvas class="highlight-overlay" width=${LCD_WIDTH} height=${LCD_HEIGHT}
+                    style="width: ${LCD_WIDTH * SCALE}px; height: ${LCD_HEIGHT * SCALE}px;"></canvas>
+                ` : ''}
+              </div>
             </div>
             <div class="compare-panel">
               <span class="compare-label diff">diff</span>
