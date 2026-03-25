@@ -38,13 +38,20 @@ impl VramSnapshot {
 
 /// Cache of VRAM snapshots at frame boundaries for fast random access.
 pub struct VramCache {
-    /// Snapshots at frame boundaries, indexed by frame number.
+    /// Snapshots at frame boundaries + periodic intervals.
     checkpoints: Vec<VramSnapshot>,
+    /// Most recently reconstructed snapshot — used as a cursor for
+    /// sequential access (scrubbing forward replays from here).
+    last_result: Option<VramSnapshot>,
 }
 
 impl VramCache {
+    /// Interval between periodic checkpoints (in entries).
+    /// Smaller = more memory but faster random access.
+    const CHECKPOINT_INTERVAL: usize = 4096;
+
     /// Build a VRAM cache from a trace store, creating checkpoints at each
-    /// frame boundary. This scans the entire trace once.
+    /// frame boundary and at regular intervals. Scans the entire trace once.
     pub fn build(store: &dyn TraceStore) -> Option<Self> {
         let addr_col = store.field_col("vram_addr")?;
         let data_col = store.field_col("vram_data")?;
@@ -52,24 +59,33 @@ impl VramCache {
         let boundaries = store.frame_boundaries();
         let total = store.entry_count();
 
-        // Build checkpoints by scanning forward
         let mut vram = VramSnapshot::new();
-        let mut checkpoints = Vec::with_capacity(boundaries.len() + 1);
+        let mut checkpoints = Vec::new();
 
         // Checkpoint at entry 0
         checkpoints.push(vram.clone());
 
         let mut next_boundary_idx = 0;
+        let mut last_checkpoint_entry = 0usize;
 
         for i in 0..total {
-            // Check if we've hit a frame boundary — snapshot before processing
+            // Checkpoint at frame boundaries
             while next_boundary_idx < boundaries.len()
                 && boundaries[next_boundary_idx] as usize == i
             {
                 let mut snap = vram.clone();
                 snap.entry = i;
                 checkpoints.push(snap);
+                last_checkpoint_entry = i;
                 next_boundary_idx += 1;
+            }
+
+            // Periodic checkpoint every CHECKPOINT_INTERVAL entries
+            if i > 0 && i - last_checkpoint_entry >= Self::CHECKPOINT_INTERVAL {
+                let mut snap = vram.clone();
+                snap.entry = i;
+                checkpoints.push(snap);
+                last_checkpoint_entry = i;
             }
 
             // Apply write
@@ -80,25 +96,50 @@ impl VramCache {
             }
         }
 
-        // Final snapshot at end of trace
+        // Final snapshot
         vram.entry = total;
         checkpoints.push(vram);
 
-        Some(Self { checkpoints })
+        // Sort by entry for binary search
+        checkpoints.sort_by_key(|cp| cp.entry);
+        checkpoints.dedup_by_key(|cp| cp.entry);
+
+        Some(Self { checkpoints, last_result: None })
     }
 
     /// Reconstruct VRAM state at a specific entry index.
-    /// Uses the nearest earlier checkpoint and replays writes forward.
-    pub fn at_entry(&self, store: &dyn TraceStore, entry: usize) -> Option<VramSnapshot> {
+    ///
+    /// Uses a three-tier strategy for fast access:
+    /// 1. If the last result is at this exact entry, return it (free)
+    /// 2. If the last result is behind the target, replay forward from it
+    /// 3. Otherwise, replay forward from the nearest earlier checkpoint
+    ///
+    /// This makes sequential scrubbing (the common case) nearly free.
+    pub fn at_entry(&mut self, store: &dyn TraceStore, entry: usize) -> Option<VramSnapshot> {
+        // Fast path: exact hit
+        if let Some(ref last) = self.last_result {
+            if last.entry == entry {
+                return Some(last.clone());
+            }
+        }
+
         let addr_col = store.field_col("vram_addr")?;
         let data_col = store.field_col("vram_data")?;
 
-        // Find the best checkpoint (latest one <= entry)
-        let cp_idx = self.checkpoints.partition_point(|cp| cp.entry <= entry);
-        let cp_idx = if cp_idx > 0 { cp_idx - 1 } else { 0 };
-        let mut vram = self.checkpoints[cp_idx].clone();
+        // Pick the best starting point: last_result (if ahead of it) or checkpoint
+        let mut vram = if let Some(ref last) = self.last_result {
+            if last.entry <= entry {
+                // Last result is behind target — replay forward from it
+                last.clone()
+            } else {
+                // Going backwards — use checkpoint
+                self.nearest_checkpoint(entry)
+            }
+        } else {
+            self.nearest_checkpoint(entry)
+        };
 
-        // Replay from checkpoint to target entry
+        // Replay writes from current position to target
         let start = vram.entry;
         let end = entry.min(store.entry_count());
         for i in start..end {
@@ -110,7 +151,14 @@ impl VramCache {
         }
 
         vram.entry = entry;
+        self.last_result = Some(vram.clone());
         Some(vram)
+    }
+
+    fn nearest_checkpoint(&self, entry: usize) -> VramSnapshot {
+        let idx = self.checkpoints.partition_point(|cp| cp.entry <= entry);
+        let idx = if idx > 0 { idx - 1 } else { 0 };
+        self.checkpoints[idx].clone()
     }
 
     /// Number of checkpoints (roughly = number of frames + 1).

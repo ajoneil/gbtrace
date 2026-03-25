@@ -97,6 +97,7 @@ export class VramViewer extends LitElement {
     this._lastRenderedEntry = -1;
     this._lastRenderedTab = null;
     this._lastHoveredSprite = -1;
+    this._drawPending = false;
   }
 
   updated(changed) {
@@ -109,7 +110,14 @@ export class VramViewer extends LitElement {
       (changed.has('currentIndex') && this.currentIndex !== this._lastRenderedEntry);
 
     if (needsRedraw) {
-      this._draw();
+      // Throttle redraws to avoid WASM calls on every hover event
+      if (!this._drawPending) {
+        this._drawPending = true;
+        requestAnimationFrame(() => {
+          this._drawPending = false;
+          this._draw();
+        });
+      }
     }
   }
 

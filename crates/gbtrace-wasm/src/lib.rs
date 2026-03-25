@@ -498,13 +498,7 @@ impl TraceStore {
     /// Render the 384-tile sheet at a specific entry as RGBA (128×192×4 bytes).
     #[wasm_bindgen(js_name = renderTileSheet)]
     pub fn render_tile_sheet(&mut self, entry: usize) -> Result<JsValue, JsError> {
-        self.build_vram_cache();
-        let cache = match &self.vram_cache {
-            Some(c) => c,
-            None => return Ok(JsValue::NULL),
-        };
-        let entry = self.map_row(entry);
-        let snap = match cache.at_entry(&*self.store, entry) {
+        let snap = match self.vram_at(entry) {
             Some(s) => s,
             None => return Ok(JsValue::NULL),
         };
@@ -520,27 +514,22 @@ impl TraceStore {
     /// `map_select`: 0 for BG map (0x9800), 1 for window map (0x9C00).
     #[wasm_bindgen(js_name = renderTilemap)]
     pub fn render_tilemap(&mut self, entry: usize, map_select: u8) -> Result<JsValue, JsError> {
-        self.build_vram_cache();
-        let cache = match &self.vram_cache {
-            Some(c) => c,
-            None => return Ok(JsValue::NULL),
-        };
-        let entry = self.map_row(entry);
-        let snap = match cache.at_entry(&*self.store, entry) {
+        // Read LCDC before the mutable borrow
+        let mapped = self.map_row(entry);
+        let lcdc = self.store.get_numeric(
+            self.store.field_col("lcdc").unwrap_or(0), mapped
+        ) as u8;
+
+        let snap = match self.vram_at(entry) {
             Some(s) => s,
             None => return Ok(JsValue::NULL),
         };
 
-        // Read LCDC to determine tile data addressing mode
-        let lcdc = self.store.get_numeric(
-            self.store.field_col("lcdc").unwrap_or(0), entry
-        ) as u8;
-        let signed_addressing = (lcdc & 0x10) == 0; // bit 4: 0=signed, 1=unsigned
-
+        let signed_addressing = (lcdc & 0x10) == 0;
         let tilemap_base = if map_select == 0 {
-            if (lcdc & 0x08) != 0 { 0x1C00 } else { 0x1800 } // bit 3: BG tilemap select
+            if (lcdc & 0x08) != 0 { 0x1C00 } else { 0x1800 }
         } else {
-            if (lcdc & 0x40) != 0 { 0x1C00 } else { 0x1800 } // bit 6: window tilemap select
+            if (lcdc & 0x40) != 0 { 0x1C00 } else { 0x1800 }
         };
 
         const PALETTE: [(u8, u8, u8); 4] = [
@@ -554,13 +543,7 @@ impl TraceStore {
     /// Get raw VRAM bytes at a specific entry (8192 bytes).
     #[wasm_bindgen(js_name = getVramAt)]
     pub fn get_vram_at(&mut self, entry: usize) -> Result<JsValue, JsError> {
-        self.build_vram_cache();
-        let cache = match &self.vram_cache {
-            Some(c) => c,
-            None => return Ok(JsValue::NULL),
-        };
-        let entry = self.map_row(entry);
-        let snap = match cache.at_entry(&*self.store, entry) {
+        let snap = match self.vram_at(entry) {
             Some(s) => s,
             None => return Ok(JsValue::NULL),
         };
@@ -579,6 +562,18 @@ impl TraceStore {
     }
 
     /// Entry count respecting downsampling.
+    /// Reconstruct VRAM at an entry, handling borrow splitting between
+    /// the mutable cache and immutable store.
+    fn vram_at(&mut self, entry: usize) -> Option<gbtrace::vram::VramSnapshot> {
+        self.build_vram_cache();
+        let entry = self.map_row(entry);
+        // Split borrows: take cache out, use store, put cache back
+        let mut cache = self.vram_cache.take()?;
+        let result = cache.at_entry(&*self.store, entry);
+        self.vram_cache = Some(cache);
+        result
+    }
+
     fn effective_entry_count(&self) -> usize {
         match &self.downsample_map {
             Some(map) => map.len(),
