@@ -195,12 +195,19 @@ struct FieldEmitter {
 
 static std::vector<FieldEmitter> g_emitters;
 static bool g_has_pix = false;
+static bool g_has_vram = false;
 
 // --- Parquet direct writer (FFI) ---
 static GbtraceWriter *g_parquet = nullptr;
 // Column indices into the parquet writer, parallel to g_emitters
 static std::vector<int> g_parquet_cols;
 static int g_parquet_ly_col = -1;
+static int g_parquet_vram_addr_col = -1;
+static int g_parquet_vram_data_col = -1;
+
+// --- VRAM write tracking ---
+static uint16_t g_vram_write_addr = 0;
+static uint8_t g_vram_write_data = 0;
 
 // --- Pixel capture ---
 // Uses GateBoy's pixel_callback in update_framebuffer() to capture each
@@ -398,6 +405,10 @@ static void build_emitters(const Profile &prof) {
         } else if (auto it4 = PPU_BOOL_READERS.find(field); it4 != PPU_BOOL_READERS.end()) {
             em.source = FieldEmitter::PPU_BOOL;
             em.read_ppu_bool = it4->second;
+        } else if (field == "vram_addr" || field == "vram_data") {
+            // Handled separately via g_parquet_vram_addr_col/g_parquet_vram_data_col
+            g_has_vram = true;
+            continue;
         } else {
             std::fprintf(stderr, "Warning: unknown field '%s' (len=%zu), skipping\n", field.c_str(), field.size());
             continue;
@@ -562,6 +573,16 @@ static void emit_entry_parquet(GateBoy &gb) {
             break;
         }
     }
+
+    // VRAM write fields
+    if (g_parquet_vram_addr_col >= 0) {
+        gbtrace_writer_set_u16(g_parquet, g_parquet_vram_addr_col, g_vram_write_addr);
+    }
+    if (g_parquet_vram_data_col >= 0) {
+        gbtrace_writer_set_u8(g_parquet, g_parquet_vram_data_col, g_vram_write_data);
+    }
+    g_vram_write_addr = 0;
+    g_vram_write_data = 0;
 
     gbtrace_writer_finish_entry(g_parquet);
 }
@@ -733,14 +754,22 @@ int main(int argc, char *argv[]) {
 
     if (parquet_mode) {
         // Build header JSON for the FFI writer
+        // Build complete field list including fields handled separately
+        std::vector<std::string> all_fields;
+        for (const auto &em : g_emitters) all_fields.push_back(em.name);
+        if (g_has_vram) {
+            all_fields.push_back("vram_addr");
+            all_fields.push_back("vram_data");
+        }
+
         std::string header_json = "{\"_header\":true,\"format_version\":\"0.1.0\","
             "\"emulator\":\"gateboy\",\"emulator_version\":\"metroboy-git\","
             "\"rom_sha256\":\"" + rom_hash + "\",\"model\":\"DMG\","
             "\"boot_rom\":\"" + boot_rom_info + "\",\"profile\":\"" + profile.name + "\","
             "\"fields\":[";
-        for (size_t i = 0; i < g_emitters.size(); i++) {
+        for (size_t i = 0; i < all_fields.size(); i++) {
             if (i > 0) header_json += ",";
-            header_json += "\"" + g_emitters[i].name + "\"";
+            header_json += "\"" + all_fields[i] + "\"";
         }
         header_json += "],\"trigger\":\"" + profile.trigger + "\"}";
 
@@ -758,6 +787,9 @@ int main(int argc, char *argv[]) {
                 g_parquet, g_emitters[i].name.c_str());
         }
         g_parquet_ly_col = gbtrace_writer_find_field(g_parquet, "ly");
+        g_parquet_vram_addr_col = gbtrace_writer_find_field(g_parquet, "vram_addr");
+        g_parquet_vram_data_col = gbtrace_writer_find_field(g_parquet, "vram_data");
+        g_has_vram = (g_parquet_vram_addr_col >= 0);
 
         // Mark entry 0 as a frame boundary
         gbtrace_writer_mark_frame(g_parquet);
@@ -811,6 +843,19 @@ int main(int argc, char *argv[]) {
         // Collect pixel output from this phase (if pix_count incremented)
         if (g_has_pix) {
             collect_pixel(gb);
+        }
+
+        // Detect VRAM writes from bus signals (check at T-cycle boundary)
+        if (g_has_vram && (phase_count % PHASES_PER_TCYCLE) == 0) {
+            const auto &s = gb.gb_state;
+            // APOV_CPU_WRp is high when the CPU is writing
+            if (s.cpu_signals.APOV_CPU_WRp.state & BIT_DATA) {
+                uint16_t addr = (uint16_t)bit_pack(s.cpu_abus);
+                if (addr >= 0x8000 && addr <= 0x9FFF) {
+                    g_vram_write_addr = addr;
+                    g_vram_write_data = (uint8_t)bit_pack(s.cpu_dbus);
+                }
+            }
         }
 
         const CpuState &reg = gb.cpu.core.reg;
