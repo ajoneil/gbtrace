@@ -131,6 +131,7 @@ export class AppShell extends LitElement {
     _frameBoundariesB: { state: true },
     _syncMode: { state: true },
     _ppuExpanded: { state: true },
+    _hoveredSprite: { state: true },
   };
 
   connectedCallback() {
@@ -210,6 +211,7 @@ export class AppShell extends LitElement {
         @field-selected=${this._onFieldSelected}
         @hover-index=${this._onHoverIndex}
         @current-index=${this._onCurrentIndex}
+        @sprite-hover=${this._onSpriteHover}
         @hidden-fields-changed=${this._onHiddenFieldsChanged}
       >
         <header>
@@ -395,6 +397,7 @@ export class AppShell extends LitElement {
               <vram-viewer
                 .store=${this._store}
                 .currentIndex=${this._effectiveIndex ?? 0}
+                .hoveredSprite=${this._hoveredSprite ?? -1}
               ></vram-viewer>
             ` : ''}
           </div>
@@ -704,6 +707,10 @@ export class AppShell extends LitElement {
 
   _onHoverIndex(e) {
     this._hoverIndex = e.detail.index;
+  }
+
+  _onSpriteHover(e) {
+    this._hoveredSprite = e.detail.index;
   }
 
   _onCurrentIndex(e) {
