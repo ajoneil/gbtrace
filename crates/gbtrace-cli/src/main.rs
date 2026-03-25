@@ -886,18 +886,6 @@ fn format_boot_rom(boot_rom: &gbtrace::BootRom) -> String {
 // diff
 // ---------------------------------------------------------------------------
 
-/// Format a JSON value for display: numbers as zero-padded lowercase hex, strings as-is.
-const FIELDS_16BIT: &[&str] = &["pc", "sp"];
-
-fn display_val_field(v: &Value, field: &str) -> String {
-    if FIELDS_16BIT.contains(&field) {
-        if let Some(n) = v.as_u64() {
-            return format!("{n:04x}");
-        }
-    }
-    display_val(v)
-}
-
 fn display_val(v: &Value) -> String {
     match v {
         Value::Number(n) => {
@@ -918,16 +906,6 @@ fn display_val(v: &Value) -> String {
         Value::Null => "null".to_string(),
         _ => v.to_string(),
     }
-}
-
-fn load_trace_entries(path: &PathBuf) -> Result<(gbtrace::TraceHeader, Vec<gbtrace::TraceEntry>), String> {
-    let reader = AnyTraceReader::open(path)
-        .map_err(|e| format!("Error opening {}: {e}", path.display()))?;
-    let header = reader.header().clone();
-    let entries: Vec<gbtrace::TraceEntry> = reader
-        .collect::<std::result::Result<Vec<_>, _>>()
-        .map_err(|e| format!("Error reading {}: {e}", path.display()))?;
-    Ok((header, entries))
 }
 
 /// Load trace, collapsing T-cycle traces to instruction level if needed.
