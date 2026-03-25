@@ -175,6 +175,24 @@ impl TraceStore {
         Ok(js_sys::Uint8ClampedArray::from(&frame.to_rgba()[..]).into())
     }
 
+    /// Render a complete frame as raw palette indices (160×144 = 23040 bytes).
+    /// Values 0-3 are palette indices, 0xFF is unrendered.
+    /// Used for pixel-level diffing without palette conversion.
+    #[wasm_bindgen(js_name = renderFrameRaw)]
+    pub fn render_frame_raw(&self, frame_index: usize) -> Result<JsValue, JsError> {
+        let (start, end) = match self.frame_entry_range(frame_index) {
+            Some(r) => r,
+            None => return Ok(JsValue::NULL),
+        };
+        let frame = if let Some(ref ds_map) = self.downsample_map {
+            let ds = gbtrace::downsample::DownsampledStore::from_map(&*self.store, ds_map.clone());
+            framebuffer::reconstruct_partial_frame_downsampled(&ds, start, end)
+        } else {
+            framebuffer::reconstruct_partial_frame(&*self.store, start, end)
+        };
+        Ok(js_sys::Uint8Array::from(&frame.pixels[..]).into())
+    }
+
     /// Render a partial frame up to `stop_entry` as RGBA pixel data.
     /// Used for the progressive scrubber in T-cycle traces.
     /// The library handles all internal decoding transparently.

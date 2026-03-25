@@ -3,6 +3,8 @@ import { LitElement, html, css } from 'lit';
 const LCD_WIDTH = 160;
 const LCD_HEIGHT = 144;
 const SCALE = 2;
+// BGB-style DMG green palette as [R, G, B]
+const PALETTE = [[0xe0,0xf8,0xd0], [0x88,0xc0,0x70], [0x34,0x68,0x56], [0x08,0x18,0x20]];
 
 /**
  * Renders Game Boy LCD frames from trace pixel data.
@@ -207,11 +209,9 @@ export class PixelDisplay extends LitElement {
       if (this.storeB) {
         const fi = this._frameIndex;
         this._renderToCanvas('canvasB', this.storeB, fi);
-        const rawA = this.store?.renderFrame(fi);
-        const rgbaA = rawA ? new Uint8ClampedArray(rawA.buffer || rawA) : null;
-        const rgbaB = this.storeB?.renderFrame(fi);
-        const arrB = rgbaB ? new Uint8ClampedArray(rgbaB.buffer || rgbaB) : null;
-        if (rgbaA && arrB) this._renderDiff(rgbaA, arrB);
+        const pixA = this.store?.renderFrameRaw(fi);
+        const pixB = this.storeB?.renderFrameRaw(fi);
+        if (pixA && pixB) this._renderDiff(pixA, pixB);
       }
     }
   }
@@ -311,22 +311,28 @@ export class PixelDisplay extends LitElement {
     }
   }
 
-  _renderDiff(rgbaA, rgbaB) {
+  _renderDiff(rawA, rawB) {
     const canvas = this.renderRoot?.querySelector('#diff');
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
-    if (!rgbaA || !rgbaB) { ctx.clearRect(0, 0, LCD_WIDTH, LCD_HEIGHT); return; }
+    if (!rawA || !rawB) { ctx.clearRect(0, 0, LCD_WIDTH, LCD_HEIGHT); return; }
+    const pixA = new Uint8Array(rawA.buffer || rawA);
+    const pixB = new Uint8Array(rawB.buffer || rawB);
     const diff = new Uint8ClampedArray(LCD_WIDTH * LCD_HEIGHT * 4);
     for (let i = 0; i < LCD_WIDTH * LCD_HEIGHT; i++) {
       const off = i * 4;
-      const same = rgbaA[off] === rgbaB[off] && rgbaA[off+1] === rgbaB[off+1] && rgbaA[off+2] === rgbaB[off+2];
-      if (same) {
-        diff[off] = rgbaA[off]; diff[off+1] = rgbaA[off+1]; diff[off+2] = rgbaA[off+2];
+      const a = pixA[i], b = pixB[i];
+      if (a === b) {
+        // Same palette index — show the pixel in normal palette
+        const [r, g, bl] = PALETTE[a & 3] || PALETTE[0];
+        diff[off] = r; diff[off+1] = g; diff[off+2] = bl;
       } else {
-        const avg = (rgbaA[off] + rgbaB[off]) / 2;
-        diff[off] = Math.min(255, avg * 0.3 + 180);
-        diff[off+1] = Math.round(avg * 0.2 + 30);
-        diff[off+2] = Math.round(avg * 0.2 + 30);
+        // Different — highlight in red
+        const avg = ((a & 3) + (b & 3)) / 2;
+        const brightness = 1 - avg / 3;
+        diff[off] = Math.round(180 + 75 * brightness);
+        diff[off+1] = Math.round(30 + 40 * brightness);
+        diff[off+2] = Math.round(30 + 40 * brightness);
       }
       diff[off+3] = 255;
     }
@@ -388,11 +394,11 @@ export class PixelDisplay extends LitElement {
       } else {
         this._renderToCanvas('canvasA', this.store, fi);
       }
-      const rgbaB = this._renderToCanvas('canvasB', this.storeB, fi);
-      // Diff uses the full frame from A vs B
-      const rawA = this.store?.renderFrame(fi);
-      const rgbaA = rawA ? new Uint8ClampedArray(rawA.buffer || rawA) : null;
-      if (rgbaA && rgbaB) this._renderDiff(rgbaA, rgbaB);
+      this._renderToCanvas('canvasB', this.storeB, fi);
+      // Diff uses raw palette indices from A vs B
+      const pixA = this.store?.renderFrameRaw(fi);
+      const pixB = this.storeB?.renderFrameRaw(fi);
+      if (pixA && pixB) this._renderDiff(pixA, pixB);
     } else if (this.currentIndex != null && this.perEntryPixels) {
       this._drawPartialAt(this.currentIndex);
     } else {
