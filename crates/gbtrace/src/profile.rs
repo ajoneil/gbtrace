@@ -48,6 +48,8 @@ struct FieldGroups {
     serial: Vec<String>,
     #[serde(default)]
     pixel: Vec<String>,
+    #[serde(default)]
+    vram: Vec<String>,
     /// Arbitrary memory reads: name = "hex_address"
     #[serde(default)]
     memory: BTreeMap<String, String>,
@@ -86,6 +88,8 @@ const KNOWN_FIELDS: &[&str] = &[
     "rendering", "win_mode",
     // frame tracking
     "frame_num",
+    // vram write tracking
+    "vram_addr", "vram_data",
 ];
 
 /// Native type of a trace field, used for Parquet column types.
@@ -102,7 +106,7 @@ pub enum FieldType {
 pub fn field_type(name: &str) -> FieldType {
     match name {
         "cy" => FieldType::UInt64,
-        "pc" | "sp" | "frame_num" => FieldType::UInt16,
+        "pc" | "sp" | "frame_num" | "vram_addr" => FieldType::UInt16,
         "ime" | "rendering" | "win_mode" => FieldType::Bool,
         "pix" => FieldType::Str,
         _ => FieldType::UInt8,
@@ -135,6 +139,7 @@ impl Profile {
             &raw.fields.interrupt,
             &raw.fields.serial,
             &raw.fields.pixel,
+            &raw.fields.vram,
         ];
 
         for group in groups {

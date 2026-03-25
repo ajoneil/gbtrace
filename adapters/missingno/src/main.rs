@@ -4,6 +4,7 @@ use std::process;
 
 use clap::Parser;
 use missingno_gmb::{GameBoy, cartridge::Cartridge};
+use missingno_gmb::cpu::mcycle::DotAction;
 use missingno_gmb::trace::{Tracer, Trigger, Profile, BootRom};
 
 #[derive(Parser)]
@@ -230,6 +231,13 @@ fn step_tcycle(gb: &mut GameBoy, tracer: &mut Tracer) -> bool {
         new_screen |= fall.new_screen;
         if let Some(pixel) = fall.pixel {
             tracer.push_pixel(pixel.shade);
+        }
+
+        // Detect VRAM writes from the dot action (writes happen on fall)
+        if let DotAction::Write { address, value } = gb.last_dot_action() {
+            if (0x8000..=0x9FFF).contains(address) {
+                tracer.push_vram_write(*address, *value);
+            }
         }
 
         if rise.new_screen || fall.new_screen {
