@@ -40,10 +40,24 @@ struct Args {
     /// Extra frames to capture after stop condition
     #[arg(long, default_value_t = 0)]
     extra_frames: u32,
+
+    /// Stop when memory ADDR equals VAL (hex, e.g. FF82=01). Can be repeated.
+    #[arg(long = "stop-when", value_parser = parse_stop_when)]
+    stop_when: Vec<(u16, u8)>,
 }
 
 fn parse_hex_u8(s: &str) -> Result<u8, String> {
     u8::from_str_radix(s, 16).map_err(|e| format!("invalid hex byte: {e}"))
+}
+
+fn parse_stop_when(s: &str) -> Result<(u16, u8), String> {
+    let (addr_s, val_s) = s.split_once('=')
+        .ok_or_else(|| "expected ADDR=VAL (e.g. FF82=01)".to_string())?;
+    let addr = u16::from_str_radix(addr_s, 16)
+        .map_err(|e| format!("invalid address: {e}"))?;
+    let val = u8::from_str_radix(val_s, 16)
+        .map_err(|e| format!("invalid value: {e}"))?;
+    Ok((addr, val))
 }
 
 fn load_reference(path: &PathBuf) -> Vec<u8> {
@@ -131,6 +145,16 @@ fn main() {
                     eprintln!("Stop condition met: opcode 0x{:02X} at PC=0x{:04X}", opcode, pc);
                     stop_triggered = true;
                     remaining_extra = Some(args.extra_frames);
+                }
+            }
+
+            // Memory watch check
+            for &(addr, val) in &args.stop_when {
+                if gb.peek(addr) == val {
+                    eprintln!("Stop condition met: [0x{:04X}] == 0x{:02X}", addr, val);
+                    stop_triggered = true;
+                    remaining_extra = Some(args.extra_frames);
+                    break;
                 }
             }
 
