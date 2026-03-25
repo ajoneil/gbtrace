@@ -1,10 +1,9 @@
-use gbtrace::column_store::{ColumnData, ColumnStore, PartitionedStore};
+use gbtrace::column_store::{ColumnStore, PartitionedStore};
 use gbtrace::disasm;
-use gbtrace::framebuffer::{self, Frame};
+use gbtrace::framebuffer;
 use gbtrace::profile::FieldType;
 use wasm_bindgen::prelude::*;
 
-use std::cell::RefCell;
 use std::collections::BTreeMap;
 
 /// Serializable entry type for JS interop.
@@ -37,8 +36,6 @@ pub struct TraceStore {
     rom: Option<Vec<u8>>,
     /// Original bytes for re-loading when sync changes.
     original_bytes: Option<Vec<u8>>,
-    /// Cached reconstructed frames (lazily populated).
-    frames_cache: RefCell<Option<Vec<Frame>>>,
     /// Optional downsampling index: maps downsampled row → original row.
     /// When set, all accessors use this mapping transparently.
     downsample_map: Option<Vec<usize>>,
@@ -62,7 +59,7 @@ impl TraceStore {
                     .map_err(|e| JsError::new(&format!("{e}")))?
             )
         };
-        Ok(TraceStore { store, rom: None, original_bytes: Some(data.to_vec()), frames_cache: RefCell::new(None), downsample_map: None })
+        Ok(TraceStore { store, rom: None, original_bytes: Some(data.to_vec()), downsample_map: None })
     }
 
     /// Enable instruction-level downsampling. Picks one entry per PC change.
@@ -88,14 +85,12 @@ impl TraceStore {
             }
         }
         self.downsample_map = if map.is_empty() { None } else { Some(map) };
-        *self.frames_cache.borrow_mut() = None; // invalidate cache
     }
 
     /// Disable downsampling, restoring the full-resolution view.
     #[wasm_bindgen(js_name = disableDownsampling)]
     pub fn disable_downsampling(&mut self) {
         self.downsample_map = None;
-        *self.frames_cache.borrow_mut() = None;
     }
 
     /// Whether this store is currently downsampled.
@@ -579,40 +574,6 @@ impl TraceStore {
         }
     }
 
-    /// Lazily reconstruct frames and cache the result.
-    ///
-    /// If the current store yields no frames (e.g. after T-cycle collapse
-    /// strips pixel data), falls back to reconstructing from the original
-    /// bytes so pixel display still works in comparison mode.
-    fn ensure_frames(&self) {
-        if self.frames_cache.borrow().is_some() {
-            return;
-        }
-        let frames = self.reconstruct_from_store();
-        if Self::has_visible_pixels(&frames) {
-            *self.frames_cache.borrow_mut() = Some(frames);
-            return;
-        }
-        // Current store has no visible pixel frames (e.g. after T-cycle
-        // collapse stripped pix data) — reconstruct from original bytes.
-        if let Some(ref bytes) = self.original_bytes {
-            if let Ok(store) = gbtrace::column_store::load_column_store_from_bytes(bytes) {
-                let frames = framebuffer::reconstruct_frames(&store);
-                if !frames.is_empty() {
-                    *self.frames_cache.borrow_mut() = Some(frames);
-                    return;
-                }
-            }
-        }
-        // Fall back to whatever we got (may be empty or blank)
-        *self.frames_cache.borrow_mut() = Some(frames);
-    }
-
-    /// Check if any frame has non-zero pixel data.
-    fn has_visible_pixels(frames: &[Frame]) -> bool {
-        frames.iter().any(|f| f.pixels.iter().any(|&p| p != 0))
-    }
-
     /// Get the entry range (start, end) for a frame by index.
     fn frame_entry_range(&self, frame_index: usize) -> Option<(usize, usize)> {
         let boundaries = match &self.store {
@@ -632,52 +593,6 @@ impl TraceStore {
             }
         };
         Some((start, end))
-    }
-
-    /// Decode a range of entries into an eager column store.
-    /// For lazy stores, only decodes the row groups that overlap the range.
-    fn decode_range(&self, start: usize, end: usize) -> Result<ColumnStore, JsError> {
-        match &self.store {
-            StoreKind::Lazy(s) => {
-                s.decode_range(start, end)
-                    .map_err(|e| JsError::new(&format!("{e}")))
-            }
-            StoreKind::Eager(s) => {
-                // For eager stores, create a sub-store view
-                Ok(s.slice(start, end))
-            }
-        }
-    }
-
-    fn get_eager_store(&self) -> Result<ColumnStore, JsError> {
-        match &self.store {
-            StoreKind::Eager(s) => {
-                // Clone is expensive but needed for the borrow checker.
-                // For lazy stores we decode from bytes instead.
-                // For eager stores used in partial rendering, reconstruct from original_bytes if available.
-                if let Some(ref bytes) = self.original_bytes {
-                    gbtrace::column_store::load_column_store_from_bytes(bytes)
-                        .map_err(|e| JsError::new(&format!("{e}")))
-                } else {
-                    Err(JsError::new("no original bytes for eager store"))
-                }
-            }
-            StoreKind::Lazy(s) => {
-                s.to_eager().map_err(|e| JsError::new(&format!("{e}")))
-            }
-        }
-    }
-
-    fn reconstruct_from_store(&self) -> Vec<Frame> {
-        match &self.store {
-            StoreKind::Eager(s) => framebuffer::reconstruct_frames(s),
-            StoreKind::Lazy(s) => {
-                match s.to_eager() {
-                    Ok(e) => framebuffer::reconstruct_frames(&e),
-                    Err(_) => Vec::new(),
-                }
-            }
-        }
     }
 
     fn row_to_map(&self, index: usize) -> BTreeMap<String, JsField> {
@@ -751,7 +666,7 @@ pub fn prepare_for_diff(a: TraceStore, b: TraceStore, sync: Option<String>) -> R
         .map_err(|e| JsError::new(&format!("{e}")))?;
 
     let arr = js_sys::Array::new();
-    arr.push(&JsValue::from(TraceStore { store: StoreKind::Eager(new_a), rom: rom_a, original_bytes: bytes_a, frames_cache: RefCell::new(None), downsample_map: None }));
-    arr.push(&JsValue::from(TraceStore { store: StoreKind::Eager(new_b), rom: rom_b, original_bytes: bytes_b, frames_cache: RefCell::new(None), downsample_map: None }));
+    arr.push(&JsValue::from(TraceStore { store: StoreKind::Eager(new_a), rom: rom_a, original_bytes: bytes_a, downsample_map: None }));
+    arr.push(&JsValue::from(TraceStore { store: StoreKind::Eager(new_b), rom: rom_b, original_bytes: bytes_b, downsample_map: None }));
     Ok(arr)
 }
