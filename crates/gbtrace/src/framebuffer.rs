@@ -164,6 +164,24 @@ pub fn reconstruct_partial_frame(
     frame
 }
 
+/// Reconstruct a partial frame for a downsampled store.
+/// Takes downsampled frame_start and stop_entry, maps them to raw indices,
+/// and reconstructs from the inner (full-resolution) store.
+pub fn reconstruct_partial_frame_downsampled(
+    ds: &DownsampledStore,
+    frame_start: usize,
+    stop_entry: usize,
+) -> Frame {
+    let raw_start = ds.original_index(frame_start).unwrap_or(0);
+    let raw_stop = if stop_entry < ds.entry_count() {
+        // Include all T-cycles up to the next instruction boundary
+        ds.original_index(stop_entry + 1).unwrap_or(ds.inner().entry_count())
+    } else {
+        ds.inner().entry_count()
+    };
+    reconstruct_partial_frame(ds.inner(), raw_start, raw_stop)
+}
+
 /// Build a map of pixel (x, y) positions for each entry in a frame.
 ///
 /// Returns a Vec of `(x, y)` pairs indexed by `entry - frame_start`.
