@@ -1,6 +1,7 @@
 pub mod column_store;
 pub mod diff;
 pub mod disasm;
+pub mod downsample;
 pub mod entry;
 pub mod framebuffer;
 pub mod error;
@@ -13,7 +14,14 @@ pub mod writer;
 #[cfg(feature = "parquet")]
 pub mod parquet;
 
+#[cfg(feature = "parquet")]
+pub mod partitioned_store;
+
 pub use column_store::{ColumnStore, EntryView};
+pub use downsample::DownsampledStore;
+
+#[cfg(feature = "parquet")]
+pub use partitioned_store::PartitionedStore;
 pub use diff::{AlignmentStrategy, DiffConfig, DiffResult, DivergenceClass, MultiDiffResult, TraceDiffer};
 pub use entry::TraceEntry;
 pub use error::Error;

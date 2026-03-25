@@ -355,12 +355,14 @@ export class PixelDisplay extends LitElement {
 
   _onCanvasMouseMove(e) {
     const pos = this._canvasToLcd(e);
-    if (!pos) return;
+    if (!pos) { console.log('[pix] mousemove: no lcd pos', e.target.tagName, e.target.id); return; }
     const entry = this._entryAtPixel(pos.x, pos.y);
     if (entry != null) {
       this.dispatchEvent(new CustomEvent('hover-index', {
         detail: { index: entry }, bubbles: true, composed: true,
       }));
+    } else {
+      console.log(`[pix] mousemove: no entry at (${pos.x},${pos.y}), reversePixMap=${!!this._reversePixMap}, pixMapFrame=${this._pixMapFrame}, frameIndex=${this._frameIndex}`);
     }
   }
 
@@ -372,8 +374,10 @@ export class PixelDisplay extends LitElement {
 
   _onCanvasClick(e) {
     const pos = this._canvasToLcd(e);
+    console.log('[pix] click:', pos, 'tcycle:', this.tcyclePixels, 'storeB:', !!this.storeB, 'target:', e.target.tagName, e.target.id);
     if (!pos) return;
     const entry = this._entryAtPixel(pos.x, pos.y);
+    console.log('[pix] click entry:', entry, 'reversePixMap:', !!this._reversePixMap, 'pixMapFrame:', this._pixMapFrame);
     if (entry != null) {
       this.dispatchEvent(new CustomEvent('current-index', {
         detail: { index: entry }, bubbles: true, composed: true,
