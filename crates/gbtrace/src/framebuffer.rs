@@ -206,3 +206,44 @@ pub fn build_pixel_position_map(
 
     map
 }
+
+/// Build a reverse pixel position map: for each LCD position (x, y), returns the
+/// global entry index of the trace entry that produced that pixel.
+/// Returns a flat array of LCD_WIDTH * LCD_HEIGHT entries, where index = y * LCD_WIDTH + x.
+/// Value of u32::MAX means no pixel was produced at that position.
+pub fn build_reverse_pixel_map(
+    store: &dyn TraceStore,
+    frame_start: usize,
+    frame_end: usize,
+) -> Vec<u32> {
+    let mut rmap = vec![u32::MAX; LCD_WIDTH * LCD_HEIGHT];
+
+    let pix_col = match store.field_col("pix") {
+        Some(c) => c,
+        None => return rmap,
+    };
+
+    let mut pixel_idx: usize = 0;
+
+    let end = frame_end.min(store.entry_count());
+    for i in frame_start..end {
+        let pix_str = store.get_str(pix_col, i);
+        if pix_str.is_empty() { continue; }
+
+        // Skip full-frame dumps
+        if pix_str.len() == LCD_WIDTH * LCD_HEIGHT { continue; }
+
+        for ch in pix_str.bytes() {
+            if ch >= b'0' && ch <= b'3' {
+                let x = pixel_idx % LCD_WIDTH;
+                let y = pixel_idx / LCD_WIDTH;
+                if y < LCD_HEIGHT {
+                    rmap[y * LCD_WIDTH + x] = i as u32;
+                }
+                pixel_idx += 1;
+            }
+        }
+    }
+
+    rmap
+}

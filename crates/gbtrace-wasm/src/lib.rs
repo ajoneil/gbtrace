@@ -259,6 +259,25 @@ impl TraceStore {
         Ok(arr.into())
     }
 
+    /// Build a reverse pixel map for a frame. Returns a Uint32Array of
+    /// LCD_WIDTH * LCD_HEIGHT entries, where index = y * 160 + x and the value
+    /// is the global entry index that produced that pixel (or 0xFFFFFFFF for none).
+    #[wasm_bindgen(js_name = buildReversePixelMap)]
+    pub fn build_reverse_pixel_map(&self, frame_index: usize) -> Result<JsValue, JsError> {
+        let (frame_start, frame_end) = match self.frame_entry_range(frame_index) {
+            Some(r) => r,
+            None => return Ok(JsValue::NULL),
+        };
+        let store: &dyn gbtrace::column_store::TraceStore = match &self.store {
+            StoreKind::Lazy(s) => s,
+            StoreKind::Eager(s) => s,
+        };
+        let rmap = framebuffer::build_reverse_pixel_map(store, frame_start, frame_end);
+        let arr = js_sys::Uint32Array::new_with_length(rmap.len() as u32);
+        arr.copy_from(&rmap);
+        Ok(arr.into())
+    }
+
     /// Get a single entry as a JS object. Returns null if out of range.
     pub fn entry(&self, index: usize) -> Result<JsValue, JsError> {
         if index >= self.entry_count() {

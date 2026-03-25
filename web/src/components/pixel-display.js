@@ -103,6 +103,7 @@ export class PixelDisplay extends LitElement {
     this._frameCountA = 0;
     this._highlightPixel = null;
     this._pixMap = null;
+    this._reversePixMap = null;
     this._pixMapFrame = -1;
   }
 
@@ -163,9 +164,11 @@ export class PixelDisplay extends LitElement {
     if (this._pixMapFrame === this._frameIndex || !this.store || !this.tcyclePixels) return;
     try {
       this._pixMap = this.store.buildPixelPositionMap(this._frameIndex);
+      this._reversePixMap = this.store.buildReversePixelMap(this._frameIndex);
       this._pixMapFrame = this._frameIndex;
     } catch (_) {
       this._pixMap = null;
+      this._reversePixMap = null;
     }
   }
 
@@ -321,6 +324,52 @@ export class PixelDisplay extends LitElement {
     ctx.putImageData(new ImageData(diff, LCD_WIDTH, LCD_HEIGHT), 0, 0);
   }
 
+  _canvasToLcd(e) {
+    const canvas = this.renderRoot?.querySelector('#canvasA');
+    if (!canvas) return null;
+    const rect = canvas.getBoundingClientRect();
+    const x = Math.floor((e.clientX - rect.left) / SCALE);
+    const y = Math.floor((e.clientY - rect.top) / SCALE);
+    if (x < 0 || x >= LCD_WIDTH || y < 0 || y >= LCD_HEIGHT) return null;
+    return { x, y };
+  }
+
+  _entryAtPixel(x, y) {
+    this._ensurePixMap();
+    if (!this._reversePixMap) return null;
+    const idx = y * LCD_WIDTH + x;
+    const entry = this._reversePixMap[idx];
+    return (entry === 0xFFFFFFFF) ? null : entry;
+  }
+
+  _onCanvasMouseMove(e) {
+    const pos = this._canvasToLcd(e);
+    if (!pos) return;
+    const entry = this._entryAtPixel(pos.x, pos.y);
+    if (entry != null) {
+      this.dispatchEvent(new CustomEvent('hover-index', {
+        detail: { index: entry }, bubbles: true, composed: true,
+      }));
+    }
+  }
+
+  _onCanvasMouseLeave() {
+    this.dispatchEvent(new CustomEvent('hover-index', {
+      detail: { index: null }, bubbles: true, composed: true,
+    }));
+  }
+
+  _onCanvasClick(e) {
+    const pos = this._canvasToLcd(e);
+    if (!pos) return;
+    const entry = this._entryAtPixel(pos.x, pos.y);
+    if (entry != null) {
+      this.dispatchEvent(new CustomEvent('current-index', {
+        detail: { index: entry }, bubbles: true, composed: true,
+      }));
+    }
+  }
+
   _draw() {
     const fi = this._frameIndex;
     if (this.storeB) {
@@ -371,7 +420,11 @@ export class PixelDisplay extends LitElement {
           <span class="pixel-title">pixels</span>
           <span class="frame-info">frame ${this._frameIndex + 1} / ${total}</span>
         </div>
-        <div class="canvas-wrap">
+        <div class="canvas-wrap"
+          @mousemove=${this.tcyclePixels ? this._onCanvasMouseMove : null}
+          @mouseleave=${this.tcyclePixels ? this._onCanvasMouseLeave : null}
+          @click=${this.tcyclePixels ? this._onCanvasClick : null}
+          style="${this.tcyclePixels ? 'cursor:crosshair;' : ''}">
           <canvas id="canvasA" width=${LCD_WIDTH} height=${LCD_HEIGHT}
             style="width: ${LCD_WIDTH * SCALE}px; height: ${LCD_HEIGHT * SCALE}px;"></canvas>
           ${this.tcyclePixels ? html`
