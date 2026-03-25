@@ -27,6 +27,10 @@ use crate::profile::{field_type, FieldType};
 const HEADER_METADATA_KEY: &str = "gbtrace_header";
 const FRAME_BOUNDARIES_KEY: &str = "gbtrace_frame_boundaries";
 const BATCH_SIZE: usize = 65536;
+/// Maximum rows per row group before forcing a flush, even without a
+/// frame boundary. Prevents huge row groups during PPU-off or other
+/// periods where no boundary is detected. ~3 frames of T-cycle data.
+const MAX_ROW_GROUP_SIZE: usize = 200_000;
 
 // ---------------------------------------------------------------------------
 // Writer
@@ -94,6 +98,8 @@ pub struct ParquetTraceWriter {
     frame_boundaries: Vec<u64>,
     /// Total entries written so far.
     entries_written: u64,
+    /// Rows written since the last `writer.flush()` (row group start).
+    rows_in_current_group: usize,
 }
 
 impl ParquetTraceWriter {
@@ -151,6 +157,7 @@ impl ParquetTraceWriter {
             prev_ly: None,
             frame_boundaries: Vec::new(),
             entries_written: 0,
+            rows_in_current_group: 0,
         })
     }
 
@@ -182,8 +189,8 @@ impl ParquetTraceWriter {
             }
         }
         if boundary {
-            self.flush_batch()?;
-            self.writer.flush()?;
+            self.flush_row_group()?;
+            self.frame_boundaries.push(self.entries_written);
         }
 
         for (i, (name, ft)) in self.field_names.iter().zip(&self.field_types).enumerate() {
@@ -213,6 +220,10 @@ impl ParquetTraceWriter {
         }
 
         self.entries_written += 1;
+        self.rows_in_current_group += 1;
+        if self.rows_in_current_group >= MAX_ROW_GROUP_SIZE {
+            self.flush_row_group()?;
+        }
         Ok(())
     }
 
@@ -237,8 +248,8 @@ impl ParquetTraceWriter {
             boundary = true;
         }
         if boundary {
-            self.flush_batch()?;
-            self.writer.flush()?;
+            self.flush_row_group()?;
+            self.frame_boundaries.push(self.entries_written);
         }
         Ok(())
     }
@@ -284,6 +295,10 @@ impl ParquetTraceWriter {
             self.flush_batch()?;
         }
         self.entries_written += 1;
+        self.rows_in_current_group += 1;
+        if self.rows_in_current_group >= MAX_ROW_GROUP_SIZE {
+            self.flush_row_group()?;
+        }
         Ok(())
     }
 
@@ -292,8 +307,7 @@ impl ParquetTraceWriter {
     /// Also flushes the current batch to start a new row group.
     pub fn mark_frame(&mut self) -> Result<()> {
         self.frame_boundaries.push(self.entries_written);
-        self.flush_batch()?;
-        self.writer.flush()?;
+        self.flush_row_group()?;
         Ok(())
     }
 
@@ -305,6 +319,14 @@ impl ParquetTraceWriter {
     /// Get field names.
     pub fn field_names(&self) -> &[String] {
         &self.field_names
+    }
+
+    /// Flush the current batch and close the row group, starting a new one.
+    fn flush_row_group(&mut self) -> Result<()> {
+        self.flush_batch()?;
+        self.writer.flush()?;
+        self.rows_in_current_group = 0;
+        Ok(())
     }
 
     fn flush_batch(&mut self) -> Result<()> {
