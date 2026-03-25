@@ -144,7 +144,7 @@ serve: wasm
 	@echo "Assembling dev site..."
 	@mkdir -p $(BUILD_DIR)/site/pkg $(BUILD_DIR)/site/tests
 	@cp web/index.html $(BUILD_DIR)/site/
-	@cp -r web/src $(BUILD_DIR)/site/
+	@rm -rf $(BUILD_DIR)/site/src && cp -r web/src $(BUILD_DIR)/site/
 	@cp web/pkg/gbtrace_wasm.js web/pkg/gbtrace_wasm_bg.wasm $(BUILD_DIR)/site/pkg/
 	@if [ -d "$(GBMICROTEST_TRACE_DIR)" ]; then cp -r $(GBMICROTEST_TRACE_DIR) $(BUILD_DIR)/site/tests/gbmicrotest; fi
 	@if [ -d "$(BLARGG_TRACE_DIR)" ]; then cp -r $(BLARGG_TRACE_DIR) $(BUILD_DIR)/site/tests/blargg; fi
