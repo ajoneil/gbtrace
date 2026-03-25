@@ -475,6 +475,7 @@ export class AppShell extends LitElement {
           .hiddenFields=${this._hiddenFields}
           .viewStart=${this._viewStart}
           .viewEnd=${this._viewEnd}
+          .currentIndex=${this._currentIndex}
         ></trace-diff-table>
       </div>
     `;
@@ -701,7 +702,8 @@ export class AppShell extends LitElement {
   _onCurrentIndex(e) {
     this._currentIndex = e.detail.index;
     // If this came from the table itself (click on row), don't scroll the table
-    const fromTable = e.composedPath?.().some(el => el.tagName === 'TRACE-TABLE');
+    const fromTable = e.composedPath?.().some(el =>
+      el.tagName === 'TRACE-TABLE' || el.tagName === 'TRACE-DIFF-TABLE');
     if (!fromTable) {
       this._scrollTableToCurrent();
     }
