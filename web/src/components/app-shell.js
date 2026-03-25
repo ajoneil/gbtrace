@@ -12,6 +12,7 @@ import './trace-timeline.js';
 import './pixel-display.js';
 import './ppu-sprite-table.js';
 import './ppu-fifo-visualizer.js';
+import './vram-viewer.js';
 
 export class AppShell extends LitElement {
   static styles = css`
@@ -390,6 +391,12 @@ export class AppShell extends LitElement {
               .perEntryPixels=${hasPerEntryPix}
               .currentIndex=${this._effectiveIndex}
             ></pixel-display>
+            ${this._store?.hasVramData?.() ? html`
+              <vram-viewer
+                .store=${this._store}
+                .currentIndex=${this._effectiveIndex ?? 0}
+              ></vram-viewer>
+            ` : ''}
           </div>
         ` : ''}
       </div>
