@@ -46,8 +46,6 @@ fi
 ADAPTER_ARGS=(
     --rom "$ROM"
     --profile "$PROFILE"
-    --stop-on-serial "0A"
-    --stop-serial-count 4
     --extra-frames 2
     --frames "$MAX_FRAMES"
     "${EXTRA_ARGS[@]}"
@@ -68,19 +66,8 @@ fi
 # --- Determine pass/fail ---
 status="fail"
 
-# Method 1: Adapter reported reference match (works for all adapters)
 if grep -q "Reference match" "$stderr_file" 2>/dev/null; then
     status="pass"
-# Method 2: Serial output (check if trace contains serial data)
-else
-    serial=$("$CLI" query "$tmp_parquet" -w "sc changes to FF" --max 100 2>&1 | \
-        grep -oP 'sb=\K[0-9a-f]+' | while read hex; do printf "\\x$hex"; done) || serial=""
-
-    if echo "$serial" | grep -qi "passed"; then
-        status="pass"
-    elif echo "$serial" | grep -qi "failed"; then
-        status="fail"
-    fi
 fi
 
 # --- Output ---
