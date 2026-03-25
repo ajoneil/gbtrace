@@ -49,7 +49,7 @@ export class TraceTable extends LitElement {
     hiddenFields: { type: Object },
     viewStart: { type: Number },
     viewEnd: { type: Number },
-    tcyclePixels: { type: Boolean },
+    perEntryPixels: { type: Boolean },
     currentIndex: { type: Number },
   };
 
@@ -61,7 +61,7 @@ export class TraceTable extends LitElement {
     this.hiddenFields = new Set();
     this.viewStart = 0;
     this.viewEnd = 0;
-    this.tcyclePixels = false;
+    this.perEntryPixels = false;
     this._renderedStart = -1;
     this._renderedCount = 0;
     this._rafId = null;
@@ -98,7 +98,7 @@ export class TraceTable extends LitElement {
         <div class="inner">
           <div class="header-row">
             <span style="${hdrStyle(IDX_WIDTH)}">#</span>
-            ${this.tcyclePixels ? html`<span style="${hdrStyle(PIX_WIDTH)}">pix</span>` : ''}
+            ${this.perEntryPixels ? html`<span style="${hdrStyle(PIX_WIDTH)}">pix</span>` : ''}
             ${vf.map(f => html`
               <span style="${hdrStyle(COL_WIDTH)}">${f}</span>
               ${hasRom && f === 'pc' ? html`<span style="${hdrStyle(ASM_WIDTH, 'text-align:left;')}">asm</span>` : ''}
@@ -197,7 +197,7 @@ export class TraceTable extends LitElement {
 
     // Fetch pixel values for T-cycle traces
     let pixArr = null;
-    if (this.tcyclePixels) {
+    if (this.perEntryPixels) {
       try { pixArr = this.store.pixRange(globalStart, count); } catch (_) {}
     }
 

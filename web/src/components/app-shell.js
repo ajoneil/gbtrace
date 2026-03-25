@@ -286,7 +286,7 @@ export class AppShell extends LitElement {
 
   _renderSingle() {
     const vf = this._visibleFields;
-    const isTcycle = this._store?.isTcyclePixels() || false;
+    const hasPerEntryPix = this._store?.hasPerEntryPixels() || false;
     const { start: frameStart, end: frameEnd } = this._getCurrentFrameRange();
     return html`
       <div class="sections">
@@ -306,7 +306,7 @@ export class AppShell extends LitElement {
         ` : ''}
 
         ${(this._store?.hasPixels()) ? html`
-          ${this._renderPpuBar(isTcycle)}
+          ${this._renderPpuBar(hasPerEntryPix)}
         ` : ''}
 
         <trace-table
@@ -316,7 +316,7 @@ export class AppShell extends LitElement {
           .fields=${this._allFields}
           .highlightIndices=${this._highlightIndices}
           .hiddenFields=${this._hiddenFields}
-          .tcyclePixels=${this._store?.isTcyclePixels() || false}
+          .perEntryPixels=${hasPerEntryPix}
           .currentIndex=${this._currentIndex}
         ></trace-table>
       </div>
@@ -331,7 +331,7 @@ export class AppShell extends LitElement {
     }
   }
 
-  _renderPpuBar(isTcycle) {
+  _renderPpuBar(hasPerEntryPix) {
     const e = this._effectiveIndex != null ? this._store?.entry(this._effectiveIndex) : null;
     const expanded = this._ppuExpanded;
 
@@ -387,7 +387,7 @@ export class AppShell extends LitElement {
               .frameBoundaries=${this._frameBoundaries}
               .frameBoundariesB=${this._frameBoundariesB}
               .viewStart=${this._viewStart}
-              .tcyclePixels=${isTcycle}
+              .perEntryPixels=${hasPerEntryPix}
               .currentIndex=${this._effectiveIndex}
             ></pixel-display>
           </div>
@@ -462,7 +462,7 @@ export class AppShell extends LitElement {
         ` : ''}
 
         ${(this._store?.hasPixels() || this._storeB?.hasPixels()) ? html`
-          ${this._renderPpuBar(false)}
+          ${this._renderPpuBar(this._store?.hasPerEntryPixels() || this._storeB?.hasPerEntryPixels() || false)}
         ` : ''}
 
         <trace-diff-table
