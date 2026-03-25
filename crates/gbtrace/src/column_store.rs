@@ -33,6 +33,84 @@ pub trait TraceStore {
     fn get_str(&self, col: usize, row: usize) -> String;
     fn get_numeric(&self, col: usize, row: usize) -> u64;
     fn get_bool(&self, col: usize, row: usize) -> bool;
+
+    // Convenience accessors by field name (default implementations)
+    fn get_numeric_named(&self, name: &str, row: usize) -> Option<u64> {
+        self.field_col(name).map(|col| self.get_numeric(col, row))
+    }
+
+    fn get_str_named(&self, name: &str, row: usize) -> Option<String> {
+        self.field_col(name).map(|col| self.get_str(col, row))
+    }
+
+    fn has_field(&self, name: &str) -> bool {
+        self.field_col(name).is_some()
+    }
+
+    /// Evaluate a condition within a range and return matching global indices.
+    fn query_range(&self, condition_str: &str, start: usize, end: usize) -> std::result::Result<Vec<u32>, String> {
+        let condition = crate::query::parse_condition(condition_str)?;
+        let total = self.entry_count();
+        let start = start.min(total);
+        let end = end.min(total);
+        let mut indices = Vec::new();
+        for i in start..end {
+            if self.eval_condition_trait(&condition, i) {
+                indices.push(i as u32);
+            }
+        }
+        Ok(indices)
+    }
+
+    /// Evaluate a parsed condition against a single row (default: always false).
+    fn eval_condition_trait(&self, _cond: &crate::query::Condition, _row: usize) -> bool {
+        false
+    }
+
+    /// Downsample a field for chart display. Returns min/max pairs per bucket.
+    fn field_summary(
+        &self,
+        field: &str,
+        start: usize,
+        end: usize,
+        buckets: usize,
+    ) -> std::result::Result<Vec<f64>, String> {
+        let col_idx = self.field_col(field)
+            .ok_or_else(|| format!("unknown field: {field}"))?;
+        let total = self.entry_count();
+        let end = end.min(total);
+        let start = start.min(end);
+        let range = end - start;
+
+        if range == 0 || buckets == 0 {
+            return Ok(Vec::new());
+        }
+
+        let mut out = Vec::with_capacity(buckets * 2);
+        for b in 0..buckets {
+            let b_start = start + (b * range) / buckets;
+            let b_end = start + ((b + 1) * range) / buckets;
+            if b_start >= b_end {
+                let v = if b_start > 0 {
+                    self.get_numeric(col_idx, b_start.min(total - 1)) as f64
+                } else { 0.0 };
+                out.push(v);
+                out.push(v);
+                continue;
+            }
+            let mut min = f64::MAX;
+            let mut max = f64::MIN;
+            for i in b_start..b_end {
+                let v = self.get_numeric(col_idx, i) as f64;
+                if v < min { min = v; }
+                if v > max { max = v; }
+            }
+            out.push(min);
+            out.push(max);
+        }
+
+        Ok(out)
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -737,6 +815,10 @@ impl TraceStore for ColumnStore {
     }
     fn get_bool(&self, col: usize, row: usize) -> bool {
         self.columns[col].get_bool(row)
+    }
+
+    fn eval_condition_trait(&self, cond: &crate::query::Condition, row: usize) -> bool {
+        self.eval_condition(cond, row)
     }
 }
 
