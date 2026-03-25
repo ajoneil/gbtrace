@@ -132,9 +132,13 @@ pub fn reconstruct_partial_frame(
         None => return frame,
     };
 
-    // Count non-empty pix outputs sequentially: each one is the next
-    // pixel pushed to the LCD, left-to-right, top-to-bottom.
+    let ly_col = store.field_col("ly");
+    let use_ly = ly_col.is_some();
+
+    // Track pixel placement: either via ly (scanline) or sequential counting
     let mut pixel_idx: usize = 0;
+    let mut scanline_x: usize = 0;
+    let mut last_ly: Option<u8> = None;
 
     let end = stop_entry.min(store.entry_count());
     for i in frame_start..end {
@@ -152,11 +156,27 @@ pub fn reconstruct_partial_frame(
             continue;
         }
 
-        // Per-pixel output: each char is one pixel in LCD order
-        for ch in pix_str.bytes() {
-            if ch >= b'0' && ch <= b'3' && pixel_idx < LCD_WIDTH * LCD_HEIGHT {
-                frame.pixels[pixel_idx] = ch - b'0';
-                pixel_idx += 1;
+        if use_ly {
+            // Use ly to determine the scanline (Y), count X within scanline
+            let ly = store.get_numeric(ly_col.unwrap(), i) as u8;
+            if last_ly != Some(ly) {
+                scanline_x = 0;
+                last_ly = Some(ly);
+            }
+            let y = ly as usize;
+            for ch in pix_str.bytes() {
+                if ch >= b'0' && ch <= b'3' && y < LCD_HEIGHT && scanline_x < LCD_WIDTH {
+                    frame.pixels[y * LCD_WIDTH + scanline_x] = ch - b'0';
+                    scanline_x += 1;
+                }
+            }
+        } else {
+            // Fallback: sequential pixel counting
+            for ch in pix_str.bytes() {
+                if ch >= b'0' && ch <= b'3' && pixel_idx < LCD_WIDTH * LCD_HEIGHT {
+                    frame.pixels[pixel_idx] = ch - b'0';
+                    pixel_idx += 1;
+                }
             }
         }
     }
@@ -200,7 +220,11 @@ pub fn build_pixel_position_map(
         None => return map,
     };
 
+    let ly_col = store.field_col("ly");
+    let use_ly = ly_col.is_some();
     let mut pixel_idx: usize = 0;
+    let mut scanline_x: usize = 0;
+    let mut last_ly: Option<u8> = None;
 
     let end = frame_end.min(store.entry_count());
     for i in frame_start..end {
@@ -211,14 +235,29 @@ pub fn build_pixel_position_map(
         if pix_str.len() == LCD_WIDTH * LCD_HEIGHT { continue; }
 
         let idx = i - frame_start;
-        for ch in pix_str.bytes() {
-            if ch >= b'0' && ch <= b'3' {
-                let x = pixel_idx % LCD_WIDTH;
-                let y = pixel_idx / LCD_WIDTH;
-                if y < LCD_HEIGHT {
-                    map[idx] = (x as u16, y as u16);
+        if use_ly {
+            let ly = store.get_numeric(ly_col.unwrap(), i) as u8;
+            if last_ly != Some(ly) {
+                scanline_x = 0;
+                last_ly = Some(ly);
+            }
+            let y = ly as usize;
+            for ch in pix_str.bytes() {
+                if ch >= b'0' && ch <= b'3' && y < LCD_HEIGHT && scanline_x < LCD_WIDTH {
+                    map[idx] = (scanline_x as u16, y as u16);
+                    scanline_x += 1;
                 }
-                pixel_idx += 1;
+            }
+        } else {
+            for ch in pix_str.bytes() {
+                if ch >= b'0' && ch <= b'3' {
+                    let x = pixel_idx % LCD_WIDTH;
+                    let y = pixel_idx / LCD_WIDTH;
+                    if y < LCD_HEIGHT {
+                        map[idx] = (x as u16, y as u16);
+                    }
+                    pixel_idx += 1;
+                }
             }
         }
     }
@@ -242,7 +281,11 @@ pub fn build_reverse_pixel_map(
         None => return rmap,
     };
 
+    let ly_col = store.field_col("ly");
+    let use_ly = ly_col.is_some();
     let mut pixel_idx: usize = 0;
+    let mut scanline_x: usize = 0;
+    let mut last_ly: Option<u8> = None;
 
     let end = frame_end.min(store.entry_count());
     for i in frame_start..end {
@@ -252,14 +295,29 @@ pub fn build_reverse_pixel_map(
         // Skip full-frame dumps
         if pix_str.len() == LCD_WIDTH * LCD_HEIGHT { continue; }
 
-        for ch in pix_str.bytes() {
-            if ch >= b'0' && ch <= b'3' {
-                let x = pixel_idx % LCD_WIDTH;
-                let y = pixel_idx / LCD_WIDTH;
-                if y < LCD_HEIGHT {
-                    rmap[y * LCD_WIDTH + x] = i as u32;
+        if use_ly {
+            let ly = store.get_numeric(ly_col.unwrap(), i) as u8;
+            if last_ly != Some(ly) {
+                scanline_x = 0;
+                last_ly = Some(ly);
+            }
+            let y = ly as usize;
+            for ch in pix_str.bytes() {
+                if ch >= b'0' && ch <= b'3' && y < LCD_HEIGHT && scanline_x < LCD_WIDTH {
+                    rmap[y * LCD_WIDTH + scanline_x] = i as u32;
+                    scanline_x += 1;
                 }
-                pixel_idx += 1;
+            }
+        } else {
+            for ch in pix_str.bytes() {
+                if ch >= b'0' && ch <= b'3' {
+                    let x = pixel_idx % LCD_WIDTH;
+                    let y = pixel_idx / LCD_WIDTH;
+                    if y < LCD_HEIGHT {
+                        rmap[y * LCD_WIDTH + x] = i as u32;
+                    }
+                    pixel_idx += 1;
+                }
             }
         }
     }
