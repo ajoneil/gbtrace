@@ -3,7 +3,7 @@
 #
 # All Gambatte tests run for exactly 15 LCD frames (1,053,360 T-cycles).
 # Pass/fail is determined by:
-#   1. _out<hex> in filename → render last frame, check screen matches hex pattern
+#   1. _out<hex> in filename → render frame 15, check screen matches hex pattern
 #   2. .png reference next to ROM → screenshot comparison
 #   3. _xout in filename → expected failure, skip
 #
@@ -19,6 +19,9 @@ CLI="${CLI:-target/release/gbtrace-cli}"
 
 NAME="$(basename "$ROM" .gb)"
 ADAPTER="$(basename "$BIN" | sed 's/gbtrace-//')"
+
+# Hard time limit per test (capture + verify)
+TEST_TIMEOUT=120
 
 # Compute relative subdir from ROM_DIR to ROM
 ROM_REL="$(realpath --relative-to="$ROM_DIR" "$(dirname "$ROM")")"
@@ -39,7 +42,7 @@ TMP="/tmp/gbtrace_gambatte_${NAME}_${ADAPTER}_$$"
 stderr_file="${TMP}.stderr"
 tmp_trace="${TMP}.gbtrace"
 
-cleanup() { rm -f "$stderr_file" "$tmp_trace" "${ROM%.gb}.sav"; }
+cleanup() { rm -f "$stderr_file" "$tmp_trace" "${ROM%.gb}.sav"; rm -rf "${TMP}_render"; }
 trap cleanup EXIT
 
 # Check for .pix reference — Gambatte names DMG refs as {test}_dmg08.pix
@@ -49,10 +52,10 @@ if [[ -f "$PIX_REF" ]]; then
     EXTRA_ARGS+=(--reference "$PIX_REF")
 fi
 
-# Capture — run for exactly 15 frames
+# Capture — run for exactly 15 frames, with timeout
 (
     set +eo pipefail
-    "$BIN" --rom "$ROM" --profile "$PROFILE" \
+    timeout "$TEST_TIMEOUT" "$BIN" --rom "$ROM" --profile "$PROFILE" \
         --frames "$MAX_FRAMES" \
         "${EXTRA_ARGS[@]}" \
         --output "$tmp_trace" 2>"$stderr_file" </dev/null
@@ -73,9 +76,10 @@ if grep -q "Reference match" "$stderr_file" 2>/dev/null; then
 # Method 2: Hex output check (_out<hex> in filename)
 elif echo "$NAME" | grep -qP '_out[0-9A-Fa-f]+$'; then
     expected_hex=$(echo "$NAME" | grep -oP '(?<=_out)[0-9A-Fa-f]+$')
-    tmp_render="/tmp/gbtrace_render_${NAME}_${ADAPTER}_$$"
+    tmp_render="${TMP}_render"
     mkdir -p "$tmp_render"
-    "$CLI" render "$tmp_trace" --frames 15 --output "$tmp_render" >/dev/null 2>&1
+    # Render frame 15 with timeout to prevent hangs
+    timeout 30 "$CLI" render "$tmp_trace" --frames 15 --output "$tmp_render" >/dev/null 2>&1 || true
     png=$(ls "$tmp_render"/*.png 2>/dev/null | head -1)
     if [[ -n "$png" ]] && python3 "$(dirname "$0")/check-gambatte-hex.py" "$expected_hex" "$png" 2>/dev/null; then
         status="pass"
