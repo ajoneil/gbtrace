@@ -2,7 +2,7 @@ use std::path::PathBuf;
 use std::process;
 
 use clap::{Parser, Subcommand};
-use gbtrace::{AnyTraceReader, Condition, ConditionEvaluator, TraceEntry, TraceWriter};
+use gbtrace::{JsonlReader, Condition, ConditionEvaluator, TraceEntry};
 use gbtrace::header::TraceHeader;
 use serde_json::Value;
 
@@ -20,19 +20,11 @@ enum Command {
         /// Trace file to inspect
         input: PathBuf,
     },
-    /// Convert between trace file formats (JSONL <-> Parquet)
+    /// Convert JSONL trace to native .gbtrace format
     Convert {
-        /// Input file (.gbtrace, .gbtrace.gz, or .gbtrace.parquet)
+        /// Input JSONL file (.gbtrace.jsonl or -)
         input: PathBuf,
-        /// Output file (.gbtrace, .gbtrace.gz, or .gbtrace.parquet)
-        #[arg(short, long)]
-        output: Option<PathBuf>,
-    },
-    /// Strip boot ROM entries from a trace, keeping only post-boot data
-    StripBoot {
-        /// Input trace file
-        input: PathBuf,
-        /// Output file (default: overwrite input)
+        /// Output .gbtrace file
         #[arg(short, long)]
         output: Option<PathBuf>,
     },
@@ -52,23 +44,6 @@ enum Command {
         /// Show the last N entries (no --where needed)
         #[arg(long)]
         last: Option<usize>,
-    },
-    /// Trim a trace: keep entries up to or after a condition
-    Trim {
-        /// Input trace file
-        input: PathBuf,
-        /// Output file (default: derive from input)
-        #[arg(short, long)]
-        output: Option<PathBuf>,
-        /// Keep entries up to and including the first match of this condition
-        #[arg(long, conflicts_with = "after")]
-        until: Option<String>,
-        /// Keep entries starting from the first match of this condition
-        #[arg(long, conflicts_with = "until")]
-        after: Option<String>,
-        /// Trim to the frame whose rendered pixels match this .pix reference file
-        #[arg(long, conflicts_with_all = ["until", "after"])]
-        reference: Option<PathBuf>,
     },
     /// Show frame boundaries detected from ly scanline counter
     Frames {
@@ -132,7 +107,6 @@ fn main() {
     let code = match cli.command {
         Command::Info { input } => cmd_info(&input),
         Command::Convert { input, output } => cmd_convert(&input, output),
-        Command::StripBoot { input, output } => cmd_strip_boot(&input, output),
         Command::Query { input, r#where: conditions, max, context, last } => {
             if let Some(n) = last {
                 cmd_query_last(&input, n)
@@ -142,13 +116,6 @@ fn main() {
         }
         Command::Frames { input } => cmd_frames(&input),
         Command::Render { input, output, frames } => cmd_render(&input, output, frames),
-        Command::Trim { input, output, until, after, reference } => {
-            if reference.is_some() {
-                cmd_trim_reference(&input, output, reference.unwrap())
-            } else {
-                cmd_trim(&input, output, until, after)
-            }
-        }
         Command::Diff {
             trace_a,
             trace_b,
@@ -319,7 +286,6 @@ fn cmd_convert(input: &PathBuf, output: Option<PathBuf>) -> i32 {
             return 1;
         }
         None => {
-            // Default: produce .gbtrace binary format
             let stem = input.file_stem().and_then(|s| s.to_str()).unwrap_or("trace");
             let stem = stem.strip_suffix(".gbtrace").unwrap_or(stem);
             input.with_file_name(format!("{stem}.gbtrace"))
@@ -328,15 +294,15 @@ fn cmd_convert(input: &PathBuf, output: Option<PathBuf>) -> i32 {
 
     let reader = if is_stdin {
         use std::io::BufReader;
-        match gbtrace::TraceReader::from_reader(BufReader::new(std::io::stdin())) {
-            Ok(r) => AnyTraceReader::Jsonl(r),
+        match gbtrace::JsonlReader::from_reader(BufReader::new(std::io::stdin())) {
+            Ok(r) => r,
             Err(e) => {
                 eprintln!("Error reading stdin: {e}");
                 return 1;
             }
         }
     } else {
-        match AnyTraceReader::open(input) {
+        match JsonlReader::open(input) {
             Ok(r) => r,
             Err(e) => {
                 eprintln!("Error opening input: {e}");
@@ -346,37 +312,15 @@ fn cmd_convert(input: &PathBuf, output: Option<PathBuf>) -> i32 {
     };
 
     let header = reader.header().clone();
-
-    // Extract frame boundaries from the source for preservation during convert.
-    let frame_boundaries: Vec<u64> = if !is_stdin {
-        gbtrace::store::open_trace_store(input)
-            .map(|store| store.frame_boundaries().iter().map(|&b| b as u64).collect())
-            .unwrap_or_default()
-    } else {
-        vec![]
-    };
-
-    let out_ext = output.extension().and_then(|e| e.to_str()).unwrap_or("");
-    let out_path_str = output.to_string_lossy();
-
-    if out_ext == "gbtrace" && !out_path_str.ends_with(".gbtrace.jsonl") {
-        // Output as native .gbtrace binary
-        convert_to_gbtrace(reader, &output, &header, &frame_boundaries)
-    } else {
-        // Output as JSONL
-        convert_to_jsonl(reader, &output, &header)
-    }
+    convert_to_gbtrace(reader, &output, &header)
 }
 
 fn convert_to_gbtrace(
-    reader: AnyTraceReader,
+    reader: JsonlReader,
     output: &PathBuf,
     header: &TraceHeader,
-    frame_boundaries: &[u64],
 ) -> i32 {
     use gbtrace::format::write::GbtraceWriter;
-    use gbtrace::format::FieldGroup;
-    use gbtrace::format::read::GbtraceStore;
     use gbtrace::profile::{field_type, field_nullable, FieldType};
 
     // Derive field groups from the header
@@ -391,19 +335,10 @@ fn convert_to_gbtrace(
     };
 
     let mut count: u64 = 0;
-    let mut boundary_idx = 0;
 
     for result in reader {
         match result {
             Ok(entry) => {
-                // Mark frame boundaries at the correct positions
-                while boundary_idx < frame_boundaries.len()
-                    && frame_boundaries[boundary_idx] == count
-                {
-                    let _ = writer.mark_frame(None);
-                    boundary_idx += 1;
-                }
-
                 // Set all field values from the entry
                 for (col, name) in header.fields.iter().enumerate() {
                     let val = entry.get(name);
@@ -478,47 +413,6 @@ fn convert_to_gbtrace(
     0
 }
 
-fn convert_to_jsonl(
-    reader: AnyTraceReader,
-    output: &PathBuf,
-    header: &TraceHeader,
-) -> i32 {
-    let mut writer = match TraceWriter::create(output, header) {
-        Ok(w) => w,
-        Err(e) => {
-            eprintln!("Error creating output: {e}");
-            return 1;
-        }
-    };
-
-    let mut count: u64 = 0;
-    for result in reader {
-        match result {
-            Ok(entry) => {
-                if let Err(e) = writer.write_entry(&entry) {
-                    eprintln!("Error writing entry {count}: {e}");
-                    return 1;
-                }
-                count += 1;
-            }
-            Err(e) => {
-                eprintln!("Error reading entry {count}: {e}");
-                return 1;
-            }
-        }
-    }
-
-    if let Err(e) = writer.finish() {
-        eprintln!("Error finalizing: {e}");
-        return 1;
-    }
-    println!("Converted {count} entries to {}", output.display());
-    0
-}
-
-// ---------------------------------------------------------------------------
-// Shared: condition parsing (delegates to gbtrace::query)
-// ---------------------------------------------------------------------------
 
 fn parse_cli_condition(s: &str) -> Result<Condition, String> {
     gbtrace::query::parse_condition(s)
@@ -537,112 +431,6 @@ fn parse_cli_conditions(parts: &[String]) -> Result<Condition, String> {
 }
 
 // ---------------------------------------------------------------------------
-// Shared: format-aware writer
-// ---------------------------------------------------------------------------
-
-enum AnyWriter {
-    Jsonl(TraceWriter),
-}
-
-impl AnyWriter {
-    fn create(path: &std::path::Path, header: &gbtrace::TraceHeader) -> Result<Self, gbtrace::Error> {
-        Ok(Self::Jsonl(TraceWriter::create(path, header)?))
-    }
-
-    fn write_entry(&mut self, entry: &TraceEntry) -> Result<(), gbtrace::Error> {
-        match self {
-            Self::Jsonl(w) => w.write_entry(entry),
-        }
-    }
-
-    fn finish(self) -> Result<(), gbtrace::Error> {
-        match self {
-            Self::Jsonl(w) => w.finish(),
-        }
-    }
-}
-
-fn default_output(input: &PathBuf, suffix: &str) -> PathBuf {
-    let stem = input.file_stem().and_then(|s| s.to_str()).unwrap_or("trace");
-    let stem = stem.strip_suffix(".gbtrace").unwrap_or(stem);
-    let ext = input.extension().and_then(|e| e.to_str()).unwrap_or("gbtrace");
-    input.with_file_name(format!("{stem}{suffix}.{ext}"))
-}
-
-// ---------------------------------------------------------------------------
-// strip-boot
-// ---------------------------------------------------------------------------
-
-fn cmd_strip_boot(input: &PathBuf, output: Option<PathBuf>) -> i32 {
-    let reader = match AnyTraceReader::open(input) {
-        Ok(r) => r,
-        Err(e) => { eprintln!("Error: {e}"); return 1; }
-    };
-
-    let mut header = reader.header().clone();
-
-    // Update header to reflect stripping
-    header.boot_rom = header.boot_rom.to_stripped();
-
-    let output = output.unwrap_or_else(|| default_output(input, "_stripped"));
-
-    let mut writer = match AnyWriter::create(&output, &header) {
-        Ok(w) => w,
-        Err(e) => { eprintln!("Error creating output: {e}"); return 1; }
-    };
-
-    let mut skipping = true;
-    let mut skipped: u64 = 0;
-    let mut written: u64 = 0;
-    let mut cy_base: Option<u64> = None;
-
-    for result in reader {
-        let mut entry = match result {
-            Ok(e) => e,
-            Err(e) => { eprintln!("Error reading: {e}"); return 1; }
-        };
-
-        if skipping {
-            if entry.get_u16("pc") == Some(0x0100) {
-                skipping = false;
-                cy_base = entry.cy();
-            } else {
-                skipped += 1;
-                continue;
-            }
-        }
-
-        // Rebase cycle count
-        if let (Some(cy), Some(base)) = (entry.cy(), cy_base) {
-            entry.set_cy(cy - base);
-        }
-
-        if let Err(e) = writer.write_entry(&entry) {
-            eprintln!("Error writing: {e}");
-            return 1;
-        }
-        written += 1;
-    }
-
-    if let Err(e) = writer.finish() {
-        eprintln!("Error finalizing: {e}");
-        return 1;
-    }
-
-    if skipping {
-        eprintln!("WARNING: no entry with pc=0x0100 found, trace may not contain boot data");
-    }
-
-    println!("Stripped {skipped} boot entries, wrote {written} entries to {}", output.display());
-    println!("  boot_rom: {}", format_boot_rom(&header.boot_rom));
-
-    0
-}
-
-// ---------------------------------------------------------------------------
-// query
-// ---------------------------------------------------------------------------
-
 fn cmd_query(input: &PathBuf, conditions: &[String], max: usize, context: usize) -> i32 {
     if conditions.is_empty() {
         eprintln!("Error: at least one --where condition required");
@@ -707,99 +495,6 @@ fn cmd_query(input: &PathBuf, conditions: &[String], max: usize, context: usize)
     0
 }
 
-// Keep old cmd_query code below for reference but it's dead
-fn _cmd_query_old(input: &PathBuf, conditions: &[String], max: usize, context: usize) -> i32 {
-    let _ = (input, conditions, max, context);
-    let condition = match parse_cli_conditions(conditions) {
-        Ok(c) => c,
-        Err(e) => { eprintln!("Error: {e}"); return 1; }
-    };
-
-    let reader = match AnyTraceReader::open(input) {
-        Ok(r) => r,
-        Err(e) => { eprintln!("Error: {e}"); return 1; }
-    };
-
-    let fields = reader.header().fields.clone();
-    let mut evaluator = ConditionEvaluator::new(condition);
-
-    let mut ring: Vec<(u64, TraceEntry)> = Vec::new();
-    let mut matches_found: usize = 0;
-    let mut entry_idx: u64 = 0;
-    let mut context_after_remaining: usize = 0;
-    let mut displayed_matches: usize = 0;
-
-    for result in reader {
-        let entry = match result {
-            Ok(e) => e,
-            Err(e) => { eprintln!("Error reading: {e}"); return 1; }
-        };
-
-        let cy = entry.cy().unwrap_or(0);
-        let is_match = evaluator.evaluate(&entry);
-
-        if context > 0 {
-            ring.push((entry_idx, entry.clone()));
-            if ring.len() > context + 1 {
-                ring.remove(0);
-            }
-        }
-
-        if is_match {
-            matches_found += 1;
-            if displayed_matches < max {
-                if displayed_matches > 0 && context_after_remaining == 0 {
-                    println!("  ---");
-                }
-
-                if context > 0 {
-                    for (idx, ctx_entry) in &ring {
-                        if *idx == entry_idx { continue; }
-                        let ctx_cy = ctx_entry.cy().unwrap_or(0);
-                        print!("  [{idx}] cy={ctx_cy:<10}");
-                        print_entry_fields(ctx_entry, &fields);
-                        println!();
-                    }
-                }
-
-                print!("> [{entry_idx}] cy={cy:<10}");
-                print_entry_fields(&entry, &fields);
-                println!();
-
-                displayed_matches += 1;
-                context_after_remaining = context;
-            }
-        } else if context_after_remaining > 0 {
-            print!("  [{entry_idx}] cy={cy:<10}");
-            print_entry_fields(&entry, &fields);
-            println!();
-            context_after_remaining -= 1;
-        }
-
-        entry_idx += 1;
-    }
-
-    if matches_found == 0 {
-        println!("No matches found.");
-    } else {
-        println!("\n{matches_found} match(es) found.");
-        if matches_found > max {
-            println!("  (showing first {max}, use --max to see more)");
-        }
-    }
-
-    0
-}
-
-fn print_entry_fields(entry: &TraceEntry, fields: &[String]) {
-    for f in fields {
-        // all fields displayed
-        if let Some(v) = entry.get(f) {
-            print!(" {f}={}", display_val(v));
-        }
-    }
-}
-
 fn cmd_query_last(input: &PathBuf, n: usize) -> i32 {
     let store = match gbtrace::store::open_trace_store(input) {
         Ok(s) => s,
@@ -839,200 +534,6 @@ fn print_store_entry(store: &dyn gbtrace::store::TraceStore, row: usize, fields:
             }
         }
     }
-}
-
-fn _cmd_query_last_old(input: &PathBuf, n: usize) -> i32 {
-    let reader = match AnyTraceReader::open(input) {
-        Ok(r) => r,
-        Err(e) => { eprintln!("Error: {e}"); return 1; }
-    };
-
-    let fields = reader.header().fields.clone();
-
-    // Collect entries into a ring buffer of size n
-    let mut ring: Vec<TraceEntry> = Vec::with_capacity(n);
-    for result in reader {
-        let entry = match result {
-            Ok(e) => e,
-            Err(e) => { eprintln!("Error reading: {e}"); return 1; }
-        };
-        if ring.len() >= n {
-            ring.remove(0);
-        }
-        ring.push(entry);
-    }
-
-    for entry in &ring {
-        print!(" ");
-        print_entry_fields(entry, &fields);
-        println!();
-    }
-
-    0
-}
-
-// ---------------------------------------------------------------------------
-// trim
-// ---------------------------------------------------------------------------
-
-fn cmd_trim(input: &PathBuf, output: Option<PathBuf>, until: Option<String>, after: Option<String>) -> i32 {
-    if until.is_none() && after.is_none() {
-        eprintln!("Error: one of --until or --after is required");
-        return 1;
-    }
-
-    let condition_str = until.as_deref().or(after.as_deref()).unwrap();
-    let condition = match parse_cli_condition(condition_str) {
-        Ok(c) => c,
-        Err(e) => { eprintln!("Error: {e}"); return 1; }
-    };
-    let keep_before = until.is_some();
-
-    let reader = match AnyTraceReader::open(input) {
-        Ok(r) => r,
-        Err(e) => { eprintln!("Error: {e}"); return 1; }
-    };
-
-    let header = reader.header().clone();
-    let suffix = if keep_before { "_trimmed" } else { "_from" };
-    let output = output.unwrap_or_else(|| default_output(input, suffix));
-
-    let mut writer = match AnyWriter::create(&output, &header) {
-        Ok(w) => w,
-        Err(e) => { eprintln!("Error creating output: {e}"); return 1; }
-    };
-
-    let mut evaluator = ConditionEvaluator::new(condition);
-    let mut written: u64 = 0;
-    let mut total: u64 = 0;
-    let mut found_match = false;
-
-    for result in reader {
-        let entry = match result {
-            Ok(e) => e,
-            Err(e) => { eprintln!("Error reading: {e}"); return 1; }
-        };
-        total += 1;
-
-        let is_match = !found_match && evaluator.evaluate(&entry);
-        if is_match {
-            found_match = true;
-            let cy = entry.cy().unwrap_or(0);
-            eprintln!("Match at entry {total}, cy={cy}");
-        }
-
-        if keep_before {
-            // --until: write everything up to and including the first match, then stop
-            if found_match && !is_match {
-                // Already past the match, just count remaining
-                continue;
-            }
-            if let Err(e) = writer.write_entry(&entry) {
-                eprintln!("Error writing: {e}");
-                return 1;
-            }
-            written += 1;
-        } else {
-            // --after: skip until first match, then write everything from there
-            if found_match {
-                if let Err(e) = writer.write_entry(&entry) {
-                    eprintln!("Error writing: {e}");
-                    return 1;
-                }
-                written += 1;
-            }
-        }
-    }
-
-    if let Err(e) = writer.finish() {
-        eprintln!("Error finalizing: {e}");
-        return 1;
-    }
-
-    if !found_match {
-        eprintln!("WARNING: condition never matched, wrote all {total} entries");
-    }
-
-    println!("Wrote {written} of {total} entries to {}", output.display());
-
-    0
-}
-
-fn cmd_trim_reference(input: &PathBuf, output: Option<PathBuf>, reference: PathBuf) -> i32 {
-    use gbtrace::framebuffer::{self, LCD_WIDTH, LCD_HEIGHT};
-
-    // Load reference .pix file and convert to pixel values (0-3)
-    let ref_str = match std::fs::read_to_string(&reference) {
-        Ok(d) => d,
-        Err(e) => { eprintln!("Error reading reference: {e}"); return 1; }
-    };
-    if ref_str.len() != LCD_WIDTH * LCD_HEIGHT {
-        eprintln!("Error: reference file should be {} bytes, got {}", LCD_WIDTH * LCD_HEIGHT, ref_str.len());
-        return 1;
-    }
-    let ref_pixels: Vec<u8> = ref_str.bytes().map(|b| b.wrapping_sub(b'0').min(3)).collect();
-
-    // Load store and reconstruct frames — same logic as the viewer uses.
-    let store = match gbtrace::store::open_trace_store(input) {
-        Ok(s) => s,
-        Err(e) => { eprintln!("Error: {e}"); return 1; }
-    };
-
-    let frames = framebuffer::reconstruct_frames(store.as_ref());
-    let mut end_entry = None;
-    for frame in &frames {
-        if frame.pixels[..] == ref_pixels[..] {
-            eprintln!("Reference matches frame {} (entries 0..{})", frame.index + 1, frame.end_entry);
-            end_entry = Some(frame.end_entry);
-            break;
-        }
-    }
-
-    let total = store.entry_count();
-    let cut = match end_entry {
-        // Include one extra entry so the frame boundary (ly wrap) is captured,
-        // allowing the rendered output to detect the matching frame properly.
-        Some(e) => (e + 1).min(total),
-        None => {
-            eprintln!("WARNING: no frame matches reference, writing all entries");
-            total
-        }
-    };
-
-    // Re-read trace and write entries up to cut point
-    let reader = match AnyTraceReader::open(input) {
-        Ok(r) => r,
-        Err(e) => { eprintln!("Error: {e}"); return 1; }
-    };
-    let header = reader.header().clone();
-    let output = output.unwrap_or_else(|| default_output(input, "_trimmed"));
-
-    let mut writer = match AnyWriter::create(&output, &header) {
-        Ok(w) => w,
-        Err(e) => { eprintln!("Error creating output: {e}"); return 1; }
-    };
-
-    let mut written: u64 = 0;
-    for result in reader {
-        if written as usize >= cut { break; }
-        let entry = match result {
-            Ok(e) => e,
-            Err(e) => { eprintln!("Error reading: {e}"); return 1; }
-        };
-        if let Err(e) = writer.write_entry(&entry) {
-            eprintln!("Error writing: {e}");
-            return 1;
-        }
-        written += 1;
-    }
-
-    if let Err(e) = writer.finish() {
-        eprintln!("Error finalizing: {e}");
-        return 1;
-    }
-
-    println!("Wrote {written} of {total} entries to {}", output.display());
-    if end_entry.is_some() { 0 } else { 1 }
 }
 
 fn format_boot_rom(boot_rom: &gbtrace::BootRom) -> String {

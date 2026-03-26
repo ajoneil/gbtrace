@@ -9,12 +9,12 @@ use std::path::Path;
 /// Streaming reader for `.gbtrace` and `.gbtrace.gz` files.
 ///
 /// Reads entries one at a time — never loads the full file into memory.
-pub struct TraceReader {
+pub struct JsonlReader {
     lines: Box<dyn BufRead>,
     header: TraceHeader,
 }
 
-impl TraceReader {
+impl JsonlReader {
     /// Open a trace file and read its header.
     pub fn open(path: impl AsRef<Path>) -> Result<Self> {
         let path = path.as_ref();
@@ -95,7 +95,7 @@ impl TraceReader {
 }
 
 /// Iterator adapter over trace entries.
-impl Iterator for TraceReader {
+impl Iterator for JsonlReader {
     type Item = Result<TraceEntry>;
 
     fn next(&mut self) -> Option<Self::Item> {
