@@ -10,7 +10,7 @@ const FIELD_GROUPS = [
   { name: 'timer',     fields: ['div', 'tima', 'tma', 'tac'] },
   { name: 'serial',    fields: ['sb', 'sc'] },
   { name: 'ppu_int',   fields: [
-    'pix', 'frame_num',
+    'pix',
     'oam0_x', 'oam0_id', 'oam0_attr', 'oam1_x', 'oam1_id', 'oam1_attr',
     'oam2_x', 'oam2_id', 'oam2_attr', 'oam3_x', 'oam3_id', 'oam3_attr',
     'oam4_x', 'oam4_id', 'oam4_attr', 'oam5_x', 'oam5_id', 'oam5_attr',
@@ -21,6 +21,7 @@ const FIELD_GROUPS = [
     'tfetch_state', 'sfetch_state', 'tile_temp_a', 'tile_temp_b',
     'pix_count', 'sprite_count', 'scan_count', 'rendering', 'win_mode',
   ]},
+  { name: 'vram',      fields: ['vram_addr', 'vram_data'] },
   { name: 'test',      fields: ['test_result', 'test_expect', 'test_pass'] },
 ];
 
