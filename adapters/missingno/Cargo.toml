@@ -8,5 +8,5 @@ name = "gbtrace-missingno"
 path = "src/main.rs"
 
 [dependencies]
-missingno-gmb = { git = "https://github.com/ajoneil/missingno", features = ["gbtrace"] }
+missingno-gb = { git = "https://github.com/ajoneil/missingno", features = ["gbtrace"] }
 clap = { version = "4", features = ["derive"] }
