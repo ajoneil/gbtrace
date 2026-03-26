@@ -35,8 +35,8 @@ fi
 
 # Determine pass/fail from the trace data
 status="fail"
-result_pass=$("$CLI" query "$TRACE" -w "test_pass=01" --max 1 2>&1 | grep -cP '^\d+ match' || true)
-if [ "$result_pass" -gt 0 ]; then
+match_count=$("$CLI" query "$TRACE" -w "test_pass=01" --max 1 2>&1 | grep -oP '^\d+(?= match)' || echo "0")
+if [ "$match_count" -gt 0 ]; then
     status="pass"
 fi
 
