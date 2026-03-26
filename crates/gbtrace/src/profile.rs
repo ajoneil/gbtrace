@@ -86,8 +86,6 @@ const KNOWN_FIELDS: &[&str] = &[
     // ppu internal — counters/flags
     "pix_count", "sprite_count", "scan_count",
     "rendering", "win_mode",
-    // frame tracking
-    "frame_num",
     // vram write tracking
     "vram_addr", "vram_data",
 ];
@@ -106,7 +104,7 @@ pub enum FieldType {
 pub fn field_type(name: &str) -> FieldType {
     match name {
         "cy" => FieldType::UInt64,
-        "pc" | "sp" | "frame_num" | "vram_addr" => FieldType::UInt16,
+        "pc" | "sp" | "vram_addr" => FieldType::UInt16,
         "ime" | "rendering" | "win_mode" => FieldType::Bool,
         "pix" => FieldType::Str,
         _ => FieldType::UInt8,

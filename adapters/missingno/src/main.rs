@@ -3,9 +3,9 @@ use std::path::PathBuf;
 use std::process;
 
 use clap::Parser;
-use missingno_gmb::{GameBoy, cartridge::Cartridge};
-use missingno_gmb::cpu::mcycle::DotAction;
-use missingno_gmb::trace::{Tracer, Trigger, Profile, BootRom};
+use missingno_gb::{GameBoy, cartridge::Cartridge};
+use missingno_gb::cpu::mcycle::DotAction;
+use missingno_gb::trace::{Tracer, Trigger, Profile, BootRom};
 
 #[derive(Parser)]
 #[command(name = "gbtrace-missingno")]

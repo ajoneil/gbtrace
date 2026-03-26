@@ -357,7 +357,6 @@ static const std::unordered_map<std::string, uint8_t(*)(const GateBoy &)> PPU_U8
 
 // Special u16 readers (not gate-level state, adapter-maintained counters)
 static const std::unordered_map<std::string, uint16_t(*)()> PPU_U16_READERS = {
-    {"frame_num", []() -> uint16_t { return g_frame_num; }},
 };
 
 static const std::unordered_map<std::string, bool(*)(const GateBoy &)> PPU_BOOL_READERS = {

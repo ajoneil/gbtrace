@@ -24,7 +24,6 @@ ppu_internal = [
     "tile_temp_a", "tile_temp_b",
     "pix_count", "sprite_count", "scan_count",
     "rendering", "win_mode",
-    "frame_num",
 ]
 interrupt = ["if_", "ie", "ime"]
 timer = ["div", "tima", "tma", "tac"]
