@@ -548,7 +548,6 @@ version = "0.1.0"
 dependencies = [
  "clap",
  "gbtrace",
- "serde_json",
 ]
 
 [[package]]

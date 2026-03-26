@@ -2,9 +2,9 @@ use std::path::PathBuf;
 use std::process;
 
 use clap::{Parser, Subcommand};
-use gbtrace::{JsonlReader, Condition, ConditionEvaluator, TraceEntry};
+use gbtrace::JsonlReader;
 use gbtrace::header::TraceHeader;
-use serde_json::Value;
+use gbtrace::query::Condition;
 
 #[derive(Parser)]
 #[command(name = "gbtrace-cli", about = "Inspect and compare GB Trace files")]
@@ -61,44 +61,25 @@ enum Command {
         #[arg(long)]
         frames: Option<String>,
     },
-    /// Compare two or more trace files and report divergences
+    /// Compare two trace files and report divergences
     Diff {
         /// First trace file (reference)
         trace_a: PathBuf,
-        /// Trace file(s) to compare against the reference
-        trace_b: Vec<PathBuf>,
-        /// Max divergence regions to show (default: 10)
-        #[arg(long, default_value_t = 10)]
-        max: usize,
-        /// Context entries before/after first divergence (default: 2)
-        #[arg(long, default_value_t = 2)]
-        context: usize,
+        /// Trace file to compare against the reference
+        trace_b: PathBuf,
         /// Only compare these fields (comma-separated, e.g. pc,a,f)
         #[arg(long)]
         fields: Option<String>,
-        /// Exclude these fields from comparison (comma-separated, e.g. ime,ly)
+        /// Exclude these fields from comparison (comma-separated)
         #[arg(long)]
         exclude: Option<String>,
-        /// Ignore boot ROM entries (skip to first pc=0x0100)
-        #[arg(long)]
-        skip_boot: bool,
-        /// Sync both traces at a condition before comparing.
-        /// Format: field=value (exact) or field&mask (bitmask non-zero).
-        /// Example: --sync "lcdc&0x80" syncs at PPU-on.
+        /// Sync condition before comparing (default: pc).
+        /// "none" for no sync, or field=value / field&mask.
         #[arg(long)]
         sync: Option<String>,
-        /// Alignment strategy: auto (default), cycle, or sequence
-        #[arg(long, default_value = "auto")]
-        align: String,
-        /// One-line-per-field summary output (good for scripting)
+        /// One-line-per-field summary output
         #[arg(long)]
         summary: bool,
-        /// Machine-readable JSON output
-        #[arg(long)]
-        json: bool,
-        /// Show divergence classification
-        #[arg(long)]
-        classify: bool,
     },
 }
 
@@ -119,17 +100,11 @@ fn main() {
         Command::Diff {
             trace_a,
             trace_b,
-            max,
-            context,
             fields,
             exclude,
-            skip_boot,
             sync,
-            align,
             summary,
-            json,
-            classify,
-        } => cmd_diff(&trace_a, &trace_b, max, context, fields, exclude, skip_boot, sync.as_deref(), &align, summary, json, classify),
+        } => cmd_diff(&trace_a, &trace_b, fields, exclude, sync.as_deref(), summary),
     };
     process::exit(code);
 }
@@ -545,291 +520,160 @@ fn format_boot_rom(boot_rom: &gbtrace::BootRom) -> String {
     }
 }
 
+
 // ---------------------------------------------------------------------------
 // diff
 // ---------------------------------------------------------------------------
 
-fn display_val(v: &Value) -> String {
-    match v {
-        Value::Number(n) => {
-            if let Some(n) = n.as_u64() {
-                if n <= 0xFF { return format!("{n:02x}"); }
-                if n <= 0xFFFF { return format!("{n:04x}"); }
-                return format!("{n:x}");
-            }
-            n.to_string()
-        }
-        Value::String(s) => {
-            if let Some(hex) = s.strip_prefix("0x").or_else(|| s.strip_prefix("0X")) {
-                return hex.to_lowercase();
-            }
-            s.clone()
-        }
-        Value::Bool(b) => b.to_string(),
-        Value::Null => "null".to_string(),
-        _ => v.to_string(),
-    }
-}
-
-fn load_store(path: &PathBuf) -> Result<Box<dyn gbtrace::store::TraceStore>, String> {
-    gbtrace::store::open_trace_store(path)
-        .map_err(|e| format!("Error opening {}: {e}", path.display()))
-}
-
-/// Build TraceEntry from a store row (for the legacy diff module).
-fn store_entry_at(store: &dyn gbtrace::store::TraceStore, row: usize) -> gbtrace::TraceEntry {
-    let fields = &store.header().fields;
-    let mut entry = gbtrace::TraceEntry::new();
-    for (col, name) in fields.iter().enumerate() {
-        if store.is_null(col, row) { continue; }
-        let ft = gbtrace::profile::field_type(name);
-        match ft {
-            gbtrace::FieldType::Bool => entry.set_bool(name, store.get_bool(col, row)),
-            gbtrace::FieldType::Str => {
-                let s = store.get_str(col, row);
-                if !s.is_empty() { entry.set_str(name, &s); }
-            }
-            gbtrace::FieldType::UInt64 => entry.set_cy(store.get_numeric(col, row)),
-            gbtrace::FieldType::UInt16 => entry.set_u16(name, store.get_numeric(col, row) as u16),
-            gbtrace::FieldType::UInt8 => entry.set_u8(name, store.get_numeric(col, row) as u8),
-        }
-    }
-    entry
-}
-
 fn cmd_diff(
     path_a: &PathBuf,
-    trace_b_paths: &[PathBuf],
-    max_regions: usize,
-    context: usize,
+    path_b: &PathBuf,
     fields_filter: Option<String>,
     exclude_filter: Option<String>,
-    skip_boot: bool,
     sync: Option<&str>,
-    align: &str,
     summary: bool,
-    json: bool,
-    classify: bool,
 ) -> i32 {
-    use gbtrace::diff::{AlignmentStrategy, DiffConfig, TraceDiffer};
     use gbtrace::comparison::TraceComparison;
 
-    let alignment = match align {
-        "sequence" => AlignmentStrategy::Sequence,
-        "cycle" => AlignmentStrategy::Cycle,
-        _ => AlignmentStrategy::Auto,
-    };
-
-    let config = DiffConfig {
-        include_fields: fields_filter.as_ref().map(|s| s.split(',').map(String::from).collect()),
-        exclude_fields: exclude_filter.as_ref().map(|s| s.split(',').map(String::from).collect()),
-        alignment,
-        skip_boot,
-        max_regions,
-        context,
-    };
-
-    let differ = TraceDiffer::new(config);
-
-    // Load all stores
-    let store_a = match load_store(path_a) {
+    let store_a = match gbtrace::store::open_trace_store(path_a) {
         Ok(s) => s,
-        Err(e) => { eprintln!("{e}"); return 1; }
+        Err(e) => { eprintln!("Error opening {}: {e}", path_a.display()); return 1; }
+    };
+    let store_b = match gbtrace::store::open_trace_store(path_b) {
+        Ok(s) => s,
+        Err(e) => { eprintln!("Error opening {}: {e}", path_b.display()); return 1; }
     };
 
-    let stores_b: Vec<Box<dyn gbtrace::store::TraceStore>> = {
-        let mut v = vec![];
-        for path in trace_b_paths {
-            match load_store(path) {
-                Ok(s) => v.push(s),
-                Err(e) => { eprintln!("{e}"); return 1; }
-            }
-        }
-        v
-    };
-
-    // Use TraceComparison to align stores (handles collapse + sync)
-    let sync_mode = if skip_boot { Some("pc") } else { sync };
-
-    // Multi-trace comparison
-    if stores_b.len() > 1 {
-        let mut all_entries = vec![];
-
-        // Build entries for store A (used as base for all comparisons)
-        let comp_first = match TraceComparison::align(&*store_a, &*stores_b[0], sync_mode) {
-            Ok(c) => c,
-            Err(e) => { eprintln!("Error aligning: {e}"); return 1; }
-        };
-        let header_a = store_a.header().clone();
-        let entries_a: Vec<gbtrace::TraceEntry> = comp_first.map_a.iter()
-            .map(|&i| store_entry_at(&*store_a, i))
-            .collect();
-        all_entries.push((header_a, entries_a));
-
-        for store_b in &stores_b {
-            let comp = match TraceComparison::align(&*store_a, &**store_b, sync_mode) {
-                Ok(c) => c,
-                Err(e) => { eprintln!("Error aligning: {e}"); return 1; }
-            };
-            let header_b = store_b.header().clone();
-            let entries_b: Vec<gbtrace::TraceEntry> = comp.map_b.iter()
-                .map(|&i| store_entry_at(&**store_b, i))
-                .collect();
-            all_entries.push((header_b, entries_b));
-        }
-
-        let multi = match differ.compare_multi(all_entries) {
-            Ok(r) => r,
-            Err(e) => { eprintln!("Error: {e}"); return 1; }
-        };
-        if json {
-            println!("{}", serde_json::to_string_pretty(&multi).unwrap());
-            return if multi.pairwise.iter().all(|r| r.is_identical()) { 0 } else { 1 };
-        }
-        let mut any_divergent = false;
-        for result in &multi.pairwise {
-            print_diff_result(result, max_regions, summary, classify);
-            if !result.is_identical() { any_divergent = true; }
-            println!();
-        }
-        return if any_divergent { 1 } else { 0 };
-    }
-
-    // Single pair comparison
-    let comp = match TraceComparison::align(&*store_a, &*stores_b[0], sync_mode) {
+    let mut comp = match TraceComparison::align(&*store_a, &*store_b, sync) {
         Ok(c) => c,
-        Err(e) => { eprintln!("Error aligning: {e}"); return 1; }
+        Err(e) => { eprintln!("Error aligning traces: {e}"); return 1; }
     };
 
-    let header_a = store_a.header().clone();
-    let header_b = stores_b[0].header().clone();
-    let entries_a: Vec<gbtrace::TraceEntry> = comp.map_a.iter()
-        .map(|&i| store_entry_at(&*store_a, i))
+    let name_a = &store_a.header().emulator;
+    let name_b = &store_b.header().emulator;
+
+    // Determine which fields to compare
+    let fields_a = &store_a.header().fields;
+    let fields_b = &store_b.header().fields;
+    let common_fields: Vec<String> = fields_a.iter()
+        .filter(|f| fields_b.contains(f))
+        .cloned()
         .collect();
-    let entries_b: Vec<gbtrace::TraceEntry> = comp.map_b.iter()
-        .map(|&i| store_entry_at(&*stores_b[0], i))
+
+    let include: Option<Vec<String>> = fields_filter
+        .map(|s| s.split(',').map(String::from).collect());
+    let exclude: Option<Vec<String>> = exclude_filter
+        .map(|s| s.split(',').map(String::from).collect());
+
+    let fields_to_compare: Vec<&str> = common_fields.iter()
+        .filter(|f| {
+            if let Some(ref inc) = include {
+                if !inc.iter().any(|i| i == *f) { return false; }
+            }
+            if let Some(ref exc) = exclude {
+                if exc.iter().any(|e| e == *f) { return false; }
+            }
+            true
+        })
+        .map(|s| s.as_str())
         .collect();
 
-    let result = match differ.compare(&header_a, entries_a, &header_b, entries_b) {
-        Ok(r) => r,
-        Err(e) => { eprintln!("Error: {e}"); return 1; }
-    };
+    // Compute stats via TraceComparison (clone to release borrow)
+    let stats = comp.compute_stats().to_vec();
+    let aligned_count = comp.len();
 
-    if json {
-        println!("{}", serde_json::to_string_pretty(&result).unwrap());
-        return if result.is_identical() { 0 } else { 1 };
-    }
+    // Filter stats to fields we're comparing
+    let relevant_stats: Vec<_> = stats.iter()
+        .filter(|s| fields_to_compare.contains(&s.name.as_str()))
+        .collect();
 
-    print_diff_result(&result, max_regions, summary, classify);
-    if result.is_identical() { 0 } else { 1 }
-}
-
-fn print_diff_result(
-    result: &gbtrace::DiffResult,
-    max_regions: usize,
-    summary: bool,
-    classify: bool,
-) {
-    let name_a = &result.name_a;
-    let name_b = &result.name_b;
+    let total_diffs: usize = relevant_stats.iter().map(|s| s.diff_count).sum();
+    let is_identical = total_diffs == 0;
 
     if summary {
-        // Compact one-line-per-field output
-        println!("{name_a} vs {name_b}: {} ({} entries, {:.1}% overlap)",
-            result.classification, result.aligned_count, result.overlap_pct);
-        for d in &result.field_divergences {
-            println!("  {:<8} {:>8} diffs, first at idx={}: {}={}  {}={}",
-                d.field, d.count, d.first_index,
-                name_a, display_val(&d.first_val_a),
-                name_b, display_val(&d.first_val_b));
-        }
-        return;
-    }
-
-    println!("Comparing: {name_a} vs {name_b}");
-
-    // Boot ROM info
-    if result.boot_rom_mismatch {
-        println!("  Boot ROM mismatch");
-    }
-    if result.rom_mismatch {
-        println!("  WARNING: ROM hashes differ!");
-    }
-    if !result.only_in_a.is_empty() {
-        println!("  Fields only in {name_a}: {}", result.only_in_a.join(", "));
-    }
-    if !result.only_in_b.is_empty() {
-        println!("  Fields only in {name_b}: {}", result.only_in_b.join(", "));
-    }
-    println!("  Comparing fields: {}", result.common_fields.join(", "));
-    println!();
-    println!("  Entries:  {} vs {}", result.entries_a, result.entries_b);
-    println!("Aligned {} entries ({:.1}% overlap)", result.aligned_count, result.overlap_pct);
-
-    if classify || !result.is_identical() {
-        println!("  Classification: {}", result.classification);
-    }
-
-    if result.is_identical() {
-        println!("\nNo divergences found! Traces match perfectly.");
-        return;
-    }
-
-    println!("\nFound divergences in {} field(s):\n", result.field_divergences.len());
-    for d in &result.field_divergences {
-        println!(
-            "  {:6}  {:>8} differences, first at idx={}: {name_a}={}  {name_b}={}",
-            d.field, d.count, d.first_index,
-            display_val(&d.first_val_a), display_val(&d.first_val_b)
-        );
-    }
-
-    println!("\n{} divergent entries in {} region(s):\n",
-        result.total_divergent, result.regions.len());
-    for (j, r) in result.regions.iter().enumerate().take(max_regions) {
-        if r.start_index == r.end_index {
-            println!("  Region {}: idx={} ({} entry)", j + 1, r.start_index, r.count);
-        } else {
-            println!("  Region {}: idx={}..{} ({} entries)",
-                j + 1, r.start_index, r.end_index, r.count);
-        }
-    }
-    if result.regions.len() > max_regions {
-        println!("  ... and {} more regions", result.regions.len() - max_regions);
-    }
-
-    // Context window
-    if !result.context_window.is_empty() {
-        let first_div = result.context_window.iter().find(|c| c.is_divergent);
-        if let Some(first) = first_div {
-            println!("\n{}", "=".repeat(72));
-            println!("Detail: first divergence at idx={}", first.index);
-            println!("{}\n", "=".repeat(72));
-        }
-
-        for entry in &result.context_window {
-            let marker = if entry.is_divergent { ">" } else { " " };
-            if !entry.divergent_fields.is_empty() {
-                let diff_strs: Vec<String> = entry.divergent_fields
-                    .iter()
-                    .map(|f| {
-                        let a = entry.vals_a.get(f).map(|v| display_val(v)).unwrap_or_else(|| "?".into());
-                        let b = entry.vals_b.get(f).map(|v| display_val(v)).unwrap_or_else(|| "?".into());
-                        format!("{f}: {a} vs {b}")
-                    })
-                    .collect();
-                println!("{marker} idx={:>10}  {}", entry.index, diff_strs.join(", "));
-            } else {
-                let pc = entry.vals_a.get("pc").map(|v| display_val(v)).unwrap_or_else(|| "?".into());
-                let op = entry.vals_a.get("op").map(|v| display_val(v)).unwrap_or_else(|| "?".into());
-                let a = entry.vals_a.get("a").map(|v| display_val(v)).unwrap_or_else(|| "?".into());
-                println!("{marker} idx={:>10}  pc={pc} op={op} a={a}  (match)", entry.index);
+        let total_m: usize = relevant_stats.iter().map(|s| s.match_count).sum();
+        let total_d: usize = relevant_stats.iter().map(|s| s.diff_count).sum();
+        let pct = if total_m + total_d > 0 { total_m as f64 / (total_m + total_d) as f64 * 100.0 } else { 100.0 };
+        println!("{name_a} vs {name_b}: {} aligned entries, {:.1}% match",
+            aligned_count, pct);
+        for s in &relevant_stats {
+            if s.diff_count > 0 {
+                // Find first diff for this field
+                let first_idx = (0..comp.len())
+                    .find(|&i| comp.field_differs(&s.name, i))
+                    .unwrap_or(0);
+                let row_a = comp.original_a(first_idx);
+                let row_b = comp.original_b(first_idx);
+                let col_a = store_a.field_col(&s.name).unwrap();
+                let col_b = store_b.field_col(&s.name).unwrap();
+                let val_a = store_a.get_numeric(col_a, row_a);
+                let val_b = store_b.get_numeric(col_b, row_b);
+                println!("  {:<16} {:>8} diffs, first at idx={}: {}={:02x}  {}={:02x}",
+                    s.name, s.diff_count, first_idx,
+                    name_a, val_a, name_b, val_b);
             }
         }
+    } else {
+        println!("Comparing: {} vs {}", name_a, name_b);
+        println!("  Aligned entries: {}", aligned_count);
+        println!("  Store A entries: {}", store_a.entry_count());
+        println!("  Store B entries: {}", store_b.entry_count());
 
-        let remaining = result.total_divergent.saturating_sub(5);
-        if remaining > 0 {
-            println!("\n... {remaining} more divergent entries");
+        // Fields only in one trace
+        let only_a: Vec<&str> = fields_a.iter()
+            .filter(|f| !fields_b.contains(f))
+            .map(|s| s.as_str())
+            .collect();
+        let only_b: Vec<&str> = fields_b.iter()
+            .filter(|f| !fields_a.contains(f))
+            .map(|s| s.as_str())
+            .collect();
+        if !only_a.is_empty() {
+            println!("  Fields only in {}: {}", name_a, only_a.join(", "));
+        }
+        if !only_b.is_empty() {
+            println!("  Fields only in {}: {}", name_b, only_b.join(", "));
+        }
+
+        println!();
+
+        if is_identical {
+            println!("  IDENTICAL ({} common fields, {} entries)", fields_to_compare.len(), aligned_count);
+        } else {
+            println!("  Divergences:");
+            for s in &relevant_stats {
+                let pct = s.match_pct();
+                if s.diff_count > 0 {
+                    println!("    {:<16} {:>8} diffs ({:.1}% match)", s.name, s.diff_count, pct);
+                }
+            }
+
+            // Show first few divergent entries
+            println!();
+            println!("  First divergences:");
+            let mut shown = 0;
+            for i in 0..comp.len() {
+                let any_diff = fields_to_compare.iter().any(|f| comp.field_differs(f, i));
+                if any_diff {
+                    let row_a = comp.original_a(i);
+                    let row_b = comp.original_b(i);
+                    print!("    [{i}] ");
+                    for f in &fields_to_compare {
+                        if comp.field_differs(f, i) {
+                            let col_a = store_a.field_col(f).unwrap();
+                            let col_b = store_b.field_col(f).unwrap();
+                            let va = store_a.get_numeric(col_a, row_a);
+                            let vb = store_b.get_numeric(col_b, row_b);
+                            print!("{f}:{:02x}|{:02x} ", va, vb);
+                        }
+                    }
+                    println!();
+                    shown += 1;
+                    if shown >= 10 { break; }
+                }
+            }
         }
     }
+
+    if is_identical { 0 } else { 1 }
 }
