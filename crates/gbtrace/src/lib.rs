@@ -17,6 +17,7 @@ pub mod parquet;
 #[cfg(feature = "parquet")]
 pub mod partitioned_store;
 pub mod vram;
+pub mod format;
 
 pub use column_store::{ColumnStore, EntryView};
 pub use downsample::DownsampledStore;
