@@ -266,22 +266,6 @@ export class TestPicker extends LitElement {
           `)}
         </div>
 
-        ${Object.keys(stats).length > 0 ? html`
-          <div class="summary">
-            ${EMULATORS.filter(e => stats[e]).map(emu => {
-              const s = stats[emu];
-              const pct = Math.round(s.pass / s.total * 100);
-              return html`
-                <div class="summary-emu">
-                  <span class="name">${emu}</span>
-                  <span class="pass">${s.pass}</span>/<span class="fail">${s.fail}</span>
-                  <span class="pct">(${pct}%)</span>
-                </div>
-              `;
-            })}
-          </div>
-        ` : ''}
-
         ${suite.categories?.length ? html`
           <div class="categories">
             <span class="cat-chip ${!this._category ? 'active' : ''}"
@@ -327,6 +311,22 @@ export class TestPicker extends LitElement {
 
         ${this._loading ? html`<p class="status loading">Loading ${this._loading}...</p>` : ''}
         ${this._error ? html`<p class="status error">${this._error}</p>` : ''}
+
+        ${Object.keys(stats).length > 0 ? html`
+          <div class="summary">
+            ${EMULATORS.filter(e => stats[e]).map(emu => {
+              const s = stats[emu];
+              const pct = Math.round(s.pass / s.total * 100);
+              return html`
+                <div class="summary-emu">
+                  <span class="name">${emu}</span>
+                  <span class="pass">${s.pass}</span>/<span class="fail">${s.fail}</span>
+                  <span class="pct">(${pct}%)</span>
+                </div>
+              `;
+            })}
+          </div>
+        ` : ''}
       </div>
     `;
   }
