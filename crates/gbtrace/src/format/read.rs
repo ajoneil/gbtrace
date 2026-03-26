@@ -13,7 +13,7 @@ use arrow::array::types::UInt8Type;
 use arrow::ipc::reader::StreamReader;
 use arrow::record_batch::RecordBatch;
 
-use crate::column_store::{ColumnData, ColumnStore, TraceStore};
+use crate::column_store::TraceStore;
 use crate::error::{Error, Result};
 use crate::header::TraceHeader;
 use crate::profile::{field_type, FieldType};
@@ -29,7 +29,7 @@ struct ChunkCache {
 
 /// A decoded chunk. Groups are decompressed on demand.
 struct DecodedChunk {
-    /// Decoded groups: group_id → ColumnStore for that group's fields.
+    /// Decoded groups: group_id → Arrow RecordBatch for that group's fields.
     groups: HashMap<u8, RecordBatch>,
     /// Raw compressed group blobs for groups not yet decoded.
     raw_groups: HashMap<u8, Vec<u8>>,
