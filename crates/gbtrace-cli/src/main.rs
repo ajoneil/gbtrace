@@ -649,6 +649,67 @@ fn cmd_query(input: &PathBuf, conditions: &[String], max: usize, context: usize)
         return 1;
     }
 
+    let store = match gbtrace::store::open_trace_store(input) {
+        Ok(s) => s,
+        Err(e) => { eprintln!("Error: {e}"); return 1; }
+    };
+
+    let fields = store.header().fields.clone();
+
+    // Use the store's query_range for the first condition, then filter
+    let condition_str = conditions.join(" AND ");
+    let matches = match store.query_range(&condition_str, 0, store.entry_count()) {
+        Ok(m) => m,
+        Err(e) => { eprintln!("Error: {e}"); return 1; }
+    };
+
+    let matches_found = matches.len();
+    let displayed_matches = matches_found.min(max);
+
+    for (display_idx, &entry_idx) in matches.iter().enumerate() {
+        if display_idx >= max { break; }
+        let i = entry_idx as usize;
+
+        if display_idx > 0 { println!("  ---"); }
+
+        // Context before
+        if context > 0 {
+            let ctx_start = if i >= context { i - context } else { 0 };
+            for ci in ctx_start..i {
+                print!("  [{ci}]");
+                print_store_entry(&*store, ci, &fields);
+                println!();
+            }
+        }
+
+        // The match
+        print!("> [{i}]");
+        print_store_entry(&*store, i, &fields);
+        println!();
+
+        // Context after
+        if context > 0 {
+            let ctx_end = (i + context + 1).min(store.entry_count());
+            for ci in (i + 1)..ctx_end {
+                print!("  [{ci}]");
+                print_store_entry(&*store, ci, &fields);
+                println!();
+            }
+        }
+    }
+
+    // Mimic the old output format
+    println!("\n{matches_found} match(es) found.");
+    if displayed_matches < matches_found {
+        println!("  (showing first {displayed_matches}, use --max to see more)");
+    }
+
+    0
+}
+
+// Keep old cmd_query code below for reference but it's dead
+fn _cmd_query_old(input: &PathBuf, conditions: &[String], max: usize, context: usize) -> i32 {
+    let _ = (input, conditions, max, context);
     let condition = match parse_cli_conditions(conditions) {
         Ok(c) => c,
         Err(e) => { eprintln!("Error: {e}"); return 1; }
@@ -662,7 +723,6 @@ fn cmd_query(input: &PathBuf, conditions: &[String], max: usize, context: usize)
     let fields = reader.header().fields.clone();
     let mut evaluator = ConditionEvaluator::new(condition);
 
-    // Ring buffer for context-before entries
     let mut ring: Vec<(u64, TraceEntry)> = Vec::new();
     let mut matches_found: usize = 0;
     let mut entry_idx: u64 = 0;
@@ -1010,44 +1070,30 @@ fn display_val(v: &Value) -> String {
     }
 }
 
-/// Load trace for diff — returns the store and an index map for aligned access.
-/// The index map handles collapse (tcycle→instruction) and sync alignment.
-fn load_trace_for_diff(
-    path: &PathBuf,
-    _collapse_tcycle: bool,
-    _align_pc: Option<u16>,
-    _sync: Option<&str>,
-) -> Result<(gbtrace::TraceHeader, Vec<gbtrace::TraceEntry>), String> {
-    // Load as TraceStore (GbtraceStore for .gbtrace, or convert JSONL on the fly)
-    let store = gbtrace::store::open_trace_store(path)
-        .map_err(|e| format!("Error opening {}: {e}", path.display()))?;
+fn load_store(path: &PathBuf) -> Result<Box<dyn gbtrace::store::TraceStore>, String> {
+    gbtrace::store::open_trace_store(path)
+        .map_err(|e| format!("Error opening {}: {e}", path.display()))
+}
 
-    // Note: collapse/align/sync are now handled by DiffStore in the WASM layer.
-    // For the CLI diff, we load all entries directly for now.
-    // TODO: use DiffStore for CLI diff too.
-    let header = store.header().clone();
-    let fields = header.fields.clone();
-    let entries: Vec<gbtrace::TraceEntry> = (0..store.entry_count())
-        .map(|i| {
-            let mut entry = gbtrace::TraceEntry::new();
-            for (col, name) in fields.iter().enumerate() {
-                if store.is_null(col, i) { continue; }
-                let ft = gbtrace::profile::field_type(name);
-                match ft {
-                    gbtrace::FieldType::Bool => entry.set_bool(name, store.get_bool(col, i)),
-                    gbtrace::FieldType::Str => {
-                        let s = store.get_str(col, i);
-                        if !s.is_empty() { entry.set_str(name, &s); }
-                    }
-                    gbtrace::FieldType::UInt64 => entry.set_cy(store.get_numeric(col, i)),
-                    gbtrace::FieldType::UInt16 => entry.set_u16(name, store.get_numeric(col, i) as u16),
-                    gbtrace::FieldType::UInt8 => entry.set_u8(name, store.get_numeric(col, i) as u8),
-                }
+/// Build TraceEntry from a store row (for the legacy diff module).
+fn store_entry_at(store: &dyn gbtrace::store::TraceStore, row: usize) -> gbtrace::TraceEntry {
+    let fields = &store.header().fields;
+    let mut entry = gbtrace::TraceEntry::new();
+    for (col, name) in fields.iter().enumerate() {
+        if store.is_null(col, row) { continue; }
+        let ft = gbtrace::profile::field_type(name);
+        match ft {
+            gbtrace::FieldType::Bool => entry.set_bool(name, store.get_bool(col, row)),
+            gbtrace::FieldType::Str => {
+                let s = store.get_str(col, row);
+                if !s.is_empty() { entry.set_str(name, &s); }
             }
-            entry
-        })
-        .collect();
-    Ok((header, entries))
+            gbtrace::FieldType::UInt64 => entry.set_cy(store.get_numeric(col, row)),
+            gbtrace::FieldType::UInt16 => entry.set_u16(name, store.get_numeric(col, row) as u16),
+            gbtrace::FieldType::UInt8 => entry.set_u8(name, store.get_numeric(col, row) as u8),
+        }
+    }
+    entry
 }
 
 fn cmd_diff(
@@ -1065,6 +1111,7 @@ fn cmd_diff(
     classify: bool,
 ) -> i32 {
     use gbtrace::diff::{AlignmentStrategy, DiffConfig, TraceDiffer};
+    use gbtrace::comparison::TraceComparison;
 
     let alignment = match align {
         "sequence" => AlignmentStrategy::Sequence,
@@ -1083,60 +1130,54 @@ fn cmd_diff(
 
     let differ = TraceDiffer::new(config);
 
-    // Peek at all headers to detect trigger mismatches and find common start PC
-    let headers: Vec<_> = {
-        let mut h = vec![];
-        for path in std::iter::once(path_a).chain(trace_b_paths.iter()) {
-            match AnyTraceReader::open(path) {
-                Ok(r) => h.push(r.header().clone()),
-                Err(e) => { eprintln!("Error: {e}"); return 1; }
-            }
-        }
-        h
-    };
-
-    let any_tcycle = headers.iter().any(|h| matches!(h.trigger, gbtrace::header::Trigger::Tcycle));
-    let any_instruction = headers.iter().any(|h| !matches!(h.trigger, gbtrace::header::Trigger::Tcycle));
-    let needs_collapse = any_tcycle && any_instruction;
-
-    // Find common start PC by peeking first entries
-    let align_pc = if needs_collapse || skip_boot {
-        // Find the max starting PC across all traces (after potential collapse)
-        let mut start_pcs = vec![];
-        for path in std::iter::once(path_a).chain(trace_b_paths.iter()) {
-            if let Ok(r) = AnyTraceReader::open(path) {
-                if let Some(Ok(entry)) = r.into_iter().next() {
-                    if let Some(pc) = entry.get_u16("pc") {
-                        start_pcs.push(pc);
-                    }
-                }
-            }
-        }
-        if start_pcs.len() > 1 && start_pcs.iter().any(|&p| p != start_pcs[0]) {
-            Some(*start_pcs.iter().max().unwrap())
-        } else {
-            None
-        }
-    } else {
-        None
-    };
-
-    // Load traces with auto-collapse and alignment
-    let (header_a, entries_a) = match load_trace_for_diff(path_a, needs_collapse, align_pc, sync) {
-        Ok(v) => v,
+    // Load all stores
+    let store_a = match load_store(path_a) {
+        Ok(s) => s,
         Err(e) => { eprintln!("{e}"); return 1; }
     };
 
-    // Multi-trace comparison
-    if trace_b_paths.len() > 1 {
-        let mut traces = vec![(header_a, entries_a)];
+    let stores_b: Vec<Box<dyn gbtrace::store::TraceStore>> = {
+        let mut v = vec![];
         for path in trace_b_paths {
-            match load_trace_for_diff(path, needs_collapse, align_pc, sync) {
-                Ok((h, e)) => traces.push((h, e)),
+            match load_store(path) {
+                Ok(s) => v.push(s),
                 Err(e) => { eprintln!("{e}"); return 1; }
             }
         }
-        let multi = match differ.compare_multi(traces) {
+        v
+    };
+
+    // Use TraceComparison to align stores (handles collapse + sync)
+    let sync_mode = if skip_boot { Some("pc") } else { sync };
+
+    // Multi-trace comparison
+    if stores_b.len() > 1 {
+        let mut all_entries = vec![];
+
+        // Build entries for store A (used as base for all comparisons)
+        let comp_first = match TraceComparison::align(&*store_a, &*stores_b[0], sync_mode) {
+            Ok(c) => c,
+            Err(e) => { eprintln!("Error aligning: {e}"); return 1; }
+        };
+        let header_a = store_a.header().clone();
+        let entries_a: Vec<gbtrace::TraceEntry> = comp_first.map_a.iter()
+            .map(|&i| store_entry_at(&*store_a, i))
+            .collect();
+        all_entries.push((header_a, entries_a));
+
+        for store_b in &stores_b {
+            let comp = match TraceComparison::align(&*store_a, &**store_b, sync_mode) {
+                Ok(c) => c,
+                Err(e) => { eprintln!("Error aligning: {e}"); return 1; }
+            };
+            let header_b = store_b.header().clone();
+            let entries_b: Vec<gbtrace::TraceEntry> = comp.map_b.iter()
+                .map(|&i| store_entry_at(&**store_b, i))
+                .collect();
+            all_entries.push((header_b, entries_b));
+        }
+
+        let multi = match differ.compare_multi(all_entries) {
             Ok(r) => r,
             Err(e) => { eprintln!("Error: {e}"); return 1; }
         };
@@ -1154,10 +1195,19 @@ fn cmd_diff(
     }
 
     // Single pair comparison
-    let (header_b, entries_b) = match load_trace_for_diff(&trace_b_paths[0], needs_collapse, align_pc, sync) {
-        Ok(v) => v,
-        Err(e) => { eprintln!("{e}"); return 1; }
+    let comp = match TraceComparison::align(&*store_a, &*stores_b[0], sync_mode) {
+        Ok(c) => c,
+        Err(e) => { eprintln!("Error aligning: {e}"); return 1; }
     };
+
+    let header_a = store_a.header().clone();
+    let header_b = stores_b[0].header().clone();
+    let entries_a: Vec<gbtrace::TraceEntry> = comp.map_a.iter()
+        .map(|&i| store_entry_at(&*store_a, i))
+        .collect();
+    let entries_b: Vec<gbtrace::TraceEntry> = comp.map_b.iter()
+        .map(|&i| store_entry_at(&*stores_b[0], i))
+        .collect();
 
     let result = match differ.compare(&header_a, entries_a, &header_b, entries_b) {
         Ok(r) => r,

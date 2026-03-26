@@ -57,8 +57,56 @@ pub trait TraceStore {
     }
 
     /// Evaluate a parsed condition against a single row.
-    fn eval_condition_trait(&self, _cond: &crate::query::Condition, _row: usize) -> bool {
-        false
+    /// Default implementation handles stateless conditions via get_numeric/get_str.
+    fn eval_condition_trait(&self, cond: &crate::query::Condition, row: usize) -> bool {
+        use crate::query::Condition;
+        match cond {
+            Condition::FieldEquals { field, value } => {
+                if let Some(col) = self.field_col(field) {
+                    let v = self.get_numeric(col, row);
+                    // Compare as hex (the display format used by queries)
+                    let hex = format!("{:x}", v);
+                    let hex2 = format!("{:02x}", v);
+                    value == &hex || value == &hex2 || value == &format!("{v}")
+                } else {
+                    false
+                }
+            }
+            Condition::FieldChanges { field } => {
+                if row == 0 { return false; }
+                if let Some(col) = self.field_col(field) {
+                    self.get_numeric(col, row) != self.get_numeric(col, row - 1)
+                } else {
+                    false
+                }
+            }
+            Condition::FieldChangesTo { field, value } => {
+                if row == 0 { return false; }
+                if let Some(col) = self.field_col(field) {
+                    let cur = self.get_numeric(col, row);
+                    let prev = self.get_numeric(col, row - 1);
+                    if cur == prev { return false; }
+                    let hex = format!("{:02x}", cur);
+                    value == &hex || value == &format!("{cur}")
+                } else {
+                    false
+                }
+            }
+            Condition::FieldChangesFrom { field, value } => {
+                if row == 0 { return false; }
+                if let Some(col) = self.field_col(field) {
+                    let cur = self.get_numeric(col, row);
+                    let prev = self.get_numeric(col, row - 1);
+                    if cur == prev { return false; }
+                    let hex = format!("{:02x}", prev);
+                    value == &hex || value == &format!("{prev}")
+                } else {
+                    false
+                }
+            }
+            // Semantic conditions (PPU mode, LCD on/off, etc.) need previous row state
+            _ => false,
+        }
     }
 
     /// Downsample a field for chart display. Returns min/max pairs per bucket.
