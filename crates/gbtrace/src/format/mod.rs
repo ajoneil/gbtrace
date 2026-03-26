@@ -14,6 +14,7 @@
 
 pub mod write;
 pub mod read;
+pub mod convert;
 
 pub const MAGIC: &[u8; 4] = b"GBTR";
 pub const VERSION: u8 = 1;

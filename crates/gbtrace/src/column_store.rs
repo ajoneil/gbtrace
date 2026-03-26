@@ -874,17 +874,34 @@ impl<'a> EntryView<'a> {
 #[cfg(feature = "parquet")]
 use crate::parquet::ParquetTraceReader;
 
-/// Load a trace store from any supported format. Returns a partitioned store for
-/// parquet (row groups decoded on demand) or an eager store for JSONL.
+/// Load a trace store from any supported format.
+/// Detects format by file content (magic bytes), falling back to extension.
+/// JSONL and parquet files are converted to the native format on load.
 pub fn open_trace_store(path: impl AsRef<std::path::Path>) -> Result<Box<dyn TraceStore>> {
     let path = path.as_ref();
-    #[cfg(feature = "parquet")]
-    if path.extension().is_some_and(|ext| ext == "parquet") {
-        let data = std::fs::read(path)?;
-        let store = crate::partitioned_store::PartitionedStore::from_bytes(&data)?;
+    let data = std::fs::read(path)?;
+    open_trace_store_from_bytes(&data)
+}
+
+/// Load from in-memory bytes, detecting format by magic.
+/// JSONL and parquet are converted to native format on load.
+pub fn open_trace_store_from_bytes(data: &[u8]) -> Result<Box<dyn TraceStore>> {
+    // Native .gbtrace format
+    if data.len() >= 4 && &data[..4] == crate::format::MAGIC {
+        let store = crate::format::read::GbtraceStore::from_bytes(data)?;
         return Ok(Box::new(store));
     }
-    Ok(Box::new(load_from_jsonl(path)?))
+
+    // Legacy parquet — convert to native via PartitionedStore read
+    #[cfg(feature = "parquet")]
+    if data.len() >= 4 && &data[..4] == b"PAR1" {
+        let store = crate::partitioned_store::PartitionedStore::from_bytes(data)?;
+        return Ok(Box::new(store));
+    }
+
+    // JSONL — convert to native format
+    let store = crate::format::convert::jsonl_to_store(data)?;
+    Ok(Box::new(store))
 }
 
 /// Load a column store from any supported trace file format (eager).

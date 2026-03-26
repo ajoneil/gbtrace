@@ -3,6 +3,7 @@ use std::process;
 
 use clap::{Parser, Subcommand};
 use gbtrace::{AnyTraceReader, Condition, ConditionEvaluator, ParquetTraceWriter, TraceEntry, TraceWriter};
+use gbtrace::header::TraceHeader;
 use serde_json::Value;
 
 #[derive(Parser)]
@@ -171,15 +172,15 @@ fn main() {
 // ---------------------------------------------------------------------------
 
 fn cmd_info(path: &PathBuf) -> i32 {
-    let reader = match AnyTraceReader::open(path) {
-        Ok(r) => r,
+    let store = match gbtrace::column_store::open_trace_store(path) {
+        Ok(s) => s,
         Err(e) => {
             eprintln!("Error: {e}");
             return 1;
         }
     };
 
-    let h = reader.header();
+    let h = store.header();
     println!("File:      {}", path.display());
     println!("Emulator:  {}", h.emulator);
     println!("Version:   {}", h.emulator_version);
@@ -190,18 +191,13 @@ fn cmd_info(path: &PathBuf) -> i32 {
     println!("ROM hash:  {}", h.rom_sha256);
     println!("Fields:    {}", h.fields.join(", "));
 
-    let mut count: u64 = 0;
-    for result in reader {
-        match result {
-            Ok(_) => count += 1,
-            Err(e) => {
-                eprintln!("Error reading entry {count}: {e}");
-                return 1;
-            }
-        }
-    }
-
+    let count = store.entry_count();
     println!("Entries:   {count}");
+
+    let boundaries = store.frame_boundaries();
+    if !boundaries.is_empty() {
+        println!("Frames:    {}", boundaries.len());
+    }
 
     if let Ok(meta) = std::fs::metadata(path) {
         let size = meta.len();
@@ -338,14 +334,10 @@ fn cmd_convert(input: &PathBuf, output: Option<PathBuf>) -> i32 {
             return 1;
         }
         None => {
-            let ext = input.extension().and_then(|e| e.to_str()).unwrap_or("");
-            if ext == "parquet" {
-                input.with_extension("gbtrace")
-            } else {
-                let stem = input.file_stem().and_then(|s| s.to_str()).unwrap_or("trace");
-                let stem = stem.strip_suffix(".gbtrace").unwrap_or(stem);
-                input.with_file_name(format!("{stem}.gbtrace.parquet"))
-            }
+            // Default: produce .gbtrace binary format
+            let stem = input.file_stem().and_then(|s| s.to_str()).unwrap_or("trace");
+            let stem = stem.strip_suffix(".gbtrace").unwrap_or(stem);
+            input.with_file_name(format!("{stem}.gbtrace"))
         }
     };
 
@@ -371,7 +363,7 @@ fn cmd_convert(input: &PathBuf, output: Option<PathBuf>) -> i32 {
     let header = reader.header().clone();
 
     // Extract frame boundaries from the source for preservation during convert.
-    let frame_boundaries: Vec<u64> = if input.extension().is_some_and(|e| e == "parquet") {
+    let frame_boundaries: Vec<u64> = if !is_stdin {
         gbtrace::column_store::open_trace_store(input)
             .map(|store| store.frame_boundaries().iter().map(|&b| b as u64).collect())
             .unwrap_or_default()
@@ -379,90 +371,214 @@ fn cmd_convert(input: &PathBuf, output: Option<PathBuf>) -> i32 {
         vec![]
     };
 
-    let is_parquet_output = output.extension().is_some_and(|e| e == "parquet");
+    let out_ext = output.extension().and_then(|e| e.to_str()).unwrap_or("");
+    let out_path_str = output.to_string_lossy();
 
-    if is_parquet_output {
-        let mut writer = match ParquetTraceWriter::create(&output, &header) {
-            Ok(w) => w,
-            Err(e) => {
-                eprintln!("Error creating output: {e}");
-                return 1;
-            }
-        };
-
-        let mut count: u64 = 0;
-        let mut boundary_idx = 0;
-        for result in reader {
-            match result {
-                Ok(entry) => {
-                    // Mark frame boundaries at the correct positions
-                    while boundary_idx < frame_boundaries.len()
-                        && frame_boundaries[boundary_idx] == count
-                    {
-                        let _ = writer.mark_frame();
-                        boundary_idx += 1;
-                    }
-                    if let Err(e) = writer.write_entry(&entry) {
-                        eprintln!("Error writing entry {count}: {e}");
-                        return 1;
-                    }
-                    count += 1;
-                }
-                Err(e) => {
-                    eprintln!("Error reading entry {count}: {e}");
-                    return 1;
-                }
-            }
-        }
-
-        if let Err(e) = writer.finish() {
-            eprintln!("Error finalizing: {e}");
-            return 1;
-        }
-
-        let input_size = std::fs::metadata(input).map(|m| m.len()).unwrap_or(0);
-        let output_size = std::fs::metadata(&output).map(|m| m.len()).unwrap_or(0);
-        let ratio = if output_size > 0 {
-            input_size as f64 / output_size as f64
-        } else {
-            0.0
-        };
-        println!("Converted {count} entries to {}", output.display());
-        println!("  {input_size} bytes -> {output_size} bytes ({ratio:.1}x compression)");
+    if out_ext == "parquet" || out_path_str.ends_with(".gbtrace.parquet") {
+        // Output as parquet (legacy)
+        convert_to_parquet(reader, &output, &header, &frame_boundaries)
+    } else if out_ext == "gbtrace" && !out_path_str.ends_with(".gbtrace.jsonl") {
+        // Output as native .gbtrace binary
+        convert_to_gbtrace(reader, &output, &header, &frame_boundaries)
     } else {
         // Output as JSONL
-        let mut writer = match TraceWriter::create(&output, &header) {
-            Ok(w) => w,
-            Err(e) => {
-                eprintln!("Error creating output: {e}");
-                return 1;
-            }
-        };
+        convert_to_jsonl(reader, &output, &header)
+    }
+}
 
-        let mut count: u64 = 0;
-        for result in reader {
-            match result {
-                Ok(entry) => {
-                    if let Err(e) = writer.write_entry(&entry) {
-                        eprintln!("Error writing entry {count}: {e}");
-                        return 1;
-                    }
-                    count += 1;
-                }
-                Err(e) => {
-                    eprintln!("Error reading entry {count}: {e}");
-                    return 1;
-                }
-            }
-        }
+fn convert_to_gbtrace(
+    reader: AnyTraceReader,
+    output: &PathBuf,
+    header: &TraceHeader,
+    frame_boundaries: &[u64],
+) -> i32 {
+    use gbtrace::format::write::GbtraceWriter;
+    use gbtrace::format::FieldGroup;
+    use gbtrace::format::read::GbtraceStore;
+    use gbtrace::profile::{field_type, field_nullable, FieldType};
 
-        if let Err(e) = writer.finish() {
-            eprintln!("Error finalizing: {e}");
+    // Derive field groups from the header
+    let groups = gbtrace::format::read::derive_groups_pub(&header.fields);
+
+    let mut writer = match GbtraceWriter::create(output, header, &groups) {
+        Ok(w) => w,
+        Err(e) => {
+            eprintln!("Error creating output: {e}");
             return 1;
         }
-        println!("Converted {count} entries to {}", output.display());
+    };
+
+    let mut count: u64 = 0;
+    let mut boundary_idx = 0;
+
+    for result in reader {
+        match result {
+            Ok(entry) => {
+                // Mark frame boundaries at the correct positions
+                while boundary_idx < frame_boundaries.len()
+                    && frame_boundaries[boundary_idx] == count
+                {
+                    let _ = writer.mark_frame(None);
+                    boundary_idx += 1;
+                }
+
+                // Set all field values from the entry
+                for (col, name) in header.fields.iter().enumerate() {
+                    let val = entry.get(name);
+                    let ft = field_type(name);
+                    let nullable = field_nullable(name);
+
+                    if nullable && val.is_none() {
+                        writer.set_null(col);
+                        continue;
+                    }
+
+                    match ft {
+                        FieldType::UInt64 => {
+                            writer.set_u64(col, val.and_then(|v| v.as_u64()).unwrap_or(0));
+                        }
+                        FieldType::UInt16 => {
+                            let v = val
+                                .and_then(|v| v.as_u64().or_else(|| {
+                                    v.as_str().and_then(|s| {
+                                        let s = s.strip_prefix("0x").unwrap_or(s);
+                                        u64::from_str_radix(s, 16).ok()
+                                    })
+                                }))
+                                .unwrap_or(0) as u16;
+                            if nullable && v == 0 { writer.set_null(col); }
+                            else { writer.set_u16(col, v); }
+                        }
+                        FieldType::UInt8 => {
+                            let v = val
+                                .and_then(|v| v.as_u64().or_else(|| {
+                                    v.as_str().and_then(|s| {
+                                        let s = s.strip_prefix("0x").unwrap_or(s);
+                                        u64::from_str_radix(s, 16).ok()
+                                    })
+                                }))
+                                .unwrap_or(0) as u8;
+                            if nullable && v == 0 { writer.set_null(col); }
+                            else { writer.set_u8(col, v); }
+                        }
+                        FieldType::Bool => {
+                            writer.set_bool(col, val.and_then(|v| v.as_bool()).unwrap_or(false));
+                        }
+                        FieldType::Str => {
+                            let s = val.and_then(|v| v.as_str()).unwrap_or("");
+                            if nullable && s.is_empty() { writer.set_null(col); }
+                            else { writer.set_str(col, s); }
+                        }
+                    }
+                }
+
+                if let Err(e) = writer.finish_entry() {
+                    eprintln!("Error writing entry {count}: {e}");
+                    return 1;
+                }
+                count += 1;
+            }
+            Err(e) => {
+                eprintln!("Error reading entry {count}: {e}");
+                return 1;
+            }
+        }
     }
 
+    if let Err(e) = writer.finish() {
+        eprintln!("Error finalizing: {e}");
+        return 1;
+    }
+
+    let input_size = std::fs::metadata("").map(|m| m.len()).unwrap_or(0);
+    let output_size = std::fs::metadata(output).map(|m| m.len()).unwrap_or(0);
+    println!("Converted {count} entries to {} ({output_size} bytes)", output.display());
+    0
+}
+
+fn convert_to_parquet(
+    reader: AnyTraceReader,
+    output: &PathBuf,
+    header: &TraceHeader,
+    frame_boundaries: &[u64],
+) -> i32 {
+    let mut writer = match ParquetTraceWriter::create(output, header) {
+        Ok(w) => w,
+        Err(e) => {
+            eprintln!("Error creating output: {e}");
+            return 1;
+        }
+    };
+
+    let mut count: u64 = 0;
+    let mut boundary_idx = 0;
+    for result in reader {
+        match result {
+            Ok(entry) => {
+                while boundary_idx < frame_boundaries.len()
+                    && frame_boundaries[boundary_idx] == count
+                {
+                    let _ = writer.mark_frame();
+                    boundary_idx += 1;
+                }
+                if let Err(e) = writer.write_entry(&entry) {
+                    eprintln!("Error writing entry {count}: {e}");
+                    return 1;
+                }
+                count += 1;
+            }
+            Err(e) => {
+                eprintln!("Error reading entry {count}: {e}");
+                return 1;
+            }
+        }
+    }
+
+    if let Err(e) = writer.finish() {
+        eprintln!("Error finalizing: {e}");
+        return 1;
+    }
+
+    let output_size = std::fs::metadata(output).map(|m| m.len()).unwrap_or(0);
+    println!("Converted {count} entries to {} ({output_size} bytes)", output.display());
+    0
+}
+
+fn convert_to_jsonl(
+    reader: AnyTraceReader,
+    output: &PathBuf,
+    header: &TraceHeader,
+) -> i32 {
+    let mut writer = match TraceWriter::create(output, header) {
+        Ok(w) => w,
+        Err(e) => {
+            eprintln!("Error creating output: {e}");
+            return 1;
+        }
+    };
+
+    let mut count: u64 = 0;
+    for result in reader {
+        match result {
+            Ok(entry) => {
+                if let Err(e) = writer.write_entry(&entry) {
+                    eprintln!("Error writing entry {count}: {e}");
+                    return 1;
+                }
+                count += 1;
+            }
+            Err(e) => {
+                eprintln!("Error reading entry {count}: {e}");
+                return 1;
+            }
+        }
+    }
+
+    if let Err(e) = writer.finish() {
+        eprintln!("Error finalizing: {e}");
+        return 1;
+    }
+    println!("Converted {count} entries to {}", output.display());
     0
 }
 
@@ -698,6 +814,47 @@ fn print_entry_fields(entry: &TraceEntry, fields: &[String]) {
 }
 
 fn cmd_query_last(input: &PathBuf, n: usize) -> i32 {
+    let store = match gbtrace::column_store::open_trace_store(input) {
+        Ok(s) => s,
+        Err(e) => { eprintln!("Error: {e}"); return 1; }
+    };
+
+    let fields = store.header().fields.clone();
+    let total = store.entry_count();
+    let start = total.saturating_sub(n);
+
+    for i in start..total {
+        print!(" ");
+        print_store_entry(&*store, i, &fields);
+        println!();
+    }
+
+    0
+}
+
+fn print_store_entry(store: &dyn gbtrace::column_store::TraceStore, row: usize, fields: &[String]) {
+    use gbtrace::profile::{field_type, FieldType};
+    for (col, name) in fields.iter().enumerate() {
+        if store.is_null(col, row) { continue; }
+        let ft = field_type(name);
+        match ft {
+            FieldType::Bool => {
+                let v = store.get_bool(col, row);
+                print!(" {name}={v}");
+            }
+            FieldType::Str => {
+                let v = store.get_str(col, row);
+                if !v.is_empty() { print!(" {name}={v}"); }
+            }
+            _ => {
+                let v = store.get_numeric(col, row);
+                print!(" {name}={v:02x}");
+            }
+        }
+    }
+}
+
+fn _cmd_query_last_old(input: &PathBuf, n: usize) -> i32 {
     let reader = match AnyTraceReader::open(input) {
         Ok(r) => r,
         Err(e) => { eprintln!("Error: {e}"); return 1; }
