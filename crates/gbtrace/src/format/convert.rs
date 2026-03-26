@@ -16,14 +16,14 @@ use super::write::GbtraceWriter;
 /// Writes to a temp file, then loads it back.
 pub fn jsonl_to_store(data: &[u8]) -> Result<GbtraceStore> {
     let owned = data.to_vec();
-    let reader = crate::reader::TraceReader::from_reader(std::io::Cursor::new(owned))?;
+    let reader = crate::reader::JsonlReader::from_reader(std::io::Cursor::new(owned))?;
     let header = reader.header().clone();
     reader_to_store(header, reader)
 }
 
 /// Convert a JSONL file to a `GbtraceStore`.
 pub fn jsonl_file_to_store(path: &std::path::Path) -> Result<GbtraceStore> {
-    let reader = crate::reader::TraceReader::open(path)?;
+    let reader = crate::reader::JsonlReader::open(path)?;
     let header = reader.header().clone();
     reader_to_store(header, reader)
 }
