@@ -110,8 +110,8 @@ pub unsafe extern "C" fn gbtrace_writer_field_type(
     w: *const GbtraceWriter,
     field: usize,
 ) -> i32 {
-    if field >= (*w).field_types.len() { return -1; }
-    match (*w).field_types[field] {
+    if field >= (&(*w).field_types).len() { return -1; }
+    match (&(*w).field_types)[field] {
         FieldType::UInt8 => 0,
         FieldType::UInt16 => 1,
         FieldType::UInt64 => 2,
