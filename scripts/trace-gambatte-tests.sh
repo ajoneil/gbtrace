@@ -75,17 +75,10 @@ elif echo "$NAME" | grep -qP '_out[0-9A-Fa-f]+$'; then
     expected_hex=$(echo "$NAME" | grep -oP '(?<=_out)[0-9A-Fa-f]+$')
     tmp_render="/tmp/gbtrace_render_${NAME}_${ADAPTER}_$$"
     mkdir -p "$tmp_render"
-    # Gambatte tests show result on frame 15 — render all and check the last
-    num_frames=$("$CLI" info "$tmp_trace" 2>/dev/null | grep Frames | awk '{print $2}')
-    if [[ -n "$num_frames" ]] && [[ "$num_frames" -gt 0 ]]; then
-        "$CLI" render "$tmp_trace" --output "$tmp_render" 2>/dev/null
-        # Check frames from last to first — some adapters produce an extra frame
-        for png in $(ls "$tmp_render"/*.png 2>/dev/null | sort -r); do
-            if python3 "$(dirname "$0")/check-gambatte-hex.py" "$expected_hex" "$png" 2>/dev/null; then
-                status="pass"
-                break
-            fi
-        done
+    "$CLI" render "$tmp_trace" --frames 15 --output "$tmp_render" >/dev/null 2>&1
+    png=$(ls "$tmp_render"/*.png 2>/dev/null | head -1)
+    if [[ -n "$png" ]] && python3 "$(dirname "$0")/check-gambatte-hex.py" "$expected_hex" "$png" 2>/dev/null; then
+        status="pass"
     fi
     rm -rf "$tmp_render"
 fi
