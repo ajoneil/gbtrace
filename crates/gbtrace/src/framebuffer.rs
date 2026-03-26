@@ -5,7 +5,7 @@
 //! pixel value ('0'-'3'). Pixels are pushed left-to-right per scanline,
 //! with scanline boundaries detected from `ly` changes.
 
-use crate::column_store::TraceStore;
+use crate::store::TraceStore;
 use crate::downsample::DownsampledStore;
 
 pub const LCD_WIDTH: usize = 160;

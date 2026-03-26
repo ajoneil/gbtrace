@@ -25,7 +25,7 @@ fn to_js(value: &impl serde::Serialize) -> Result<JsValue, JsError> {
 /// decoded at a time. JSONL files and post-diff stores are loaded eagerly.
 #[wasm_bindgen]
 pub struct TraceStore {
-    store: Box<dyn gbtrace::column_store::TraceStore>,
+    store: Box<dyn gbtrace::store::TraceStore>,
     rom: Option<Vec<u8>>,
     /// Original bytes for re-loading when sync changes.
     original_bytes: Option<Vec<u8>>,
@@ -42,7 +42,7 @@ impl TraceStore {
     /// Supports native .gbtrace, legacy parquet, and JSONL.
     #[wasm_bindgen(constructor)]
     pub fn from_bytes(data: &[u8]) -> Result<TraceStore, JsError> {
-        let store = gbtrace::column_store::open_trace_store_from_bytes(data)
+        let store = gbtrace::store::open_trace_store_from_bytes(data)
             .map_err(|e| JsError::new(&format!("{e}")))?;
         Ok(TraceStore { store, rom: None, original_bytes: Some(data.to_vec()), downsample_map: None, vram_cache: None })
     }
@@ -629,7 +629,7 @@ impl TraceStore {
 /// Sync modes: "pc" (default), "none", or any condition string like "ly=0", "lcdc&80".
 #[wasm_bindgen(js_name = prepareForDiff)]
 pub fn prepare_for_diff(a: &TraceStore, b: &TraceStore, sync: Option<String>) -> Result<JsValue, JsError> {
-    let diff = gbtrace::diff_store::DiffStore::align(
+    let diff = gbtrace::comparison::TraceComparison::align(
         &*a.store, &*b.store, sync.as_deref()
     ).map_err(|e| JsError::new(&format!("{e}")))?;
 

@@ -1,20 +1,20 @@
-pub mod column_store;
+pub mod store;
+pub mod comparison;
 pub mod diff;
 pub mod disasm;
 pub mod downsample;
 pub mod entry;
+pub mod format;
 pub mod framebuffer;
 pub mod error;
 pub mod header;
 pub mod profile;
 pub mod query;
 pub mod reader;
-pub mod writer;
 pub mod vram;
-pub mod format;
-pub mod diff_store;
+pub mod writer;
 
-pub use column_store::TraceStore;
+pub use store::TraceStore;
 pub use downsample::DownsampledStore;
 pub use diff::{AlignmentStrategy, DiffConfig, DiffResult, DivergenceClass, MultiDiffResult, TraceDiffer};
 pub use entry::TraceEntry;
@@ -28,8 +28,7 @@ pub use writer::TraceWriter;
 use error::Result;
 use std::path::Path;
 
-/// Format-agnostic trace reader for JSONL files.
-/// For native .gbtrace files, use `column_store::open_trace_store` instead.
+/// JSONL trace reader. For native .gbtrace files, use `store::open_trace_store`.
 pub enum AnyTraceReader {
     Jsonl(TraceReader),
 }

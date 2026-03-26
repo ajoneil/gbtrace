@@ -13,7 +13,7 @@ use arrow::array::types::UInt8Type;
 use arrow::ipc::reader::StreamReader;
 use arrow::record_batch::RecordBatch;
 
-use crate::column_store::TraceStore;
+use crate::store::TraceStore;
 use crate::error::{Error, Result};
 use crate::header::TraceHeader;
 use crate::profile::{field_type, FieldType};

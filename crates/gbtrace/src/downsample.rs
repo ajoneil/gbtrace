@@ -3,7 +3,7 @@
 //! `DownsampledStore` presents an instruction-level view of an underlying
 //! T-cycle store by picking one entry per PC change.
 
-use crate::column_store::TraceStore;
+use crate::store::TraceStore;
 use crate::header::TraceHeader;
 
 /// A decorator that presents an instruction-level view of an underlying
