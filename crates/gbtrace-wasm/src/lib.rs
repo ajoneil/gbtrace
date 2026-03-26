@@ -40,21 +40,11 @@ pub struct TraceStore {
 #[wasm_bindgen]
 impl TraceStore {
     /// Load a trace from raw bytes (detects format automatically).
+    /// Supports native .gbtrace, legacy parquet, and JSONL.
     #[wasm_bindgen(constructor)]
     pub fn from_bytes(data: &[u8]) -> Result<TraceStore, JsError> {
-        const PARQUET_MAGIC: &[u8] = b"PAR1";
-
-        let store: Box<dyn gbtrace::column_store::TraceStore> = if data.len() >= 4 && &data[..4] == PARQUET_MAGIC {
-            Box::new(
-                gbtrace::column_store::load_partitioned_store_from_bytes(data)
-                    .map_err(|e| JsError::new(&format!("{e}")))?
-            )
-        } else {
-            Box::new(
-                gbtrace::column_store::load_column_store_from_bytes(data)
-                    .map_err(|e| JsError::new(&format!("{e}")))?
-            )
-        };
+        let store = gbtrace::column_store::open_trace_store_from_bytes(data)
+            .map_err(|e| JsError::new(&format!("{e}")))?;
         Ok(TraceStore { store, rom: None, original_bytes: Some(data.to_vec()), downsample_map: None, vram_cache: None })
     }
 
@@ -632,7 +622,8 @@ impl TraceStore {
     }
 }
 
-/// Helper: load bytes as an eager ColumnStore.
+/// Helper: load bytes as an eager ColumnStore (for diff preparation).
+/// TODO: refactor diff to work with GbtraceStore directly.
 fn load_eager_from_bytes(data: &[u8]) -> Result<ColumnStore, JsError> {
     const PARQUET_MAGIC: &[u8] = b"PAR1";
     if data.len() >= 4 && &data[..4] == PARQUET_MAGIC {
