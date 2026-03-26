@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Generate a single gbmicrotest trace: adapter + ROM → parquet
+# Generate a single gbmicrotest trace: adapter + ROM → .gbtrace
 # Usage: trace-gbmicrotest.sh <adapter-binary> <rom> <profile> <output-dir>
 set -euo pipefail
 
@@ -14,55 +14,36 @@ ADAPTER="$(basename "$BIN" | sed 's/gbtrace-//')"
 FRAMES=2
 
 TMP="/tmp/gbtrace_micro_${NAME}_${ADAPTER}_$$"
-RAW="${TMP}.gbtrace"
+TRACE="${TMP}.gbtrace"
+stderr_file="${TMP}.stderr"
 
-# Capture
-if ! "$BIN" --rom "$ROM" --profile "$PROFILE" --output "$RAW" \
+cleanup() { rm -f "$TRACE" "$stderr_file" "${ROM%.gb}.sav"; }
+trap cleanup EXIT
+
+# Capture — adapter stops when test_pass is set
+if ! "$BIN" --rom "$ROM" --profile "$PROFILE" --output "$TRACE" \
     --frames "$FRAMES" \
-    --stop-when FF82=01 --stop-when FF82=FF 2>/dev/null; then
+    --stop-when FF82=01 --stop-when FF82=FF 2>"$stderr_file"; then
     printf "%-40s %-10s ERROR\n" "$NAME" "$ADAPTER"
-    rm -f "$RAW" "${ROM%.gb}.sav"
     exit 1
 fi
 
-# Strip boot ROM entries if present
-STRIPPED="${TMP}.stripped"
-boot_rom=$("$CLI" info "$RAW" 2>/dev/null | grep 'Boot ROM' | awk '{print $3}')
-if [ "$boot_rom" = "skip" ] || [ "$boot_rom" = "none" ] || [ "$boot_rom" = "built-in" ]; then
-    cp "$RAW" "$STRIPPED"
-elif "$CLI" strip-boot "$RAW" --output "$STRIPPED" >/dev/null 2>&1; then
-    : # stripped successfully
-else
-    cp "$RAW" "$STRIPPED"
+if [[ ! -s "$TRACE" ]]; then
+    printf "%-40s %-10s ERROR (empty)\n" "$NAME" "$ADAPTER"
+    exit 1
 fi
 
-# Trim to the instruction where test_pass is set
-TRIMMED="${TMP}.trimmed"
-total_entries=$("$CLI" info "$STRIPPED" 2>/dev/null | grep Entries | awk '{print $2}')
-"$CLI" trim "$STRIPPED" --output "$TRIMMED" --until "test_pass=01" >/dev/null 2>&1
-trimmed_entries=$("$CLI" info "$TRIMMED" 2>/dev/null | grep Entries | awk '{print $2}')
-if [ "$trimmed_entries" = "$total_entries" ]; then
-    "$CLI" trim "$STRIPPED" --output "$TRIMMED" --until "test_pass=FF" >/dev/null 2>&1
-fi
-
-# Determine pass/fail
-result_pass=$("$CLI" query "$TRIMMED" -w "test_pass=01" --max 1 2>&1 | grep -cP '^\d+ match' || true)
-result_fail=$("$CLI" query "$TRIMMED" -w "test_pass=FF" --max 1 2>&1 | grep -cP '^\d+ match' || true)
-
+# Determine pass/fail from the trace data
+status="fail"
+result_pass=$("$CLI" query "$TRACE" -w "test_pass=01" --max 1 2>&1 | grep -cP '^\d+ match' || true)
 if [ "$result_pass" -gt 0 ]; then
     status="pass"
-elif [ "$result_fail" -gt 0 ]; then
-    status="fail"
-else
-    status="fail"
 fi
 
-# Convert to parquet
+# Move to output
 mkdir -p "$OUT_DIR"
-out="${OUT_DIR}/${NAME}_${ADAPTER}_${status}.gbtrace.parquet"
-"$CLI" convert "$TRIMMED" --output "$out" >/dev/null 2>&1
+out="${OUT_DIR}/${NAME}_${ADAPTER}_${status}.gbtrace"
+mv "$TRACE" "$out"
 
 entries=$("$CLI" info "$out" 2>/dev/null | grep Entries | awk '{print $2}')
 printf "%-40s %-10s %-4s %6s entries\n" "$NAME" "$ADAPTER" "${status^^}" "${entries:-?}"
-
-rm -f "$RAW" "$STRIPPED" "$TRIMMED" "${ROM%.gb}.sav"

@@ -1,9 +1,7 @@
 #!/usr/bin/env bash
-# Generate a single blargg trace: adapter + ROM → parquet
+# Generate a single blargg trace: adapter + ROM → .gbtrace
 #
-# Pass/fail detection:
-#   1. If adapter supports serial, stop on serial output and check for "Passed"
-#   2. If a .pix reference exists next to the ROM, use screenshot matching
+# Pass/fail: adapter reports "Reference match" when framebuffer matches .pix
 #
 # Usage: trace-blargg.sh <adapter-binary> <rom> <profile> <output-dir> <rom-dir>
 set -euo pipefail
@@ -32,9 +30,9 @@ PIX_REF="$(dirname "$ROM")/${NAME}.pix"
 MAX_FRAMES=1200
 TMP="/tmp/gbtrace_blargg_${NAME}_${ADAPTER}_$$"
 stderr_file="${TMP}.stderr"
-tmp_parquet="${TMP}.parquet"
+tmp_trace="${TMP}.gbtrace"
 
-cleanup() { rm -f "$stderr_file" "${ROM%.gb}.sav"; }
+cleanup() { rm -f "$stderr_file" "$tmp_trace" "${ROM%.gb}.sav"; }
 trap cleanup EXIT
 
 # --- Capture ---
@@ -43,21 +41,15 @@ if [[ -f "$PIX_REF" ]]; then
     EXTRA_ARGS+=(--reference "$PIX_REF")
 fi
 
-ADAPTER_ARGS=(
-    --rom "$ROM"
-    --profile "$PROFILE"
-    --extra-frames 2
-    --frames "$MAX_FRAMES"
-    "${EXTRA_ARGS[@]}"
-)
-
-# All adapters write parquet directly via FFI.
 (
     set +eo pipefail
-    "$BIN" "${ADAPTER_ARGS[@]}" --output "$tmp_parquet" 2>"$stderr_file" </dev/null
+    "$BIN" --rom "$ROM" --profile "$PROFILE" \
+        --extra-frames 2 --frames "$MAX_FRAMES" \
+        "${EXTRA_ARGS[@]}" \
+        --output "$tmp_trace" 2>"$stderr_file" </dev/null
 ) || true
 
-if [[ ! -s "$tmp_parquet" ]]; then
+if [[ ! -s "$tmp_trace" ]]; then
     err_msg=$(head -1 "$stderr_file" 2>/dev/null || echo "unknown")
     printf "%-40s %-10s ERROR (%s)\n" "$NAME" "$ADAPTER" "$err_msg"
     exit 1
@@ -65,15 +57,14 @@ fi
 
 # --- Determine pass/fail ---
 status="fail"
-
 if grep -q "Reference match" "$stderr_file" 2>/dev/null; then
     status="pass"
 fi
 
 # --- Output ---
 mkdir -p "$TRACE_SUBDIR"
-out="${TRACE_SUBDIR}/${NAME}_${ADAPTER}_${status}.gbtrace.parquet"
-mv "$tmp_parquet" "$out"
+out="${TRACE_SUBDIR}/${NAME}_${ADAPTER}_${status}.gbtrace"
+mv "$tmp_trace" "$out"
 
 entries=$("$CLI" info "$out" 2>/dev/null | grep Entries | awk '{print $2}')
 printf "%-40s %-10s %-4s %6s entries\n" "$NAME" "$ADAPTER" "${status^^}" "${entries:-?}"

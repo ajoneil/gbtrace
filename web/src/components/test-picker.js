@@ -77,7 +77,7 @@ const EMULATORS = ['gateboy', 'missingno', 'gambatte', 'sameboy', 'mgba'];
 
 function traceUrl(suite, rom, emulator, status = 'pass') {
   const base = rom.replace('.gb', '');
-  return `${suite.base}/${base}_${emulator}_${status}.gbtrace.parquet`;
+  return `${suite.base}/${base}_${emulator}_${status}.gbtrace`;
 }
 
 function romUrl(suite, rom) {

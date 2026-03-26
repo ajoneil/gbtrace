@@ -3,7 +3,7 @@
 
 Usage: manifest.py <trace-dir> <rom-dir>
 
-Scans trace-dir for .gbtrace.parquet files and rom-dir for .gb files,
+Scans trace-dir for .gbtrace files and rom-dir for .gb files,
 then writes manifest.json to trace-dir.
 """
 import json
@@ -26,9 +26,9 @@ def generate_manifest(trace_dir, rom_dir):
     traces = {}
     for dirpath, _, filenames in sorted(os.walk(trace_dir)):
         for fname in sorted(filenames):
-            if not fname.endswith('.gbtrace.parquet'):
+            if not fname.endswith('.gbtrace'):
                 continue
-            base = fname.replace('.gbtrace.parquet', '')
+            base = fname.replace('.gbtrace', '')
             for emu in EMULATORS:
                 for status in ['pass', 'fail']:
                     suffix = f'_{emu}_{status}'
