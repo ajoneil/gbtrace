@@ -384,6 +384,10 @@ fn read_u64(data: &[u8], pos: &mut usize) -> u64 {
 }
 
 /// Derive field groups from field names using standard grouping conventions.
+pub fn derive_groups_pub(fields: &[String]) -> Vec<FieldGroup> {
+    derive_groups(fields)
+}
+
 fn derive_groups(fields: &[String]) -> Vec<FieldGroup> {
     use crate::profile::field_nullable;
 
