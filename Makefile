@@ -36,6 +36,7 @@ EMUS ?= gambatte,sameboy,mgba,gateboy,missingno
 GBMICROTEST_TRACE_DIR := $(BUILD_DIR)/traces/gbmicrotest
 BLARGG_TRACE_DIR := $(BUILD_DIR)/traces/blargg
 MOONEYE_TRACE_DIR := $(BUILD_DIR)/traces/mooneye
+GAMBATTE_TESTS_TRACE_DIR := $(BUILD_DIR)/traces/gambatte-tests
 
 export LD_LIBRARY_PATH := $(PROJECT_DIR)/adapters/sameboy/SameBoy/build/lib:$(LD_LIBRARY_PATH)
 export CLI
@@ -58,7 +59,8 @@ $(RULES_MK): scripts/gen-rules.py
 # Uses a shell loop to handle filenames with spaces.
 .PHONY: pix-refs
 pix-refs: scripts/png-to-pix.py
-	@for png in test-suites/blargg/*.png test-suites/blargg/**/*.png test-suites/dmg-acid2/*.png; do \
+	@for png in test-suites/blargg/*.png test-suites/blargg/**/*.png test-suites/dmg-acid2/*.png \
+	            test-suites/gambatte/**/*.png test-suites/gambatte/**/**/*.png; do \
 		[ -f "$$png" ] || continue; \
 		pix="$${png%.png}.pix"; \
 		if [ ! -f "$$pix" ] || [ "$$png" -nt "$$pix" ]; then \
@@ -69,7 +71,7 @@ pix-refs: scripts/png-to-pix.py
 DMG_ACID2_REF := test-suites/dmg-acid2/reference.pix
 
 .PHONY: all adapters cli wasm traces traces-gbmicrotest traces-blargg \
-        traces-mooneye traces-dmg-acid2 manifests site serve clean
+        traces-mooneye traces-gambatte-tests traces-dmg-acid2 manifests site serve clean
 
 all: site
 
@@ -77,7 +79,7 @@ adapters: $(ADAPTER_BINS)
 
 cli: $(CLI)
 
-traces: traces-gbmicrotest traces-blargg traces-mooneye traces-dmg-acid2
+traces: traces-gbmicrotest traces-blargg traces-mooneye traces-gambatte-tests traces-dmg-acid2
 
 traces-gbmicrotest: $(RULES_MK) $(GBMICROTEST_STAMPS)
 	@echo "Generating gbmicrotest manifest..."
@@ -93,6 +95,11 @@ traces-mooneye: $(RULES_MK) $(MOONEYE_STAMPS)
 	@echo "Generating mooneye manifest..."
 	@python3 scripts/manifest.py "$(MOONEYE_TRACE_DIR)" "test-suites/mooneye"
 	@echo "=== mooneye complete ==="
+
+traces-gambatte-tests: $(RULES_MK) pix-refs $(GAMBATTE_TESTS_STAMPS)
+	@echo "Generating gambatte-tests manifest..."
+	@python3 scripts/manifest.py "$(GAMBATTE_TESTS_TRACE_DIR)" "test-suites/gambatte"
+	@echo "=== gambatte-tests complete ==="
 
 DMG_ACID2_TRACE_DIR := $(BUILD_DIR)/traces/dmg-acid2
 DMG_ACID2_ROM := test-suites/dmg-acid2/dmg-acid2.gb
