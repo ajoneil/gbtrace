@@ -4,10 +4,10 @@ on:
   workflow_dispatch:
     inputs:
       suite:
-        description: "Test suite (all, gbmicrotest, blargg, mooneye, dmg-acid2)"
+        description: "Test suite (all, gbmicrotest, blargg, mooneye, gambatte-tests, dmg-acid2)"
         default: "all"
         type: choice
-        options: [all, gbmicrotest, blargg, mooneye, dmg-acid2]
+        options: [all, gbmicrotest, blargg, mooneye, gambatte-tests, dmg-acid2]
       emulator:
         description: "Emulator (all, gambatte, sameboy, mgba, gateboy, missingno)"
         default: "all"
@@ -22,7 +22,7 @@ jobs:
     steps:
       - id: set
         run: |
-          SUITES='["gbmicrotest","blargg","mooneye","dmg-acid2"]'
+          SUITES='["gbmicrotest","blargg","mooneye","gambatte-tests","dmg-acid2"]'
           EMUS='["gambatte","sameboy","mgba","gateboy","missingno"]'
 
           if [ "${{ inputs.suite }}" != "" ] && [ "${{ inputs.suite }}" != "all" ]; then
@@ -93,7 +93,12 @@ jobs:
           EMU="${{ matrix.emulator }}"
           BIN="adapters/${EMU}/gbtrace-${EMU}"
           TRACE_DIR="build/traces/${SUITE}"
-          ROM_DIR="test-suites/${SUITE}"
+          # ROM_DIR: gambatte-tests ROMs are in test-suites/gambatte
+          if [ "$SUITE" = "gambatte-tests" ]; then
+            ROM_DIR="test-suites/gambatte"
+          else
+            ROM_DIR="test-suites/${SUITE}"
+          fi
           mkdir -p "$TRACE_DIR"
 
           MAX_JOBS=$(nproc)
@@ -122,6 +127,14 @@ jobs:
               while IFS= read -r -d '' rom; do
                 run_parallel bash scripts/trace-mooneye.sh "$BIN" "$rom" "$PROFILE" "$TRACE_DIR" "$ROM_DIR"
               done < <(find "$ROM_DIR" -name '*.gb' -print0 | sort -z)
+              ;;
+            gambatte-tests)
+              PROFILE="test-suites/gambatte/profile.toml"
+              # Generate pix references from PNGs
+              make pix-refs 2>/dev/null || true
+              while IFS= read -r -d '' rom; do
+                run_parallel bash scripts/trace-gambatte-tests.sh "$BIN" "$rom" "$PROFILE" "$TRACE_DIR" "$ROM_DIR"
+              done < <(find "$ROM_DIR" -name '*.gb' ! -name '*.gbc' -print0 | sort -z)
               ;;
             dmg-acid2)
               PROFILE="test-suites/dmg-acid2/profile.toml"
