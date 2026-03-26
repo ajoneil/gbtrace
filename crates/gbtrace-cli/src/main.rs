@@ -172,7 +172,7 @@ fn main() {
 // ---------------------------------------------------------------------------
 
 fn cmd_info(path: &PathBuf) -> i32 {
-    let store = match gbtrace::column_store::open_trace_store(path) {
+    let store = match gbtrace::store::open_trace_store(path) {
         Ok(s) => s,
         Err(e) => {
             eprintln!("Error: {e}");
@@ -212,7 +212,7 @@ fn cmd_info(path: &PathBuf) -> i32 {
 // ---------------------------------------------------------------------------
 
 fn cmd_frames(path: &PathBuf) -> i32 {
-    let store = match gbtrace::column_store::open_trace_store(path) {
+    let store = match gbtrace::store::open_trace_store(path) {
         Ok(s) => s,
         Err(e) => {
             eprintln!("Error: {e}");
@@ -250,7 +250,7 @@ fn cmd_frames(path: &PathBuf) -> i32 {
 // ---------------------------------------------------------------------------
 
 fn cmd_render(path: &PathBuf, output_dir: Option<PathBuf>, frame_filter: Option<String>) -> i32 {
-    let store = match gbtrace::column_store::open_trace_store(path) {
+    let store = match gbtrace::store::open_trace_store(path) {
         Ok(s) => s,
         Err(e) => {
             eprintln!("Error: {e}");
@@ -349,7 +349,7 @@ fn cmd_convert(input: &PathBuf, output: Option<PathBuf>) -> i32 {
 
     // Extract frame boundaries from the source for preservation during convert.
     let frame_boundaries: Vec<u64> = if !is_stdin {
-        gbtrace::column_store::open_trace_store(input)
+        gbtrace::store::open_trace_store(input)
             .map(|store| store.frame_boundaries().iter().map(|&b| b as u64).collect())
             .unwrap_or_default()
     } else {
@@ -741,7 +741,7 @@ fn print_entry_fields(entry: &TraceEntry, fields: &[String]) {
 }
 
 fn cmd_query_last(input: &PathBuf, n: usize) -> i32 {
-    let store = match gbtrace::column_store::open_trace_store(input) {
+    let store = match gbtrace::store::open_trace_store(input) {
         Ok(s) => s,
         Err(e) => { eprintln!("Error: {e}"); return 1; }
     };
@@ -759,7 +759,7 @@ fn cmd_query_last(input: &PathBuf, n: usize) -> i32 {
     0
 }
 
-fn print_store_entry(store: &dyn gbtrace::column_store::TraceStore, row: usize, fields: &[String]) {
+fn print_store_entry(store: &dyn gbtrace::store::TraceStore, row: usize, fields: &[String]) {
     use gbtrace::profile::{field_type, FieldType};
     for (col, name) in fields.iter().enumerate() {
         if store.is_null(col, row) { continue; }
@@ -913,7 +913,7 @@ fn cmd_trim_reference(input: &PathBuf, output: Option<PathBuf>, reference: PathB
     let ref_pixels: Vec<u8> = ref_str.bytes().map(|b| b.wrapping_sub(b'0').min(3)).collect();
 
     // Load store and reconstruct frames — same logic as the viewer uses.
-    let store = match gbtrace::column_store::open_trace_store(input) {
+    let store = match gbtrace::store::open_trace_store(input) {
         Ok(s) => s,
         Err(e) => { eprintln!("Error: {e}"); return 1; }
     };
@@ -1019,7 +1019,7 @@ fn load_trace_for_diff(
     _sync: Option<&str>,
 ) -> Result<(gbtrace::TraceHeader, Vec<gbtrace::TraceEntry>), String> {
     // Load as TraceStore (GbtraceStore for .gbtrace, or convert JSONL on the fly)
-    let store = gbtrace::column_store::open_trace_store(path)
+    let store = gbtrace::store::open_trace_store(path)
         .map_err(|e| format!("Error opening {}: {e}", path.display()))?;
 
     // Note: collapse/align/sync are now handled by DiffStore in the WASM layer.

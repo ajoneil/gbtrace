@@ -3,7 +3,7 @@
 //! Supports: JSONL, parquet (legacy), and existing `.gbtrace` files.
 //! Produces a `GbtraceStore` either from a file or from in-memory bytes.
 
-use crate::column_store::TraceStore;
+use crate::store::TraceStore;
 use crate::entry::TraceEntry;
 use crate::error::Result;
 use crate::header::TraceHeader;

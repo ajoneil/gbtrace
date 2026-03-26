@@ -1,6 +1,6 @@
 //! Round-trip test: write a .gbtrace file, read it back, verify correctness.
 
-use gbtrace::column_store::TraceStore;
+use gbtrace::store::TraceStore;
 use gbtrace::format::read::GbtraceStore;
 use gbtrace::format::write::GbtraceWriter;
 use gbtrace::format::FieldGroup;

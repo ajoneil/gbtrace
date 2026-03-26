@@ -1,17 +1,17 @@
-//! DiffStore: lightweight comparison view over two TraceStores.
+//! TraceComparison: lightweight comparison view over two TraceStores.
 //!
-//! Instead of copying/transforming traces for comparison, DiffStore holds
+//! Instead of copying/transforming traces for comparison, TraceComparison holds
 //! references to two original stores and maintains index mappings for
 //! alignment (sync) and downsampling (tcycle → instruction collapse).
 //!
 //! No data is copied. All reads go through the index maps to the originals.
 
-use crate::column_store::TraceStore;
+use crate::store::TraceStore;
 use crate::error::{Error, Result};
 use crate::profile::{field_type, FieldType};
 
 /// A comparison view over two trace stores.
-pub struct DiffStore<'a> {
+pub struct TraceComparison<'a> {
     pub store_a: &'a dyn TraceStore,
     pub store_b: &'a dyn TraceStore,
     /// Maps aligned index → original entry index in store A.
@@ -38,8 +38,8 @@ impl FieldDiffStats {
     }
 }
 
-impl<'a> DiffStore<'a> {
-    /// Create a DiffStore by aligning two traces.
+impl<'a> TraceComparison<'a> {
+    /// Create a TraceComparison by aligning two traces.
     ///
     /// Sync modes:
     /// - `None` or `Some("pc")`: align by first common PC value

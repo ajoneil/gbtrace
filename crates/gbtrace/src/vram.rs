@@ -4,7 +4,7 @@
 //! (0x8000-0x9FFF) at any point in the trace. Caches snapshots at frame
 //! boundaries for fast scrubbing.
 
-use crate::column_store::TraceStore;
+use crate::store::TraceStore;
 
 pub const VRAM_SIZE: usize = 8192;
 pub const VRAM_BASE: u16 = 0x8000;
