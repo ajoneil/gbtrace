@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Generate a single mooneye trace: adapter + ROM → parquet
+# Generate a single mooneye trace: adapter + ROM → .gbtrace
 #
 # Pass/fail detection:
 #   Mooneye tests execute LD B, B (opcode 0x40) when complete.
@@ -33,9 +33,9 @@ PIX_REF="$(dirname "$ROM")/${NAME}.pix"
 MAX_FRAMES=200
 TMP="/tmp/gbtrace_mooneye_${NAME}_${ADAPTER}_$$"
 stderr_file="${TMP}.stderr"
-tmp_parquet="${TMP}.parquet"
+tmp_trace="${TMP}.gbtrace"
 
-cleanup() { rm -f "$stderr_file" "${ROM%.gb}.sav"; }
+cleanup() { rm -f "$stderr_file" "$tmp_trace" "${ROM%.gb}.sav"; }
 trap cleanup EXIT
 
 # --- Capture ---
@@ -44,22 +44,15 @@ if [[ -f "$PIX_REF" ]]; then
     EXTRA_ARGS+=(--reference "$PIX_REF")
 fi
 
-ADAPTER_ARGS=(
-    --rom "$ROM"
-    --profile "$PROFILE"
-    --stop-opcode 40
-    --extra-frames 2
-    --frames "$MAX_FRAMES"
-    "${EXTRA_ARGS[@]}"
-)
-
-# All adapters write parquet directly via FFI.
 (
     set +eo pipefail
-    "$BIN" "${ADAPTER_ARGS[@]}" --output "$tmp_parquet" 2>"$stderr_file" </dev/null
+    "$BIN" --rom "$ROM" --profile "$PROFILE" \
+        --stop-opcode 40 --extra-frames 2 --frames "$MAX_FRAMES" \
+        "${EXTRA_ARGS[@]}" \
+        --output "$tmp_trace" 2>"$stderr_file" </dev/null
 ) || true
 
-if [[ ! -s "$tmp_parquet" ]]; then
+if [[ ! -s "$tmp_trace" ]]; then
     err_msg=$(head -1 "$stderr_file" 2>/dev/null || echo "unknown")
     printf "%-40s %-10s ERROR (%s)\n" "$NAME" "$ADAPTER" "$err_msg"
     exit 1
@@ -67,16 +60,14 @@ fi
 
 # --- Determine pass/fail ---
 # Check registers from the last entry: Fibonacci sequence = pass
-# b=03 c=05 d=08 e=0d h=15 l=22
-status=$("$CLI" query "$tmp_parquet" --last 1 2>&1 | \
+status=$("$CLI" query "$tmp_trace" --last 1 2>&1 | \
     grep -qP 'b=03\b.*c=05\b.*d=08\b.*e=0d\b.*h=15\b.*l=22\b' \
     && echo "pass" || echo "fail")
 
-
 # --- Output ---
 mkdir -p "$TRACE_SUBDIR"
-out="${TRACE_SUBDIR}/${NAME}_${ADAPTER}_${status}.gbtrace.parquet"
-mv "$tmp_parquet" "$out"
+out="${TRACE_SUBDIR}/${NAME}_${ADAPTER}_${status}.gbtrace"
+mv "$tmp_trace" "$out"
 
 entries=$("$CLI" info "$out" 2>/dev/null | grep Entries | awk '{print $2}')
 printf "%-40s %-10s %-4s %6s entries\n" "$NAME" "$ADAPTER" "${status^^}" "${entries:-?}"

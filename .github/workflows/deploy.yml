@@ -67,7 +67,7 @@ jobs:
           done
           echo "Trace summary:"
           for suite_dir in build/traces/*/; do
-            count=$(find "$suite_dir" -name '*.parquet' 2>/dev/null | wc -l)
+            count=$(find "$suite_dir" -name '*.gbtrace' 2>/dev/null | wc -l)
             echo "  $(basename "$suite_dir"): $count traces"
           done
 

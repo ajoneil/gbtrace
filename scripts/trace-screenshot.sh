@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Generate a trace for a screenshot test: adapter + ROM → parquet
+# Generate a trace for a screenshot test: adapter + ROM → .gbtrace
 # The adapter compares its framebuffer against the reference and stops
 # when it matches. Pass/fail is determined by whether the adapter
 # reported a reference match.
@@ -13,24 +13,24 @@ PROFILE="$3"
 REFERENCE="$4"
 OUT_DIR="$5"
 MAX_FRAMES="${6:-200}"
-CLI="${CLI:-target/release/gbtrace-cli}"
 
 NAME="$(basename "$ROM" .gb)"
 ADAPTER="$(basename "$BIN" | sed 's/gbtrace-//')"
 
 TMP="/tmp/gbtrace_screenshot_${NAME}_${ADAPTER}_$$"
 stderr_file="${TMP}.stderr"
+tmp_trace="${TMP}.gbtrace"
 
-cleanup() { rm -f "$stderr_file"; }
+cleanup() { rm -f "$stderr_file" "$tmp_trace"; }
 trap cleanup EXIT
 
 # Capture — adapter stops when framebuffer matches reference
-"$BIN" --rom "$ROM" --profile "$PROFILE" --output "${TMP}.parquet" \
+"$BIN" --rom "$ROM" --profile "$PROFILE" --output "$tmp_trace" \
     --reference "$REFERENCE" \
     --frames "$MAX_FRAMES" \
     2>"$stderr_file" || true
 
-if [[ ! -s "${TMP}.parquet" ]]; then
+if [[ ! -s "$tmp_trace" ]]; then
     printf "%-30s %-10s ERROR (capture)\n" "$NAME" "$ADAPTER"
     exit 1
 fi
@@ -45,4 +45,4 @@ else
 fi
 
 mkdir -p "$OUT_DIR"
-mv "${TMP}.parquet" "${OUT_DIR}/${NAME}_${ADAPTER}_${status}.gbtrace.parquet"
+mv "$tmp_trace" "${OUT_DIR}/${NAME}_${ADAPTER}_${status}.gbtrace"
