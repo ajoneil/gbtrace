@@ -25,7 +25,9 @@ def gen_suite(suite_name, rom_dir, profile, trace_dir, emus, script):
     stamps = []
     for emu in emus:
         for rom in roms:
-            name = os.path.splitext(os.path.basename(rom))[0]
+            # Include relative path in stamp name to avoid collisions
+            rel = os.path.relpath(rom, rom_dir)
+            name = os.path.splitext(rel)[0]
             safe = sanitize(name)
             stamp = f'{trace_dir}/.stamp_{safe}_{emu}'
             stamps.append(stamp)
@@ -71,12 +73,23 @@ def main():
         'scripts/trace-mooneye.sh',
     )
 
+    gambatte_stamps = gen_suite(
+        'gambatte-tests',
+        'test-suites/gambatte',
+        'test-suites/gambatte/profile.toml',
+        '$(GAMBATTE_TESTS_TRACE_DIR)',
+        emus,
+        'scripts/trace-gambatte-tests.sh',
+    )
+
     # Output stamp lists as Make variables
     print(f"GBMICROTEST_STAMPS := {' '.join(micro_stamps)}")
     print()
     print(f"BLARGG_STAMPS := {' '.join(blargg_stamps)}")
     print()
     print(f"MOONEYE_STAMPS := {' '.join(mooneye_stamps)}")
+    print()
+    print(f"GAMBATTE_TESTS_STAMPS := {' '.join(gambatte_stamps)}")
 
 
 if __name__ == '__main__':
