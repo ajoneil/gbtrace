@@ -1,12 +1,10 @@
 //! Columnar trace storage.
 //!
-//! Stores trace data as one typed vector per field, avoiding the
-//! per-row `BTreeMap<String, serde_json::Value>` overhead of `TraceEntry`.
-//! A 7M-row trace with 14 fields uses ~100MB instead of ~2GB.
+//! `ColumnStore` is an in-memory eager store used for diff preparation.
+//! For normal trace loading, use `open_trace_store` which returns a
+//! `GbtraceStore` (chunk-based, lazy loading from the native format).
 //!
-//! `PartitionedStore` (parquet feature) wraps a compressed parquet file and
-//! decodes row groups on demand with an LRU cache. This keeps memory
-//! proportional to a few decoded row groups rather than the entire trace.
+//! The `TraceStore` trait provides the common interface for both.
 
 use std::collections::HashMap;
 
@@ -868,23 +866,17 @@ impl<'a> EntryView<'a> {
 }
 
 // ---------------------------------------------------------------------------
-// Loading from readers
+// Loading
 // ---------------------------------------------------------------------------
 
-#[cfg(feature = "parquet")]
-use crate::parquet::ParquetTraceReader;
-
 /// Load a trace store from any supported format.
-/// Detects format by file content (magic bytes), falling back to extension.
-/// JSONL and parquet files are converted to the native format on load.
+/// Detects format by magic bytes: GBTR (native), or JSONL (converted on load).
 pub fn open_trace_store(path: impl AsRef<std::path::Path>) -> Result<Box<dyn TraceStore>> {
-    let path = path.as_ref();
-    let data = std::fs::read(path)?;
+    let data = std::fs::read(path.as_ref())?;
     open_trace_store_from_bytes(&data)
 }
 
 /// Load from in-memory bytes, detecting format by magic.
-/// JSONL and parquet are converted to native format on load.
 pub fn open_trace_store_from_bytes(data: &[u8]) -> Result<Box<dyn TraceStore>> {
     // Native .gbtrace format
     if data.len() >= 4 && &data[..4] == crate::format::MAGIC {
@@ -892,98 +884,14 @@ pub fn open_trace_store_from_bytes(data: &[u8]) -> Result<Box<dyn TraceStore>> {
         return Ok(Box::new(store));
     }
 
-    // Legacy parquet — convert to native via PartitionedStore read
-    #[cfg(feature = "parquet")]
-    if data.len() >= 4 && &data[..4] == b"PAR1" {
-        let store = crate::partitioned_store::PartitionedStore::from_bytes(data)?;
-        return Ok(Box::new(store));
-    }
-
-    // JSONL — convert to native format
+    // JSONL — convert to native format on load
     let store = crate::format::convert::jsonl_to_store(data)?;
     Ok(Box::new(store))
 }
 
-/// Load a column store from any supported trace file format (eager).
+/// Load a column store from a JSONL trace file (eager, for diff preparation).
 pub fn load_column_store(path: impl AsRef<std::path::Path>) -> Result<ColumnStore> {
-    let path = path.as_ref();
-    #[cfg(feature = "parquet")]
-    if path.extension().is_some_and(|ext| ext == "parquet") {
-        return load_from_parquet(path);
-    }
-    load_from_jsonl(path)
-}
-
-#[cfg(feature = "parquet")]
-fn load_from_parquet(path: &std::path::Path) -> Result<ColumnStore> {
-    use arrow::array::{BooleanArray, StringArray, UInt16Array, UInt64Array, UInt8Array};
-
-    let reader = ParquetTraceReader::open(path)?;
-    let header = reader.header().clone();
-    let field_types: Vec<FieldType> = header.fields.iter().map(|n| field_type(n)).collect();
-
-    let mut store = ColumnStore::new(header);
-
-    // Access the underlying batch reader directly by re-opening
-    let file = std::fs::File::open(path)?;
-    let builder = parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder::try_new(file)?;
-
-    // Extract explicit frame boundaries from parquet file metadata
-    let metadata = builder.metadata();
-    store.explicit_boundaries = metadata.file_metadata().key_value_metadata()
-        .and_then(|kvs| kvs.iter().find(|kv| kv.key == "gbtrace_frame_boundaries"))
-        .and_then(|kv| kv.value.as_ref())
-        .map(|s| s.split(',').filter_map(|v| v.parse::<u32>().ok()).collect::<Vec<_>>());
-
-    let batch_reader = builder.with_batch_size(65536).build()?;
-
-    for batch_result in batch_reader {
-        let batch = batch_result.map_err(Error::Arrow)?;
-        let num_rows = batch.num_rows();
-
-        for (col_idx, ft) in field_types.iter().enumerate() {
-            let col = batch.column(col_idx);
-            match ft {
-                FieldType::UInt64 => {
-                    let arr = col.as_any().downcast_ref::<UInt64Array>().unwrap();
-                    if let ColumnData::U64(v) = store.column_mut(col_idx) {
-                        v.extend_from_slice(arr.values());
-                    }
-                }
-                FieldType::UInt16 => {
-                    let arr = col.as_any().downcast_ref::<UInt16Array>().unwrap();
-                    if let ColumnData::U16(v) = store.column_mut(col_idx) {
-                        v.extend_from_slice(arr.values());
-                    }
-                }
-                FieldType::UInt8 => {
-                    let arr = col.as_any().downcast_ref::<UInt8Array>().unwrap();
-                    if let ColumnData::U8(v) = store.column_mut(col_idx) {
-                        v.extend_from_slice(arr.values());
-                    }
-                }
-                FieldType::Bool => {
-                    let arr = col.as_any().downcast_ref::<BooleanArray>().unwrap();
-                    if let ColumnData::Bool(v) = store.column_mut(col_idx) {
-                        for i in 0..num_rows {
-                            v.push(arr.value(i));
-                        }
-                    }
-                }
-                FieldType::Str => {
-                    let arr = col.as_any().downcast_ref::<StringArray>().unwrap();
-                    if let ColumnData::Str(v) = store.column_mut(col_idx) {
-                        for i in 0..num_rows {
-                            v.push(arr.value(i).to_string());
-                        }
-                    }
-                }
-            }
-        }
-        store.add_rows(num_rows);
-    }
-
-    Ok(store)
+    load_from_jsonl(path.as_ref())
 }
 
 fn load_from_jsonl(path: &std::path::Path) -> Result<ColumnStore> {
@@ -1012,83 +920,8 @@ fn load_from_jsonl(path: &std::path::Path) -> Result<ColumnStore> {
     Ok(store)
 }
 
-/// Load a column store from in-memory bytes (for WASM).
-#[cfg(feature = "parquet")]
+/// Load a column store from in-memory JSONL bytes (for WASM diff preparation).
 pub fn load_column_store_from_bytes(data: &[u8]) -> Result<ColumnStore> {
-    use arrow::array::{BooleanArray, StringArray, UInt16Array, UInt64Array, UInt8Array};
-
-    const PARQUET_MAGIC: &[u8] = b"PAR1";
-
-    if data.len() >= 4 && &data[..4] == PARQUET_MAGIC {
-        // Parquet path
-        let reader = ParquetTraceReader::from_bytes(data.to_vec())?;
-        let header = reader.header().clone();
-        let field_types: Vec<FieldType> = header.fields.iter().map(|n| field_type(n)).collect();
-
-        let mut store = ColumnStore::new(header);
-
-        let bytes = bytes::Bytes::from(data.to_vec());
-        let builder =
-            parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder::try_new(bytes)?;
-
-        // Extract explicit frame boundaries
-        let metadata = builder.metadata();
-        store.explicit_boundaries = metadata.file_metadata().key_value_metadata()
-            .and_then(|kvs| kvs.iter().find(|kv| kv.key == "gbtrace_frame_boundaries"))
-            .and_then(|kv| kv.value.as_ref())
-            .map(|s| s.split(',').filter_map(|v| v.parse::<u32>().ok()).collect::<Vec<_>>());
-
-        let batch_reader = builder.with_batch_size(65536).build()?;
-
-        for batch_result in batch_reader {
-            let batch = batch_result.map_err(Error::Arrow)?;
-            let num_rows = batch.num_rows();
-
-            for (col_idx, ft) in field_types.iter().enumerate() {
-                let col = batch.column(col_idx);
-                match ft {
-                    FieldType::UInt64 => {
-                        let arr = col.as_any().downcast_ref::<UInt64Array>().unwrap();
-                        if let ColumnData::U64(v) = store.column_mut(col_idx) {
-                            v.extend_from_slice(arr.values());
-                        }
-                    }
-                    FieldType::UInt16 => {
-                        let arr = col.as_any().downcast_ref::<UInt16Array>().unwrap();
-                        if let ColumnData::U16(v) = store.column_mut(col_idx) {
-                            v.extend_from_slice(arr.values());
-                        }
-                    }
-                    FieldType::UInt8 => {
-                        let arr = col.as_any().downcast_ref::<UInt8Array>().unwrap();
-                        if let ColumnData::U8(v) = store.column_mut(col_idx) {
-                            v.extend_from_slice(arr.values());
-                        }
-                    }
-                    FieldType::Bool => {
-                        let arr = col.as_any().downcast_ref::<BooleanArray>().unwrap();
-                        if let ColumnData::Bool(v) = store.column_mut(col_idx) {
-                            for i in 0..num_rows {
-                                v.push(arr.value(i));
-                            }
-                        }
-                    }
-                    FieldType::Str => {
-                        let arr = col.as_any().downcast_ref::<StringArray>().unwrap();
-                        if let ColumnData::Str(v) = store.column_mut(col_idx) {
-                            for i in 0..num_rows {
-                                v.push(arr.value(i).to_string());
-                            }
-                        }
-                    }
-                }
-            }
-            store.add_rows(num_rows);
-        }
-
-        return Ok(store);
-    }
-
     // JSONL/gzip path
     use std::io::{BufRead, BufReader, Cursor, Read};
     use flate2::read::GzDecoder;
@@ -1148,25 +981,4 @@ pub fn load_column_store_from_bytes(data: &[u8]) -> Result<ColumnStore> {
 
 // Re-export DownsampledStore from its own module.
 pub use crate::downsample::DownsampledStore;
-
-// Re-export PartitionedStore (formerly LazyColumnStore) and its loader for
-// backward compatibility via column_store module path.
-#[cfg(feature = "parquet")]
-pub use crate::partitioned_store::PartitionedStore;
-
-/// Backward-compatible alias: LazyColumnStore → PartitionedStore.
-#[cfg(feature = "parquet")]
-pub type LazyColumnStore = PartitionedStore;
-
-/// Load a partitioned store from in-memory parquet bytes (for WASM).
-#[cfg(feature = "parquet")]
-pub fn load_partitioned_store_from_bytes(data: &[u8]) -> Result<PartitionedStore> {
-    PartitionedStore::from_bytes(data)
-}
-
-/// Backward-compatible alias for `load_partitioned_store_from_bytes`.
-#[cfg(feature = "parquet")]
-pub fn load_lazy_column_store_from_bytes(data: &[u8]) -> Result<PartitionedStore> {
-    load_partitioned_store_from_bytes(data)
-}
 

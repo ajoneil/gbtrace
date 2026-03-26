@@ -6,7 +6,6 @@ description = "Reader, writer, and profile parser for the GB Trace emulator comp
 
 [features]
 default = []
-parquet = ["dep:bytes", "dep:parquet"]
 png = ["dep:png"]
 
 [dependencies]
@@ -16,10 +15,8 @@ toml = "0.8"
 flate2 = "1"
 sha2 = "0.10"
 thiserror = "2"
-arrow = { version = "54", default-features = false, features = ["ipc", "prettyprint"] }
+arrow = { version = "54", default-features = false, features = ["ipc"] }
 zstd = "0.13"
-bytes = { version = "1", optional = true }
-parquet = { version = "54", optional = true, features = ["zstd"] }
 png = { version = "0.17", optional = true }
 tempfile = "3"
 

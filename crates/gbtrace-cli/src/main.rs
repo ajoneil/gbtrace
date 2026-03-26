@@ -2,7 +2,7 @@ use std::path::PathBuf;
 use std::process;
 
 use clap::{Parser, Subcommand};
-use gbtrace::{AnyTraceReader, Condition, ConditionEvaluator, ParquetTraceWriter, TraceEntry, TraceWriter};
+use gbtrace::{AnyTraceReader, Condition, ConditionEvaluator, TraceEntry, TraceWriter};
 use gbtrace::header::TraceHeader;
 use serde_json::Value;
 
@@ -204,21 +204,6 @@ fn cmd_info(path: &PathBuf) -> i32 {
         println!("File size: {size} bytes ({:.1} MB)", size as f64 / 1024.0 / 1024.0);
     }
 
-    // Show row group info for parquet files
-    if path.to_str().map_or(false, |s| s.contains(".parquet")) {
-        if let Ok(file) = std::fs::File::open(path) {
-            if let Ok(builder) = parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder::try_new(file) {
-                let metadata = builder.metadata();
-                let num_rg = metadata.num_row_groups();
-                println!("Row groups: {num_rg}");
-                for i in 0..num_rg {
-                    let rg = metadata.row_group(i);
-                    println!("  [{i}] {} rows", rg.num_rows());
-                }
-            }
-        }
-    }
-
     0
 }
 
@@ -374,10 +359,7 @@ fn cmd_convert(input: &PathBuf, output: Option<PathBuf>) -> i32 {
     let out_ext = output.extension().and_then(|e| e.to_str()).unwrap_or("");
     let out_path_str = output.to_string_lossy();
 
-    if out_ext == "parquet" || out_path_str.ends_with(".gbtrace.parquet") {
-        // Output as parquet (legacy)
-        convert_to_parquet(reader, &output, &header, &frame_boundaries)
-    } else if out_ext == "gbtrace" && !out_path_str.ends_with(".gbtrace.jsonl") {
+    if out_ext == "gbtrace" && !out_path_str.ends_with(".gbtrace.jsonl") {
         // Output as native .gbtrace binary
         convert_to_gbtrace(reader, &output, &header, &frame_boundaries)
     } else {
@@ -496,54 +478,6 @@ fn convert_to_gbtrace(
     0
 }
 
-fn convert_to_parquet(
-    reader: AnyTraceReader,
-    output: &PathBuf,
-    header: &TraceHeader,
-    frame_boundaries: &[u64],
-) -> i32 {
-    let mut writer = match ParquetTraceWriter::create(output, header) {
-        Ok(w) => w,
-        Err(e) => {
-            eprintln!("Error creating output: {e}");
-            return 1;
-        }
-    };
-
-    let mut count: u64 = 0;
-    let mut boundary_idx = 0;
-    for result in reader {
-        match result {
-            Ok(entry) => {
-                while boundary_idx < frame_boundaries.len()
-                    && frame_boundaries[boundary_idx] == count
-                {
-                    let _ = writer.mark_frame();
-                    boundary_idx += 1;
-                }
-                if let Err(e) = writer.write_entry(&entry) {
-                    eprintln!("Error writing entry {count}: {e}");
-                    return 1;
-                }
-                count += 1;
-            }
-            Err(e) => {
-                eprintln!("Error reading entry {count}: {e}");
-                return 1;
-            }
-        }
-    }
-
-    if let Err(e) = writer.finish() {
-        eprintln!("Error finalizing: {e}");
-        return 1;
-    }
-
-    let output_size = std::fs::metadata(output).map(|m| m.len()).unwrap_or(0);
-    println!("Converted {count} entries to {} ({output_size} bytes)", output.display());
-    0
-}
-
 fn convert_to_jsonl(
     reader: AnyTraceReader,
     output: &PathBuf,
@@ -608,29 +542,22 @@ fn parse_cli_conditions(parts: &[String]) -> Result<Condition, String> {
 
 enum AnyWriter {
     Jsonl(TraceWriter),
-    Parquet(ParquetTraceWriter),
 }
 
 impl AnyWriter {
     fn create(path: &std::path::Path, header: &gbtrace::TraceHeader) -> Result<Self, gbtrace::Error> {
-        if path.extension().is_some_and(|e| e == "parquet") {
-            Ok(Self::Parquet(ParquetTraceWriter::create(path, header)?))
-        } else {
-            Ok(Self::Jsonl(TraceWriter::create(path, header)?))
-        }
+        Ok(Self::Jsonl(TraceWriter::create(path, header)?))
     }
 
     fn write_entry(&mut self, entry: &TraceEntry) -> Result<(), gbtrace::Error> {
         match self {
             Self::Jsonl(w) => w.write_entry(entry),
-            Self::Parquet(w) => w.write_entry(entry),
         }
     }
 
     fn finish(self) -> Result<(), gbtrace::Error> {
         match self {
             Self::Jsonl(w) => w.finish(),
-            Self::Parquet(w) => w.finish(),
         }
     }
 }

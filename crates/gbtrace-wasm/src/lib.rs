@@ -623,17 +623,9 @@ impl TraceStore {
 }
 
 /// Helper: load bytes as an eager ColumnStore (for diff preparation).
-/// TODO: refactor diff to work with GbtraceStore directly.
 fn load_eager_from_bytes(data: &[u8]) -> Result<ColumnStore, JsError> {
-    const PARQUET_MAGIC: &[u8] = b"PAR1";
-    if data.len() >= 4 && &data[..4] == PARQUET_MAGIC {
-        let ps = gbtrace::column_store::load_partitioned_store_from_bytes(data)
-            .map_err(|e| JsError::new(&format!("{e}")))?;
-        ps.to_eager().map_err(|e| JsError::new(&format!("{e}")))
-    } else {
-        gbtrace::column_store::load_column_store_from_bytes(data)
-            .map_err(|e| JsError::new(&format!("{e}")))
-    }
+    gbtrace::column_store::load_column_store_from_bytes(data)
+        .map_err(|e| JsError::new(&format!("{e}")))
 }
 
 /// Prepare two TraceStores for comparison with a sync condition.

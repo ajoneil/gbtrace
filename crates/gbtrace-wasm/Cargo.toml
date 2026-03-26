@@ -8,7 +8,7 @@ description = "WASM bindings for the gbtrace trace viewer"
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-gbtrace = { path = "../gbtrace", features = ["parquet"] }
+gbtrace = { path = "../gbtrace" }
 wasm-bindgen = "0.2"
 serde-wasm-bindgen = "0.6"
 js-sys = "0.3"
