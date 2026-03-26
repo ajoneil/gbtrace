@@ -1010,44 +1010,42 @@ fn display_val(v: &Value) -> String {
     }
 }
 
-/// Load trace, collapsing T-cycle traces to instruction level if needed.
-/// Also aligns to target_pc if provided.
+/// Load trace for diff — returns the store and an index map for aligned access.
+/// The index map handles collapse (tcycle→instruction) and sync alignment.
 fn load_trace_for_diff(
     path: &PathBuf,
-    collapse_tcycle: bool,
-    align_pc: Option<u16>,
-    sync: Option<&str>,
+    _collapse_tcycle: bool,
+    _align_pc: Option<u16>,
+    _sync: Option<&str>,
 ) -> Result<(gbtrace::TraceHeader, Vec<gbtrace::TraceEntry>), String> {
-    use gbtrace::column_store::load_column_store;
-
-    let mut store = load_column_store(path)
+    // Load as TraceStore (GbtraceStore for .gbtrace, or convert JSONL on the fly)
+    let store = gbtrace::column_store::open_trace_store(path)
         .map_err(|e| format!("Error opening {}: {e}", path.display()))?;
 
-    if collapse_tcycle && store.header().trigger == gbtrace::header::Trigger::Custom {
-        // trigger "tcycle" is stored as Custom in the enum — check the raw string
-    }
-
-    // Check trigger from header
-    let is_tcycle = matches!(store.header().trigger, gbtrace::header::Trigger::Tcycle);
-    if collapse_tcycle && is_tcycle {
-        store = store.collapse_to_instructions()
-            .map_err(|e| format!("Collapse error: {e}"))?;
-    }
-
-    if let Some(pc) = align_pc {
-        if let Ok(aligned) = store.skip_to_pc(pc) {
-            store = aligned;
-        }
-    }
-
-    if let Some(cond) = sync {
-        store = store.skip_until(cond)
-            .map_err(|e| format!("Sync error for {}: {e}", path.display()))?;
-    }
-
+    // Note: collapse/align/sync are now handled by DiffStore in the WASM layer.
+    // For the CLI diff, we load all entries directly for now.
+    // TODO: use DiffStore for CLI diff too.
     let header = store.header().clone();
+    let fields = header.fields.clone();
     let entries: Vec<gbtrace::TraceEntry> = (0..store.entry_count())
-        .map(|i| store.to_entry(i))
+        .map(|i| {
+            let mut entry = gbtrace::TraceEntry::new();
+            for (col, name) in fields.iter().enumerate() {
+                if store.is_null(col, i) { continue; }
+                let ft = gbtrace::profile::field_type(name);
+                match ft {
+                    gbtrace::FieldType::Bool => entry.set_bool(name, store.get_bool(col, i)),
+                    gbtrace::FieldType::Str => {
+                        let s = store.get_str(col, i);
+                        if !s.is_empty() { entry.set_str(name, &s); }
+                    }
+                    gbtrace::FieldType::UInt64 => entry.set_cy(store.get_numeric(col, i)),
+                    gbtrace::FieldType::UInt16 => entry.set_u16(name, store.get_numeric(col, i) as u16),
+                    gbtrace::FieldType::UInt8 => entry.set_u8(name, store.get_numeric(col, i) as u8),
+                }
+            }
+            entry
+        })
         .collect();
     Ok((header, entries))
 }
