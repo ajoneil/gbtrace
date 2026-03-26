@@ -5,7 +5,7 @@
 // and rawRead8 (peek) for IO registers.
 //
 // Usage:
-//   gbtrace-mgba --rom test.gb --profile cpu_basic.toml [--output trace.gbtrace]
+//   gbtrace-mgba --rom test.gb --profile cpu_basic.toml --output trace.gbtrace
 //
 // Build:
 //   See Makefile in this directory.
@@ -270,7 +270,6 @@ static void build_emitters(const struct Profile *prof) {
 
 // --- Globals ---
 
-static FILE *g_output = NULL;
 static struct Profile g_profile;
 static struct mCore *g_core = NULL;
 
@@ -282,20 +281,10 @@ static int g_stop_serial_triggered = 0;
 static int g_stop_opcode = -1;
 static int g_stop_opcode_triggered = 0;
 
-// --- Parquet direct writer (FFI) ---
-static GbtraceWriter *g_parquet = NULL;
-static int g_parquet_cols[MAX_FIELDS];
-static int g_parquet_ly_col = -1;
-
-// --- Formatting helpers ---
-
-static inline void fput_u8(FILE *out, int val) {
-    fprintf(out, "%d", val & 0xFF);
-}
-
-static inline void fput_u16(FILE *out, int val) {
-    fprintf(out, "%d", val & 0xFFFF);
-}
+// --- FFI writer ---
+static GbtraceWriter *g_writer = NULL;
+static int g_writer_cols[MAX_FIELDS];
+static int g_writer_ly_col = -1;
 
 static int read_reg8(struct SM83Core *cpu, const char *name) {
     if (strcmp(name, "a") == 0) return cpu->a;
@@ -321,80 +310,46 @@ struct TraceModule {
     struct mDebuggerModule d; // must be first
 };
 
-static void emit_entry_parquet(struct mCore *core) {
+static void emit_entry(struct mCore *core) {
     struct SM83Core *cpu = core->cpu;
 
     // Gather ly and pix_len for boundary check
     uint8_t ly_val = 255;
     size_t pix_len = 0;
-    if (g_parquet_ly_col >= 0) {
+    if (g_writer_ly_col >= 0) {
         ly_val = core->rawRead8(core, 0xFF44, -1);
     }
     if (g_has_pix) {
         pix_len = strlen(g_pending_pix);
     }
-    gbtrace_writer_check_boundary(g_parquet, ly_val, pix_len);
+    gbtrace_writer_check_boundary(g_writer, ly_val, pix_len);
 
     // Set all field values
     for (int i = 0; i < g_nemitters; i++) {
-        int col = g_parquet_cols[i];
+        int col = g_writer_cols[i];
         if (col < 0) continue;
         struct FieldEmitter *em = &g_emitters[i];
         switch (em->source) {
         case SRC_REG8:
-            gbtrace_writer_set_u8(g_parquet, col, read_reg8(cpu, em->name));
+            gbtrace_writer_set_u8(g_writer, col, read_reg8(cpu, em->name));
             break;
         case SRC_REG16:
-            gbtrace_writer_set_u16(g_parquet, col, read_reg16(cpu, em->name));
+            gbtrace_writer_set_u16(g_writer, col, read_reg16(cpu, em->name));
             break;
         case SRC_IO:
-            gbtrace_writer_set_u8(g_parquet, col, core->rawRead8(core, em->io_addr, -1));
+            gbtrace_writer_set_u8(g_writer, col, core->rawRead8(core, em->io_addr, -1));
             break;
         case SRC_IME:
-            gbtrace_writer_set_bool(g_parquet, col, cpu->irqPending);
+            gbtrace_writer_set_bool(g_writer, col, cpu->irqPending);
             break;
         case SRC_PIX:
-            gbtrace_writer_set_str(g_parquet, col, g_pending_pix, strlen(g_pending_pix));
+            gbtrace_writer_set_str(g_writer, col, g_pending_pix, strlen(g_pending_pix));
             g_pending_pix[0] = '\0';
             break;
         }
     }
 
-    gbtrace_writer_finish_entry(g_parquet);
-}
-
-static void emit_entry(struct mCore *core) {
-    struct SM83Core *cpu = core->cpu;
-
-    int first = 1;
-    fprintf(g_output, "{");
-
-    for (int i = 0; i < g_nemitters; i++) {
-        struct FieldEmitter *em = &g_emitters[i];
-        if (!first) fprintf(g_output, ",");
-        first = 0;
-        fprintf(g_output, "\"%s\":", em->name);
-        switch (em->source) {
-        case SRC_REG8:
-            fput_u8(g_output, read_reg8(cpu, em->name));
-            break;
-        case SRC_REG16:
-            fput_u16(g_output, read_reg16(cpu, em->name));
-            break;
-        case SRC_IO:
-            fput_u8(g_output, core->rawRead8(core, em->io_addr, -1));
-            break;
-        case SRC_IME:
-            fprintf(g_output, cpu->irqPending ? "true" : "false");
-            break;
-        case SRC_PIX:
-            fprintf(g_output, "\"%s\"", g_pending_pix);
-            g_pending_pix[0] = '\0';
-            break;
-        }
-    }
-
-    fprintf(g_output, "}\n");
+    gbtrace_writer_finish_entry(g_writer);
 }
 
 static void check_stop_conditions(struct mCore *core) {
@@ -427,11 +382,7 @@ static void check_stop_conditions(struct mCore *core) {
 }
 
 static void trace_custom(struct mDebuggerModule *mod) {
-    if (g_parquet) {
-        emit_entry_parquet(mod->p->core);
-    } else {
-        emit_entry(mod->p->core);
-    }
+    emit_entry(mod->p->core);
     check_stop_conditions(mod->p->core);
 }
 
@@ -451,27 +402,6 @@ static char *sha256_file(const char *path) {
     return result;
 }
 
-// --- Header ---
-
-static void write_header(FILE *out, const struct Profile *prof,
-                          const char *rom_sha256, const char *model,
-                          const char *boot_rom_info) {
-    fprintf(out,
-        "{\"_header\":true,\"format_version\":\"0.1.0\","
-        "\"emulator\":\"mgba\",\"emulator_version\":\"0.10.x\","
-        "\"rom_sha256\":\"%s\",\"model\":\"%s\","
-        "\"boot_rom\":\"%s\",\"profile\":\"%s\","
-        "\"fields\":[",
-        rom_sha256, model, boot_rom_info, prof->name);
-
-    for (int i = 0; i < prof->nfields; i++) {
-        if (i > 0) fprintf(out, ",");
-        fprintf(out, "\"%s\"", prof->fields[i]);
-    }
-
-    fprintf(out, "],\"trigger\":\"instruction\"}\n");
-}
-
 // --- Main ---
 
 static void print_usage(const char *argv0) {
@@ -481,7 +411,7 @@ static void print_usage(const char *argv0) {
         "Options:\n"
         "  --rom <path>         ROM file to run (required)\n"
         "  --profile <path>     Capture profile TOML file (required)\n"
-        "  --output <path>      Output trace file (default: stdout)\n"
+        "  --output <path>      Output trace file (required)\n"
         "  --frames <n>         Stop after N frames (default: 3000)\n"
         "  --stop-when <A=V>    Stop when memory ADDR equals VAL (hex, e.g. A000=80)\n"
         "  --stop-on-serial <B> Stop when byte B (hex) is sent via serial (e.g. 0A for newline)\n"
@@ -550,35 +480,16 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
+    if (!output_path) {
+        fprintf(stderr, "Error: --output is required\n");
+        print_usage(argv[0]);
+        return 1;
+    }
+
     // Load profile
     g_profile = parse_profile(profile_path);
     build_emitters(&g_profile);
     fprintf(stderr, "Profile: %s (%d fields)\n", g_profile.name, g_profile.nfields);
-
-    // Detect parquet output mode from file extension
-    int parquet_mode = 0;
-    if (output_path) {
-        size_t olen = strlen(output_path);
-        if (olen >= 8 && strcmp(output_path + olen - 8, ".parquet") == 0) {
-            parquet_mode = 1;
-        }
-    }
-
-    // Open output (JSONL mode only; parquet mode opens via FFI after header is built)
-    if (!parquet_mode) {
-        if (!output_path || strcmp(output_path, "-") == 0) {
-            g_output = stdout;
-        } else {
-            g_output = fopen(output_path, "w");
-            if (!g_output) {
-                fprintf(stderr, "Error: cannot open %s for writing\n", output_path);
-                return 1;
-            }
-        }
-
-        static char output_buf[64 * 1024];
-        setvbuf(g_output, output_buf, _IOFBF, sizeof(output_buf));
-    }
 
     // Create core by auto-detecting from ROM file
     g_core = mCoreFind(rom_path);
@@ -644,11 +555,10 @@ int main(int argc, char *argv[]) {
 
     g_core->reset(g_core);
 
-    // Write header / init parquet writer
+    // Init FFI writer
     char *rom_hash = sha256_file(rom_path);
 
-    if (parquet_mode) {
-        // Build header JSON for the FFI writer
+    {
         char header_json[4096];
         int hpos = snprintf(header_json, sizeof(header_json),
             "{\"_header\":true,\"format_version\":\"0.1.0\","
@@ -665,33 +575,27 @@ int main(int argc, char *argv[]) {
         hpos += snprintf(header_json + hpos, sizeof(header_json) - hpos,
                          "],\"trigger\":\"instruction\"}");
 
-        g_parquet = gbtrace_writer_new(output_path, header_json, hpos);
-        if (!g_parquet) {
-            fprintf(stderr, "Error: failed to create parquet writer\n");
+        g_writer = gbtrace_writer_new(output_path, header_json, hpos);
+        if (!g_writer) {
+            fprintf(stderr, "Error: failed to create trace writer\n");
             return 1;
         }
-
-        // Cache column indices
-        for (int i = 0; i < g_nemitters; i++) {
-            g_parquet_cols[i] = gbtrace_writer_find_field(g_parquet, g_emitters[i].name);
-        }
-        g_parquet_ly_col = gbtrace_writer_find_field(g_parquet, "ly");
-
-        /* Mark entry 0 as a frame boundary */
-        gbtrace_writer_mark_frame(g_parquet);
-
-        fprintf(stderr, "Output: parquet (direct write)\n");
-    } else {
-        write_header(g_output, &g_profile, rom_hash, model, boot_rom_info);
     }
+
+    // Cache column indices
+    for (int i = 0; i < g_nemitters; i++) {
+        g_writer_cols[i] = gbtrace_writer_find_field(g_writer, g_emitters[i].name);
+    }
+    g_writer_ly_col = gbtrace_writer_find_field(g_writer, "ly");
+
+    /* Mark entry 0 as a frame boundary */
+    gbtrace_writer_mark_frame(g_writer);
+
+    fprintf(stderr, "Output: %s\n", output_path);
 
     // Emit the initial CPU state (the debugger callback misses the first
     // instruction because it's attached after reset)
-    if (g_parquet) {
-        emit_entry_parquet(g_core);
-    } else {
-        emit_entry(g_core);
-    }
+    emit_entry(g_core);
 
     // Set up debugger with trace module
     struct mDebugger debugger;
@@ -736,9 +640,7 @@ int main(int argc, char *argv[]) {
         if (g_has_pix || g_has_reference) {
             capture_mgba_frame();
         }
-        if (g_parquet) {
-            gbtrace_writer_mark_frame(g_parquet);
-        }
+        gbtrace_writer_mark_frame(g_writer);
 
         /* Check reference match (immediate stop) */
         if (g_has_reference && memcmp(g_pending_pix, g_reference_pix, 160 * 144) == 0) {
@@ -796,15 +698,8 @@ int main(int argc, char *argv[]) {
         }
     }
 
-    if (g_parquet) {
-        gbtrace_writer_close(g_parquet);
-        g_parquet = NULL;
-    } else {
-        fflush(g_output);
-        if (g_output != stdout) {
-            fclose(g_output);
-        }
-    }
+    gbtrace_writer_close(g_writer);
+    g_writer = NULL;
 
     mDebuggerDetachModule(&debugger, &trace_mod.d);
     mDebuggerDeinit(&debugger);
