@@ -2,11 +2,11 @@
 name = "gbtrace-ffi"
 version = "0.1.0"
 edition = "2021"
-description = "C FFI bindings for gbtrace parquet writer"
+description = "C FFI bindings for gbtrace native format writer"
 
 [lib]
 crate-type = ["staticlib"]
 
 [dependencies]
-gbtrace = { path = "../gbtrace", features = ["parquet"] }
+gbtrace = { path = "../gbtrace" }
 serde_json = "1"

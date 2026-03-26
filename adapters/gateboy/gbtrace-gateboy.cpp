@@ -435,29 +435,6 @@ static std::string sha256_file(const std::string &path) {
     return result;
 }
 
-// --- Header ---
-
-static void write_header(FILE *out, const Profile &prof,
-                          const std::string &rom_sha256,
-                          const std::string &boot_rom_info) {
-    std::fprintf(out,
-        "{\"_header\":true,\"format_version\":\"0.1.0\","
-        "\"emulator\":\"gateboy\",\"emulator_version\":\"metroboy-git\","
-        "\"rom_sha256\":\"%s\",\"model\":\"DMG\","
-        "\"boot_rom\":\"%s\",\"profile\":\"%s\","
-        "\"fields\":[",
-        rom_sha256.c_str(), boot_rom_info.c_str(),
-        prof.name.c_str());
-
-    for (size_t i = 0; i < g_emitters.size(); i++) {
-        if (i > 0) std::fprintf(out, ",");
-        std::fprintf(out, "\"%s\"", g_emitters[i].name.c_str());
-    }
-
-    std::fprintf(out, "],\"trigger\":\"%s\"}\n",
-                 prof.trigger.c_str());
-}
-
 // --- Stop conditions ---
 
 struct StopCondition {
@@ -481,51 +458,7 @@ static StopCondition parse_stop_when(const std::string &spec) {
 
 // --- Emit one trace entry ---
 
-static void emit_entry(FILE *out, GateBoy &gb) {
-    const CpuState &reg = gb.cpu.core.reg;
-
-    bool first = true;
-    std::fprintf(out, "{");
-
-    for (const auto &em : g_emitters) {
-        if (!first) std::fprintf(out, ",");
-        first = false;
-        std::fprintf(out, "\"%s\":", em.name.c_str());
-        switch (em.source) {
-        case FieldEmitter::CPU_REG8:
-            std::fprintf(out, "%d", read_cpu_reg8(reg, em.name));
-            break;
-        case FieldEmitter::CPU_REG16:
-            std::fprintf(out, "%d", read_cpu_reg16(reg, em.name));
-            break;
-        case FieldEmitter::CPU_IME:
-            std::fprintf(out, "%s", reg.ime ? "true" : "false");
-            break;
-        case FieldEmitter::IO_READ: {
-            uint8_t val = read_reg(gb, em.io_addr);
-            std::fprintf(out, "%d", val);
-            break;
-        }
-        case FieldEmitter::PIX:
-            std::fprintf(out, "\"%s\"", g_pix_buf.c_str());
-            g_pix_buf.clear();
-            break;
-        case FieldEmitter::PPU_U8:
-            std::fprintf(out, "%d", em.read_ppu_u8(gb));
-            break;
-        case FieldEmitter::PPU_U16:
-            std::fprintf(out, "%d", em.read_ppu_u16());
-            break;
-        case FieldEmitter::PPU_BOOL:
-            std::fprintf(out, "%s", em.read_ppu_bool(gb) ? "true" : "false");
-            break;
-        }
-    }
-
-    std::fprintf(out, "}\n");
-}
-
-static void emit_entry_parquet(GateBoy &gb) {
+static void emit_entry(GateBoy &gb) {
     const CpuState &reg = gb.cpu.core.reg;
 
     // Gather ly and pix_len for boundary check
@@ -603,7 +536,7 @@ static void print_usage(const char *argv0) {
         "Options:\n"
         "  --rom <path>            ROM file to run (required)\n"
         "  --profile <path>        Capture profile TOML file (required)\n"
-        "  --output <path>         Output trace file (default: stdout)\n"
+        "  --output <path>         Output trace file (required)\n"
         "  --frames <n>            Stop after N frames (default: 3000)\n"
         "  --stop-when <A=V>       Stop when memory ADDR equals VAL (hex)\n"
         "  --stop-on-serial <B>    Stop when byte B (hex) is sent via serial\n"
@@ -684,28 +617,10 @@ int main(int argc, char *argv[]) {
         }
     }
 
-    // Detect parquet output mode from file extension
-    bool parquet_mode = false;
-    if (output_path.size() >= 8 &&
-        output_path.substr(output_path.size() - 8) == ".parquet") {
-        parquet_mode = true;
-    }
-
-    // Open output (JSONL mode only; parquet mode opens via FFI after header is built)
-    FILE *output = nullptr;
-    if (!parquet_mode) {
-        if (output_path.empty() || output_path == "-") {
-            output = stdout;
-        } else {
-            output = std::fopen(output_path.c_str(), "w");
-            if (!output) {
-                std::fprintf(stderr, "Error: cannot open %s for writing\n",
-                             output_path.c_str());
-                return 1;
-            }
-        }
-        static char output_buf[64 * 1024];
-        std::setvbuf(output, output_buf, _IOFBF, sizeof(output_buf));
+    if (output_path.empty()) {
+        std::fprintf(stderr, "Error: --output is required\n");
+        print_usage(argv[0]);
+        return 1;
     }
 
     // Load ROM into a blob
@@ -759,7 +674,7 @@ int main(int argc, char *argv[]) {
     // Write header / init parquet writer
     std::string rom_hash = sha256_file(rom_path);
 
-    if (parquet_mode) {
+    {
         // Build header JSON for the FFI writer
         // Build complete field list including fields handled separately
         std::vector<std::string> all_fields;
@@ -783,7 +698,7 @@ int main(int argc, char *argv[]) {
         g_parquet = gbtrace_writer_new(
             output_path.c_str(), header_json.c_str(), header_json.size());
         if (!g_parquet) {
-            std::fprintf(stderr, "Error: failed to create parquet writer\n");
+            std::fprintf(stderr, "Error: failed to create trace writer\n");
             return 1;
         }
 
@@ -801,9 +716,7 @@ int main(int argc, char *argv[]) {
         // Mark entry 0 as a frame boundary
         gbtrace_writer_mark_frame(g_parquet);
 
-        std::fprintf(stderr, "Output: parquet (direct write)\n");
-    } else {
-        write_header(output, profile, rom_hash, boot_rom_info.c_str());
+        std::fprintf(stderr, "Output: native format (FFI writer)\n");
     }
 
     // Print stop conditions
@@ -880,11 +793,7 @@ int main(int argc, char *argv[]) {
                               || (reg.op_state == 0 && reg.op_addr != prev_op_addr);
 
         if (should_emit) {
-            if (g_parquet) {
-                emit_entry_parquet(gb);
-            } else {
-                emit_entry(output, gb);
-            }
+            emit_entry(gb);
         }
 
         // Check stop conditions at instruction boundaries only
@@ -954,9 +863,7 @@ int main(int argc, char *argv[]) {
             if (!prev_vsync && vsync) {
                 // VSYNC started — previous frame is complete
                 g_frame_num++;
-                if (g_parquet) {
-                    gbtrace_writer_mark_frame(g_parquet);
-                }
+                gbtrace_writer_mark_frame(g_parquet);
                 // If a stop was requested, the LCD frame is now complete
                 if (stop_triggered) {
                     stopped_early = true;
@@ -990,15 +897,8 @@ int main(int argc, char *argv[]) {
         }
     }
 
-    if (g_parquet) {
-        gbtrace_writer_close(g_parquet);
-        g_parquet = nullptr;
-    } else {
-        std::fflush(output);
-        if (output != stdout) {
-            std::fclose(output);
-        }
-    }
+    gbtrace_writer_close(g_parquet);
+    g_parquet = nullptr;
 
     if (stopped_early) {
         std::fprintf(stderr, "Stop condition met at frame %d, output written.\n", frames);

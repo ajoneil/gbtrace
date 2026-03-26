@@ -5,7 +5,7 @@
 // CPU state, and GB_safe_read_memory (peek) for IO registers.
 //
 // Usage:
-//   gbtrace-sameboy --rom test.gb --profile cpu_basic.toml [--output trace.gbtrace]
+//   gbtrace-sameboy --rom test.gb --profile cpu_basic.toml --output trace.gbtrace
 //
 // Build:
 //   See Makefile in this directory.
@@ -153,7 +153,6 @@ static Profile parse_profile(const std::string &path) {
 
 // --- Globals for trace callback context ---
 
-static FILE *g_output = nullptr;
 static GB_gameboy_t *g_gb = nullptr;
 static Profile g_profile;
 static uint64_t g_total_8mhz_ticks = 0; // needed for frame timing
@@ -166,10 +165,10 @@ static bool g_stop_serial_triggered = false;
 static int g_stop_opcode = -1;
 static bool g_stop_opcode_triggered = false;
 
-// --- Parquet direct writer (FFI) ---
-static GbtraceWriter *g_parquet = nullptr;
-static std::vector<int> g_parquet_cols;
-static int g_parquet_ly_col = -1;
+// --- FFI writer ---
+static GbtraceWriter *g_writer = nullptr;
+static std::vector<int> g_writer_cols;
+static int g_writer_ly_col = -1;
 
 // Pre-computed list of what to emit per entry.
 struct FieldEmitter {
@@ -245,16 +244,6 @@ static void build_emitters(const Profile &prof) {
     }
 }
 
-// --- Formatting helpers ---
-
-static inline void fput_u8(FILE *out, int val) {
-    std::fprintf(out, "%d", val & 0xFF);
-}
-
-static inline void fput_u16(FILE *out, int val) {
-    std::fprintf(out, "%d", val & 0xFFFF);
-}
-
 // Read a register value from the emulator.
 static inline int read_reg(GB_gameboy_t *gb, RegisterField::Reg reg) {
     GB_registers_t *regs = GB_get_registers(gb);
@@ -277,92 +266,56 @@ static inline int read_reg(GB_gameboy_t *gb, RegisterField::Reg reg) {
     return 0;
 }
 
-// --- Parquet emit ---
+// --- Emit entry ---
 
-static void emit_entry_parquet(GB_gameboy_t *gb, uint16_t address) {
+static void emit_entry(GB_gameboy_t *gb, uint16_t address) {
     // Gather ly and pix_len for boundary check
     uint8_t ly_val = 255;
     size_t pix_len = 0;
-    if (g_parquet_ly_col >= 0) {
+    if (g_writer_ly_col >= 0) {
         ly_val = GB_safe_read_memory(gb, 0xFF44);
     }
     if (g_has_pix) {
         pix_len = g_pending_pix.size();
     }
-    gbtrace_writer_check_boundary(g_parquet, ly_val, pix_len);
+    gbtrace_writer_check_boundary(g_writer, ly_val, pix_len);
 
     // Set all field values
     for (size_t i = 0; i < g_emitters.size(); i++) {
-        int col = g_parquet_cols[i];
+        int col = g_writer_cols[i];
         if (col < 0) continue;
         const auto &em = g_emitters[i];
         switch (em.source) {
         case FieldEmitter::REGISTER_8:
-            gbtrace_writer_set_u8(g_parquet, col, read_reg(gb, em.reg));
+            gbtrace_writer_set_u8(g_writer, col, read_reg(gb, em.reg));
             break;
         case FieldEmitter::REGISTER_16:
             if (em.reg == RegisterField::PC)
-                gbtrace_writer_set_u16(g_parquet, col, address);
+                gbtrace_writer_set_u16(g_writer, col, address);
             else
-                gbtrace_writer_set_u16(g_parquet, col, read_reg(gb, em.reg));
+                gbtrace_writer_set_u16(g_writer, col, read_reg(gb, em.reg));
             break;
         case FieldEmitter::IO_READ:
-            gbtrace_writer_set_u8(g_parquet, col, GB_safe_read_memory(gb, em.io_addr));
+            gbtrace_writer_set_u8(g_writer, col, GB_safe_read_memory(gb, em.io_addr));
             break;
         case FieldEmitter::IME:
-            gbtrace_writer_set_bool(g_parquet, col, gb->ime);
+            gbtrace_writer_set_bool(g_writer, col, gb->ime);
             break;
         case FieldEmitter::PIX:
-            gbtrace_writer_set_str(g_parquet, col,
+            gbtrace_writer_set_str(g_writer, col,
                                    g_pending_pix.c_str(), g_pending_pix.size());
             g_pending_pix.clear();
             break;
         }
     }
 
-    gbtrace_writer_finish_entry(g_parquet);
+    gbtrace_writer_finish_entry(g_writer);
 }
 
 // --- Trace callback ---
 
 static void exec_callback(GB_gameboy_t *gb, uint16_t address, uint8_t opcode) {
-    if (g_parquet) {
-        emit_entry_parquet(gb, address);
-    } else {
-    bool first = true;
-    std::fprintf(g_output, "{");
-
-    for (const auto &em : g_emitters) {
-        if (!first) std::fprintf(g_output, ",");
-        first = false;
-        std::fprintf(g_output, "\"%s\":", em.name.c_str());
-        switch (em.source) {
-        case FieldEmitter::REGISTER_8:
-            fput_u8(g_output, read_reg(gb, em.reg));
-            break;
-        case FieldEmitter::REGISTER_16:
-            // For PC, use the callback's address parameter (regs->pc has
-            // already been advanced past the opcode fetch by this point).
-            if (em.reg == RegisterField::PC)
-                fput_u16(g_output, address);
-            else
-                fput_u16(g_output, read_reg(gb, em.reg));
-            break;
-        case FieldEmitter::IO_READ:
-            fput_u8(g_output, GB_safe_read_memory(gb, em.io_addr));
-            break;
-        case FieldEmitter::IME:
-            std::fprintf(g_output, gb->ime ? "true" : "false");
-            break;
-        case FieldEmitter::PIX:
-            std::fprintf(g_output, "\"%s\"", g_pending_pix.c_str());
-            g_pending_pix.clear();
-            break;
-        }
-    }
-
-    std::fprintf(g_output, "}\n");
-    } // end JSONL path
+    emit_entry(gb, address);
 
     // Check opcode stop condition
     if (g_stop_opcode >= 0 && !g_stop_opcode_triggered) {
@@ -407,29 +360,6 @@ static std::string sha256_file(const std::string &path) {
     return result;
 }
 
-// --- Header ---
-
-static void write_header(FILE *out, const Profile &prof,
-                          const std::string &rom_sha256,
-                          const std::string &model,
-                          const std::string &boot_rom_info) {
-    std::fprintf(out,
-        "{\"_header\":true,\"format_version\":\"0.1.0\","
-        "\"emulator\":\"sameboy\",\"emulator_version\":\"0.16.x\","
-        "\"rom_sha256\":\"%s\",\"model\":\"%s\","
-        "\"boot_rom\":\"%s\",\"profile\":\"%s\","
-        "\"fields\":[",
-        rom_sha256.c_str(), model.c_str(), boot_rom_info.c_str(),
-        prof.name.c_str());
-
-    for (size_t i = 0; i < prof.fields.size(); i++) {
-        if (i > 0) std::fprintf(out, ",");
-        std::fprintf(out, "\"%s\"", prof.fields[i].c_str());
-    }
-
-    std::fprintf(out, "],\"trigger\":\"instruction\"}\n");
-}
-
 // --- Stop condition ---
 
 struct StopCondition {
@@ -460,7 +390,7 @@ static void print_usage(const char *argv0) {
         "Options:\n"
         "  --rom <path>         ROM file to run (required)\n"
         "  --profile <path>     Capture profile TOML file (required)\n"
-        "  --output <path>      Output trace file (default: stdout)\n"
+        "  --output <path>      Output trace file (required)\n"
         "  --frames <n>         Stop after N frames (default: 3000)\n"
         "  --stop-when <A=V>    Stop when memory ADDR equals VAL (hex, e.g. A000=80)\n"
         "  --stop-on-serial <HH>  Stop when serial byte HH is sent (hex)\n"
@@ -520,7 +450,7 @@ int main(int argc, char *argv[]) {
         }
     }
 
-    if (rom_path.empty() || profile_path.empty()) {
+    if (rom_path.empty() || profile_path.empty() || output_path.empty()) {
         print_usage(argv[0]);
         return 1;
     }
@@ -551,29 +481,6 @@ int main(int argc, char *argv[]) {
 
     std::fprintf(stderr, "Profile: %s (%zu fields)\n",
                  g_profile.name.c_str(), g_profile.fields.size());
-
-    // Detect parquet output mode from file extension
-    bool parquet_mode = false;
-    if (output_path.size() >= 8 &&
-        output_path.substr(output_path.size() - 8) == ".parquet") {
-        parquet_mode = true;
-    }
-
-    // Open output (JSONL mode only; parquet mode opens via FFI after header is built)
-    if (!parquet_mode) {
-        if (output_path.empty() || output_path == "-") {
-            g_output = stdout;
-        } else {
-            g_output = std::fopen(output_path.c_str(), "w");
-            if (!g_output) {
-                std::fprintf(stderr, "Error: cannot open %s for writing\n", output_path.c_str());
-                return 1;
-            }
-        }
-
-        static char output_buf[64 * 1024];
-        std::setvbuf(g_output, output_buf, _IOFBF, sizeof(output_buf));
-    }
 
     // Init emulator
     g_gb = GB_init(GB_alloc(), gb_model);
@@ -624,44 +531,39 @@ int main(int argc, char *argv[]) {
     // Reset cycle origin so traces start at cy=0 post-boot
     g_total_8mhz_ticks = 0;
 
-    // Write header / init parquet writer
+    // Init FFI writer
     std::string rom_hash = sha256_file(rom_path);
 
-    if (parquet_mode) {
-        // Build header JSON for the FFI writer
-        std::string header_json = "{\"_header\":true,\"format_version\":\"0.1.0\","
-            "\"emulator\":\"sameboy\",\"emulator_version\":\"0.16.x\","
-            "\"rom_sha256\":\"" + rom_hash + "\",\"model\":\"" + model + "\","
-            "\"boot_rom\":\"" + boot_rom_info + "\",\"profile\":\"" + g_profile.name + "\","
-            "\"fields\":[";
-        for (size_t i = 0; i < g_emitters.size(); i++) {
-            if (i > 0) header_json += ",";
-            header_json += "\"" + g_emitters[i].name + "\"";
-        }
-        header_json += "],\"trigger\":\"instruction\"}";
-
-        g_parquet = gbtrace_writer_new(
-            output_path.c_str(), header_json.c_str(), header_json.size());
-        if (!g_parquet) {
-            std::fprintf(stderr, "Error: failed to create parquet writer\n");
-            return 1;
-        }
-
-        // Cache column indices
-        g_parquet_cols.resize(g_emitters.size());
-        for (size_t i = 0; i < g_emitters.size(); i++) {
-            g_parquet_cols[i] = gbtrace_writer_find_field(
-                g_parquet, g_emitters[i].name.c_str());
-        }
-        g_parquet_ly_col = gbtrace_writer_find_field(g_parquet, "ly");
-
-        // Mark entry 0 as a frame boundary
-        gbtrace_writer_mark_frame(g_parquet);
-
-        std::fprintf(stderr, "Output: parquet (direct write)\n");
-    } else {
-        write_header(g_output, g_profile, rom_hash, model, boot_rom_info);
+    // Build header JSON for the FFI writer
+    std::string header_json = "{\"_header\":true,\"format_version\":\"0.1.0\","
+        "\"emulator\":\"sameboy\",\"emulator_version\":\"0.16.x\","
+        "\"rom_sha256\":\"" + rom_hash + "\",\"model\":\"" + model + "\","
+        "\"boot_rom\":\"" + boot_rom_info + "\",\"profile\":\"" + g_profile.name + "\","
+        "\"fields\":[";
+    for (size_t i = 0; i < g_emitters.size(); i++) {
+        if (i > 0) header_json += ",";
+        header_json += "\"" + g_emitters[i].name + "\"";
     }
+    header_json += "],\"trigger\":\"instruction\"}";
+
+    g_writer = gbtrace_writer_new(
+        output_path.c_str(), header_json.c_str(), header_json.size());
+    if (!g_writer) {
+        std::fprintf(stderr, "Error: failed to create writer for '%s'\n",
+                     output_path.c_str());
+        return 1;
+    }
+
+    // Cache column indices
+    g_writer_cols.resize(g_emitters.size());
+    for (size_t i = 0; i < g_emitters.size(); i++) {
+        g_writer_cols[i] = gbtrace_writer_find_field(
+            g_writer, g_emitters[i].name.c_str());
+    }
+    g_writer_ly_col = gbtrace_writer_find_field(g_writer, "ly");
+
+    // Mark entry 0 as a frame boundary
+    gbtrace_writer_mark_frame(g_writer);
 
     GB_set_execution_callback(g_gb, exec_callback);
 
@@ -699,9 +601,7 @@ int main(int argc, char *argv[]) {
             if (g_has_pix || has_reference) {
                 capture_sameboy_frame();
             }
-            if (g_parquet) {
-                gbtrace_writer_mark_frame(g_parquet);
-            }
+            gbtrace_writer_mark_frame(g_writer);
 
             // Check reference match (immediate stop)
             if (has_reference && g_pending_pix == g_reference_pix) {
@@ -758,15 +658,8 @@ int main(int argc, char *argv[]) {
         }
     }
 
-    if (g_parquet) {
-        gbtrace_writer_close(g_parquet);
-        g_parquet = nullptr;
-    } else {
-        std::fflush(g_output);
-        if (g_output != stdout) {
-            std::fclose(g_output);
-        }
-    }
+    gbtrace_writer_close(g_writer);
+    g_writer = nullptr;
 
     GB_free(g_gb);
     GB_dealloc(g_gb);

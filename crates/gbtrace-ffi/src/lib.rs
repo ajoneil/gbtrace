@@ -1,20 +1,21 @@
-//! C FFI bindings for the gbtrace parquet writer.
+//! C FFI bindings for the gbtrace native format writer.
 //!
 //! Adapters link against libgbtrace_ffi.a and call these functions to write
-//! parquet files directly, bypassing JSONL serialization entirely.
+//! .gbtrace files directly, bypassing JSONL serialization entirely.
 //!
 //! Typical usage from C:
 //! ```c
-//! GbtraceWriter *w = gbtrace_writer_new("out.parquet", header_json, len);
+//! GbtraceWriter *w = gbtrace_writer_new("out.gbtrace", header_json, len);
 //! int ly_col = gbtrace_writer_find_field(w, "ly");
 //! int pc_col = gbtrace_writer_find_field(w, "pc");
 //! // ...
 //! // For each trace entry:
-//! gbtrace_writer_check_boundary(w, ly_val, pix_len);
 //! gbtrace_writer_set_u16(w, pc_col, pc_val);
 //! gbtrace_writer_set_u8(w, ly_col, ly_val);
 //! // ... set all fields ...
 //! gbtrace_writer_finish_entry(w);
+//! // At vblank:
+//! gbtrace_writer_mark_frame(w);
 //! // When done:
 //! gbtrace_writer_close(w);
 //! ```
@@ -23,16 +24,19 @@ use std::ffi::CStr;
 use std::os::raw::c_char;
 use std::slice;
 
+use gbtrace::format::write::GbtraceWriter as NativeWriter;
+use gbtrace::format::read::derive_groups_pub;
 use gbtrace::header::TraceHeader;
-use gbtrace::parquet::ParquetTraceWriter;
-use gbtrace::profile::FieldType;
+use gbtrace::profile::{field_type, FieldType};
 
 /// Opaque writer handle exposed to C.
 pub struct GbtraceWriter {
-    writer: ParquetTraceWriter,
+    writer: NativeWriter,
+    field_names: Vec<String>,
+    field_types: Vec<FieldType>,
 }
 
-/// Create a new parquet writer.
+/// Create a new native format writer.
 ///
 /// `path` is a null-terminated C string for the output file path.
 /// `header_json` + `header_len` describe the header JSON (not null-terminated).
@@ -62,7 +66,11 @@ pub unsafe extern "C" fn gbtrace_writer_new(
         }
     };
 
-    let writer = match ParquetTraceWriter::create(path_str, &header) {
+    let groups = derive_groups_pub(&header.fields);
+    let field_names = header.fields.clone();
+    let field_types: Vec<FieldType> = field_names.iter().map(|n| field_type(n)).collect();
+
+    let writer = match NativeWriter::create(path_str, &header, &groups) {
         Ok(w) => w,
         Err(e) => {
             eprintln!("gbtrace_writer_new: failed to create writer: {e}");
@@ -70,13 +78,13 @@ pub unsafe extern "C" fn gbtrace_writer_new(
         }
     };
 
-    Box::into_raw(Box::new(GbtraceWriter { writer }))
+    Box::into_raw(Box::new(GbtraceWriter { writer, field_names, field_types }))
 }
 
 /// Return the number of fields.
 #[no_mangle]
 pub unsafe extern "C" fn gbtrace_writer_num_fields(w: *const GbtraceWriter) -> usize {
-    (*w).writer.field_names().len()
+    (*w).field_names.len()
 }
 
 /// Find the column index of a field by name. Returns -1 if not found.
@@ -89,7 +97,7 @@ pub unsafe extern "C" fn gbtrace_writer_find_field(
         Ok(s) => s,
         Err(_) => return -1,
     };
-    match (*w).writer.field_names().iter().position(|n| n == name_str) {
+    match (*w).field_names.iter().position(|n| n == name_str) {
         Some(i) => i as i32,
         None => -1,
     }
@@ -102,11 +110,8 @@ pub unsafe extern "C" fn gbtrace_writer_field_type(
     w: *const GbtraceWriter,
     field: usize,
 ) -> i32 {
-    let types = (*w).writer.field_types();
-    if field >= types.len() {
-        return -1;
-    }
-    match types[field] {
+    if field >= (*w).field_types.len() { return -1; }
+    match (*w).field_types[field] {
         FieldType::UInt8 => 0,
         FieldType::UInt16 => 1,
         FieldType::UInt64 => 2,
@@ -115,76 +120,67 @@ pub unsafe extern "C" fn gbtrace_writer_field_type(
     }
 }
 
-/// Check for frame boundary (call BEFORE setting field values for each entry).
-/// `ly` is the current LY value (pass 255 if LY is not in this entry).
-/// `pix_len` is the length of the pix string (pass 0 if no pix data).
-/// Returns 0 on success, -1 on error.
+/// Legacy boundary check — no-op in native format.
+/// Retained for C adapter compatibility.
 #[no_mangle]
 pub unsafe extern "C" fn gbtrace_writer_check_boundary(
-    w: *mut GbtraceWriter,
-    ly: u8,
-    pix_len: usize,
+    _w: *mut GbtraceWriter,
+    _ly: u8,
+    _pix_len: usize,
 ) -> i32 {
-    let ly_opt = if ly == 255 { None } else { Some(ly) };
-    match (*w).writer.check_boundary(ly_opt, pix_len) {
-        Ok(()) => 0,
-        Err(e) => {
-            eprintln!("gbtrace_writer_check_boundary: {e}");
-            -1
-        }
-    }
+    0
 }
 
-/// Set a u8 field value and append it to the column buffer.
+/// Set a u8 field value.
 #[no_mangle]
 pub unsafe extern "C" fn gbtrace_writer_set_u8(
     w: *mut GbtraceWriter,
     field: usize,
     value: u8,
 ) {
-    (*w).writer.append_u8(field, value);
+    (*w).writer.set_u8(field, value);
 }
 
-/// Set a u16 field value and append it to the column buffer.
+/// Set a u16 field value.
 #[no_mangle]
 pub unsafe extern "C" fn gbtrace_writer_set_u16(
     w: *mut GbtraceWriter,
     field: usize,
     value: u16,
 ) {
-    (*w).writer.append_u16(field, value);
+    (*w).writer.set_u16(field, value);
 }
 
-/// Set a u64 field value and append it to the column buffer.
+/// Set a u64 field value.
 #[no_mangle]
 pub unsafe extern "C" fn gbtrace_writer_set_u64(
     w: *mut GbtraceWriter,
     field: usize,
     value: u64,
 ) {
-    (*w).writer.append_u64(field, value);
+    (*w).writer.set_u64(field, value);
 }
 
-/// Set a bool field value and append it to the column buffer.
+/// Set a bool field value.
 #[no_mangle]
 pub unsafe extern "C" fn gbtrace_writer_set_bool(
     w: *mut GbtraceWriter,
     field: usize,
     value: bool,
 ) {
-    (*w).writer.append_bool(field, value);
+    (*w).writer.set_bool(field, value);
 }
 
-/// Append a null value to a nullable column (pix, vram_addr, vram_data).
+/// Append a null value for a nullable field.
 #[no_mangle]
 pub unsafe extern "C" fn gbtrace_writer_set_null(
     w: *mut GbtraceWriter,
     field: usize,
 ) {
-    (*w).writer.append_null(field);
+    (*w).writer.set_null(field);
 }
 
-/// Set a string field value and append it to the column buffer.
+/// Set a string field value.
 /// `ptr` and `len` describe the UTF-8 string (not null-terminated).
 #[no_mangle]
 pub unsafe extern "C" fn gbtrace_writer_set_str(
@@ -195,15 +191,14 @@ pub unsafe extern "C" fn gbtrace_writer_set_str(
 ) {
     let bytes = slice::from_raw_parts(ptr as *const u8, len);
     let s = std::str::from_utf8_unchecked(bytes);
-    (*w).writer.append_str(field, s);
+    (*w).writer.set_str(field, s);
 }
 
 /// Mark a frame boundary at the current entry position.
-/// Call at vblank — writes the boundary to parquet metadata and flushes.
-/// Returns 0 on success, -1 on error.
+/// Call at vblank. Returns 0 on success, -1 on error.
 #[no_mangle]
 pub unsafe extern "C" fn gbtrace_writer_mark_frame(w: *mut GbtraceWriter) -> i32 {
-    match (*w).writer.mark_frame() {
+    match (*w).writer.mark_frame(None) {
         Ok(()) => 0,
         Err(e) => {
             eprintln!("gbtrace_writer_mark_frame: {e}");
@@ -216,7 +211,7 @@ pub unsafe extern "C" fn gbtrace_writer_mark_frame(w: *mut GbtraceWriter) -> i32
 /// Returns 0 on success, -1 on error.
 #[no_mangle]
 pub unsafe extern "C" fn gbtrace_writer_finish_entry(w: *mut GbtraceWriter) -> i32 {
-    match (*w).writer.finish_row() {
+    match (*w).writer.finish_entry() {
         Ok(()) => 0,
         Err(e) => {
             eprintln!("gbtrace_writer_finish_entry: {e}");
@@ -225,7 +220,7 @@ pub unsafe extern "C" fn gbtrace_writer_finish_entry(w: *mut GbtraceWriter) -> i
     }
 }
 
-/// Close the writer and finalize the parquet file.
+/// Close the writer and finalize the file.
 /// Consumes the writer — do not use it after this call.
 /// Returns 0 on success, -1 on error.
 #[no_mangle]
