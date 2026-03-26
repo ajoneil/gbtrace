@@ -1,4 +1,3 @@
-use gbtrace::column_store::ColumnStore;
 use gbtrace::disasm;
 use gbtrace::framebuffer;
 use gbtrace::profile::FieldType;
@@ -622,38 +621,30 @@ impl TraceStore {
     }
 }
 
-/// Helper: load bytes as an eager ColumnStore (for diff preparation).
-fn load_eager_from_bytes(data: &[u8]) -> Result<ColumnStore, JsError> {
-    gbtrace::column_store::load_column_store_from_bytes(data)
-        .map_err(|e| JsError::new(&format!("{e}")))
-}
-
 /// Prepare two TraceStores for comparison with a sync condition.
+///
+/// Returns a JS object with alignment info: { mapA: Uint32Array, mapB: Uint32Array, len: number }
+/// The original stores are not modified — the maps provide index remapping.
 ///
 /// Sync modes: "pc" (default), "none", or any condition string like "ly=0", "lcdc&80".
 #[wasm_bindgen(js_name = prepareForDiff)]
-pub fn prepare_for_diff(a: TraceStore, b: TraceStore, sync: Option<String>) -> Result<js_sys::Array, JsError> {
-    let rom_a = a.rom;
-    let rom_b = b.rom;
-    let bytes_a = a.original_bytes;
-    let bytes_b = b.original_bytes;
+pub fn prepare_for_diff(a: &TraceStore, b: &TraceStore, sync: Option<String>) -> Result<JsValue, JsError> {
+    let diff = gbtrace::diff_store::DiffStore::align(
+        &*a.store, &*b.store, sync.as_deref()
+    ).map_err(|e| JsError::new(&format!("{e}")))?;
 
-    // Reload as eager stores from original bytes for diff preparation
-    let store_a = match &bytes_a {
-        Some(data) => load_eager_from_bytes(data)?,
-        None => return Err(JsError::new("store A has no original bytes for diff reload")),
-    };
-    let store_b = match &bytes_b {
-        Some(data) => load_eager_from_bytes(data)?,
-        None => return Err(JsError::new("store B has no original bytes for diff reload")),
-    };
+    let map_a: Vec<u32> = diff.map_a.iter().map(|&i| i as u32).collect();
+    let map_b: Vec<u32> = diff.map_b.iter().map(|&i| i as u32).collect();
 
-    let sync_str = sync.as_deref();
-    let (new_a, new_b) = ColumnStore::prepare_for_diff_with_sync(store_a, store_b, sync_str)
-        .map_err(|e| JsError::new(&format!("{e}")))?;
+    let obj = js_sys::Object::new();
+    let arr_a = js_sys::Uint32Array::new_with_length(map_a.len() as u32);
+    arr_a.copy_from(&map_a);
+    let arr_b = js_sys::Uint32Array::new_with_length(map_b.len() as u32);
+    arr_b.copy_from(&map_b);
 
-    let arr = js_sys::Array::new();
-    arr.push(&JsValue::from(TraceStore { store: Box::new(new_a), rom: rom_a, original_bytes: bytes_a, downsample_map: None, vram_cache: None }));
-    arr.push(&JsValue::from(TraceStore { store: Box::new(new_b), rom: rom_b, original_bytes: bytes_b, downsample_map: None, vram_cache: None }));
-    Ok(arr)
+    js_sys::Reflect::set(&obj, &"mapA".into(), &arr_a).unwrap();
+    js_sys::Reflect::set(&obj, &"mapB".into(), &arr_b).unwrap();
+    js_sys::Reflect::set(&obj, &"len".into(), &JsValue::from(diff.len() as u32)).unwrap();
+
+    Ok(obj.into())
 }

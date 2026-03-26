@@ -12,8 +12,9 @@ pub mod reader;
 pub mod writer;
 pub mod vram;
 pub mod format;
+pub mod diff_store;
 
-pub use column_store::{ColumnStore, EntryView};
+pub use column_store::TraceStore;
 pub use downsample::DownsampledStore;
 pub use diff::{AlignmentStrategy, DiffConfig, DiffResult, DivergenceClass, MultiDiffResult, TraceDiffer};
 pub use entry::TraceEntry;
