@@ -113,11 +113,21 @@ pub fn field_type(name: &str) -> FieldType {
     }
 }
 
-/// Whether a field should be nullable in the parquet schema.
+/// Whether a field should be nullable.
 /// Sparse fields (pixel output, VRAM writes) benefit from null
 /// representation instead of zero/empty defaults.
 pub fn field_nullable(name: &str) -> bool {
-    matches!(name, "pix" | "vram_addr" | "vram_data")
+    matches!(name, "pix" | "vram_addr" | "vram_data" | "vram_write" | "apu_write" | "oam_write")
+}
+
+/// Whether a field should use dictionary encoding.
+/// Fields with distinct value count bounded by hardware design.
+pub fn field_dictionary(name: &str) -> bool {
+    matches!(name,
+        "lcdc" | "stat" | "bgp" | "obp0" | "obp1"
+        | "tac" | "f" | "ime" | "rendering" | "win_mode"
+        | "tfetch_state" | "sfetch_state"
+    )
 }
 
 fn parse_hex_addr(s: &str) -> std::result::Result<u16, String> {
