@@ -9,7 +9,6 @@ name = "gbtrace-cli"
 path = "src/main.rs"
 
 [dependencies]
-gbtrace = { path = "../gbtrace", features = ["parquet", "png"] }
+gbtrace = { path = "../gbtrace", features = ["png"] }
 clap = { version = "4", features = ["derive"] }
-parquet = "54"
 serde_json = "1"
