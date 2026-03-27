@@ -121,18 +121,27 @@ export class TestPicker extends LitElement {
     .suite-tab.active { color: var(--accent); border-bottom-color: var(--accent); font-weight: 600; }
 
     .summary {
-      display: flex; gap: 12px; margin-bottom: 10px; font-size: 0.72rem;
+      display: flex; gap: 8px; margin-top: 12px; font-size: 0.72rem;
       font-family: var(--mono); flex-wrap: wrap;
     }
     .summary-emu {
-      display: flex; align-items: center; gap: 4px;
-      padding: 2px 8px; border-radius: 4px;
+      display: flex; flex-direction: column; gap: 2px;
+      padding: 4px 8px; border-radius: 4px;
       background: var(--bg-secondary); border: 1px solid var(--border);
+      min-width: 90px;
     }
+    .summary-top { display: flex; align-items: center; gap: 4px; }
     .summary-emu .name { color: var(--text-muted); font-weight: 600; }
     .summary-emu .pass { color: #4caf50; }
     .summary-emu .fail { color: #f44336; }
-    .summary-emu .pct { color: var(--text-muted); }
+    .summary-emu .missing { color: #ff9800; }
+    .summary-bar {
+      height: 4px; border-radius: 2px; display: flex; overflow: hidden;
+      background: var(--bg);
+    }
+    .summary-bar .seg-pass { background: #4caf50; }
+    .summary-bar .seg-fail { background: #f44336; }
+    .summary-bar .seg-missing { background: #ff9800; opacity: 0.5; }
 
     .categories { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 8px; }
     .cat-chip {
@@ -217,18 +226,17 @@ export class TestPicker extends LitElement {
 
   _getSuiteStats(suite) {
     if (!suite.tests) return {};
+    const totalTests = suite.tests.length;
     const stats = {};
     for (const emu of EMULATORS) {
-      let pass = 0, fail = 0, total = 0;
+      let pass = 0, fail = 0;
       for (const test of suite.tests) {
         const s = test.emulators?.[emu];
-        if (s) {
-          total++;
-          if (s === 'pass') pass++;
-          else fail++;
-        }
+        if (s === 'pass') pass++;
+        else if (s === 'fail') fail++;
       }
-      if (total > 0) stats[emu] = { pass, fail, total };
+      const missing = totalTests - pass - fail;
+      if (pass > 0 || fail > 0) stats[emu] = { pass, fail, missing, total: totalTests };
     }
     return stats;
   }
@@ -316,12 +324,22 @@ export class TestPicker extends LitElement {
           <div class="summary">
             ${EMULATORS.filter(e => stats[e]).map(emu => {
               const s = stats[emu];
-              const pct = Math.round(s.pass / s.total * 100);
+              const passPct = (s.pass / s.total * 100).toFixed(1);
+              const failPct = (s.fail / s.total * 100).toFixed(1);
+              const missPct = (s.missing / s.total * 100).toFixed(1);
               return html`
                 <div class="summary-emu">
-                  <span class="name">${emu}</span>
-                  <span class="pass">${s.pass}</span>/<span class="fail">${s.fail}</span>
-                  <span class="pct">(${pct}%)</span>
+                  <div class="summary-top">
+                    <span class="name">${emu}</span>
+                    <span class="pass">${s.pass}</span>
+                    <span class="fail">${s.fail}</span>
+                    ${s.missing > 0 ? html`<span class="missing">${s.missing}</span>` : ''}
+                  </div>
+                  <div class="summary-bar">
+                    <div class="seg-pass" style="width:${passPct}%"></div>
+                    <div class="seg-fail" style="width:${failPct}%"></div>
+                    <div class="seg-missing" style="width:${missPct}%"></div>
+                  </div>
                 </div>
               `;
             })}
