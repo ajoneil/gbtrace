@@ -332,7 +332,7 @@ export class TestPicker extends LitElement {
                   <div class="summary-top">
                     <span class="name">${emu}</span>
                     <span class="pass">${s.pass}</span>
-                    <span class="fail">${s.fail}</span>
+                    ${s.fail > 0 ? html`<span class="fail">${s.fail}</span>` : ''}
                     ${s.missing > 0 ? html`<span class="missing">${s.missing}</span>` : ''}
                   </div>
                   <div class="summary-bar">
