@@ -16,11 +16,10 @@
 
 use std::collections::HashMap;
 use std::fs::File;
-use std::io::{self, BufWriter, Seek, SeekFrom, Write};
+use std::io::{self, BufWriter, Seek, Write};
 use std::sync::Arc;
 
 use arrow::array::*;
-use arrow::array::builder::*;
 use arrow::array::types::UInt8Type;
 use arrow::datatypes::*;
 use arrow::ipc::writer::StreamWriter;
@@ -36,6 +35,7 @@ use super::*;
 enum ColBuf {
     U8(UInt8Builder),
     U16(UInt16Builder),
+    #[allow(dead_code)]
     U32(UInt32Builder),
     U64(UInt64Builder),
     Bool(BooleanBuilder),
@@ -109,6 +109,7 @@ impl ColBuf {
         }
     }
 
+    #[allow(dead_code)]
     fn len(&self) -> usize {
         match self {
             Self::U8(b) => b.len(),
@@ -124,11 +125,8 @@ impl ColBuf {
 
 /// Mapping from field group to its column indices.
 struct GroupMapping {
-    groups: Vec<FieldGroup>,
     /// group_index → [col_indices]
     col_indices: Vec<Vec<usize>>,
-    /// col_index → group_index
-    col_to_group: Vec<usize>,
 }
 
 impl GroupMapping {
@@ -139,23 +137,19 @@ impl GroupMapping {
             .collect();
 
         let mut col_indices = Vec::new();
-        let mut col_to_group = vec![0usize; all_fields.len()];
 
-        for (gi, group) in groups.iter().enumerate() {
+        for (_gi, group) in groups.iter().enumerate() {
             let mut cols = Vec::new();
             for field_name in &group.fields {
                 if let Some(&ci) = field_to_col.get(field_name.as_str()) {
                     cols.push(ci);
-                    col_to_group[ci] = gi;
                 }
             }
             col_indices.push(cols);
         }
 
         Self {
-            groups: groups.to_vec(),
             col_indices,
-            col_to_group,
         }
     }
 }
@@ -164,7 +158,6 @@ impl GroupMapping {
 pub struct GbtraceWriter {
     out: BufWriter<File>,
     header: TraceHeader,
-    field_types: Vec<FieldType>,
     group_mapping: GroupMapping,
     columns: Vec<ColBuf>,
     chunk_size: usize,
@@ -198,10 +191,6 @@ impl GbtraceWriter {
         out.write_all(&(header_compressed.len() as u32).to_le_bytes())?;
         out.write_all(&header_compressed)?;
 
-        let field_types: Vec<FieldType> = header.fields.iter()
-            .map(|n| field_type(n))
-            .collect();
-
         let group_mapping = GroupMapping::from_groups(groups, &header.fields);
 
         let columns: Vec<ColBuf> = header.fields.iter()
@@ -215,7 +204,6 @@ impl GbtraceWriter {
         Ok(Self {
             out,
             header: header.clone(),
-            field_types,
             group_mapping,
             columns,
             chunk_size: DEFAULT_CHUNK_SIZE,

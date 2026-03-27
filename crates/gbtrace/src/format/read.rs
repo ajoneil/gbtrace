@@ -6,8 +6,6 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::io::Cursor;
-use std::sync::Arc;
-
 use arrow::array::*;
 use arrow::array::types::UInt8Type;
 use arrow::ipc::reader::StreamReader;
@@ -16,7 +14,6 @@ use arrow::record_batch::RecordBatch;
 use crate::store::TraceStore;
 use crate::error::{Error, Result};
 use crate::header::TraceHeader;
-use crate::profile::{field_type, FieldType};
 
 use super::*;
 
@@ -33,7 +30,7 @@ struct DecodedChunk {
     groups: HashMap<u8, RecordBatch>,
     /// Raw compressed group blobs for groups not yet decoded.
     raw_groups: HashMap<u8, Vec<u8>>,
-    entry_count: usize,
+    _entry_count: usize,
 }
 
 impl ChunkCache {
@@ -68,12 +65,9 @@ impl ChunkCache {
 /// groups are decompressed only when accessed.
 pub struct GbtraceStore {
     header: TraceHeader,
-    field_types: Vec<FieldType>,
     field_index: HashMap<String, usize>,
     /// Maps field name → (group_id, index within group's RecordBatch)
     field_to_group: HashMap<String, (u8, usize)>,
-    /// Group definitions from the file header.
-    groups: Vec<FieldGroup>,
 
     /// The full file data (for seeking to chunks).
     data: Vec<u8>,
@@ -153,7 +147,6 @@ impl GbtraceStore {
         let total_entries = read_u64(&data, &mut pos) as usize;
 
         // Build field index
-        let field_types: Vec<FieldType> = header.fields.iter().map(|n| field_type(n)).collect();
         let field_index: HashMap<String, usize> = header.fields.iter()
             .enumerate()
             .map(|(i, f)| (f.clone(), i))
@@ -166,10 +159,8 @@ impl GbtraceStore {
 
         Ok(Self {
             header,
-            field_types,
             field_index,
             field_to_group,
-            groups,
             data: data.to_vec(),
             chunk_index,
             cumulative,
@@ -230,7 +221,7 @@ impl GbtraceStore {
         Ok(DecodedChunk {
             groups: HashMap::new(),
             raw_groups,
-            entry_count,
+            _entry_count: entry_count,
         })
     }
 
@@ -389,8 +380,6 @@ pub fn derive_groups_pub(fields: &[String]) -> Vec<FieldGroup> {
 }
 
 fn derive_groups(fields: &[String]) -> Vec<FieldGroup> {
-    use crate::profile::field_nullable;
-
     let cpu_fields: Vec<String> = fields.iter()
         .filter(|f| matches!(f.as_str(), "pc"|"sp"|"a"|"f"|"b"|"c"|"d"|"e"|"h"|"l"|"op"|"ime"))
         .cloned().collect();
