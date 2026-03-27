@@ -4,7 +4,6 @@ use std::process;
 use clap::{Parser, Subcommand};
 use gbtrace::JsonlReader;
 use gbtrace::header::TraceHeader;
-use gbtrace::query::Condition;
 
 #[derive(Parser)]
 #[command(name = "gbtrace-cli", about = "Inspect and compare GB Trace files")]
@@ -382,28 +381,11 @@ fn convert_to_gbtrace(
         return 1;
     }
 
-    let input_size = std::fs::metadata("").map(|m| m.len()).unwrap_or(0);
     let output_size = std::fs::metadata(output).map(|m| m.len()).unwrap_or(0);
     println!("Converted {count} entries to {} ({output_size} bytes)", output.display());
     0
 }
 
-
-fn parse_cli_condition(s: &str) -> Result<Condition, String> {
-    gbtrace::query::parse_condition(s)
-}
-
-fn parse_cli_conditions(parts: &[String]) -> Result<Condition, String> {
-    let conditions: Vec<Condition> = parts
-        .iter()
-        .map(|s| gbtrace::query::parse_condition(s))
-        .collect::<Result<Vec<_>, _>>()?;
-    if conditions.len() == 1 {
-        Ok(conditions.into_iter().next().unwrap())
-    } else {
-        Ok(Condition::All(conditions))
-    }
-}
 
 // ---------------------------------------------------------------------------
 fn cmd_query(input: &PathBuf, conditions: &[String], max: usize, context: usize) -> i32 {
