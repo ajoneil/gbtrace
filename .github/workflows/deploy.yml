@@ -58,11 +58,16 @@ jobs:
             cp -rn "$dir"* "build/traces/$suite/" 2>/dev/null || true
           done
           # Regenerate manifests with merged data
+          # Map suite trace dirs to ROM dirs (some differ)
+          declare -A ROM_DIRS
+          ROM_DIRS[gambatte-tests]="test-suites/gambatte"
+
           for suite_dir in build/traces/*/; do
             [ -d "$suite_dir" ] || continue
             suite=$(basename "$suite_dir")
-            if [ -d "test-suites/$suite" ]; then
-              python3 scripts/manifest.py "$suite_dir" "test-suites/$suite"
+            rom_dir="${ROM_DIRS[$suite]:-test-suites/$suite}"
+            if [ -d "$rom_dir" ]; then
+              python3 scripts/manifest.py "$suite_dir" "$rom_dir"
             fi
           done
           echo "Trace summary:"
@@ -86,20 +91,22 @@ jobs:
             cp -r "$suite_dir" "build/site/tests/$suite"
           done
 
-          # Copy ROMs for disassembly
-          for suite in gbmicrotest blargg mooneye dmg-acid2; do
-            if [ -d "build/site/tests/$suite" ] && [ -d "test-suites/$suite" ]; then
-              cd "test-suites/$suite"
-              find . -name '*.gb' -exec sh -c 'mkdir -p "../../build/site/tests/'"$suite"'/$(dirname "{}")" && cp "{}" "../../build/site/tests/'"$suite"'/{}"' \;
-              cd ../..
-            fi
-          done
+          # Copy ROMs and profiles — use ROM_DIRS mapping for suites with different paths
+          declare -A ROM_DIRS
+          ROM_DIRS[gambatte-tests]="test-suites/gambatte"
 
-          # Copy profile TOMLs
-          for suite in gbmicrotest blargg mooneye dmg-acid2; do
-            toml="test-suites/$suite/profile.toml"
-            if [ -f "$toml" ] && [ -d "build/site/tests/$suite" ]; then
-              cp "$toml" "build/site/tests/$suite/"
+          for suite_dir in build/site/tests/*/; do
+            [ -d "$suite_dir" ] || continue
+            suite=$(basename "$suite_dir")
+            rom_dir="${ROM_DIRS[$suite]:-test-suites/$suite}"
+            [ -d "$rom_dir" ] || continue
+            # Copy ROMs
+            cd "$rom_dir"
+            find . -name '*.gb' -exec sh -c 'mkdir -p "../../build/site/tests/'"$suite"'/$(dirname "{}")" && cp "{}" "../../build/site/tests/'"$suite"'/{}"' \;
+            cd ../..
+            # Copy profile
+            if [ -f "$rom_dir/profile.toml" ]; then
+              cp "$rom_dir/profile.toml" "$suite_dir/"
             fi
           done
 
