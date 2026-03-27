@@ -32,7 +32,7 @@ const TEST_SUITES = [
     preferredEmu: 'gateboy',
     tests: null,
     categories: [
-      { name: 'cpu instrs', filter: 'cpu_instrs/' },
+      { name: 'cpu instrs', filter: 'cpu_instrs__' },
       { name: 'instr timing', filter: 'instr_timing' },
     ],
   },
@@ -61,11 +61,11 @@ const TEST_SUITES = [
     preferredEmu: 'gateboy',
     tests: null,
     categories: [
-      { name: 'sprites', filter: 'sprites' },
+      { name: 'sprites', filter: 'sprites__' },
       { name: 'palette m3', filter: 'dmgpalette' },
       { name: 'scx m3', filter: 'scx_during' },
-      { name: 'div', filter: 'div/' },
-      { name: 'halt', filter: 'halt' },
+      { name: 'div', filter: 'div__' },
+      { name: 'halt', filter: 'halt__' },
       { name: 'stat irq', filter: 'miscmstatirq' },
     ],
   },
@@ -84,9 +84,8 @@ const EMULATORS = ['gateboy', 'missingno', 'gambatte', 'sameboy', 'mgba'];
 
 const EMU_SHORT = { gateboy: 'GB', missingno: 'MN', gambatte: 'Ga', sameboy: 'SB', mgba: 'mG' };
 
-function traceUrl(suite, rom, emulator, status = 'pass') {
-  const base = rom.replace('.gb', '');
-  return `${suite.base}/${base}_${emulator}_${status}.gbtrace`;
+function traceUrl(suite, test, emulator, status = 'pass') {
+  return `${suite.base}/${test.name}_${emulator}_${status}.gbtrace`;
 }
 
 function romUrl(suite, rom) {
@@ -405,7 +404,7 @@ export class TestPicker extends LitElement {
   }
 
   async _load(suite, test, emulator, status = 'pass') {
-    const url = traceUrl(suite, test.rom, emulator, status);
+    const url = traceUrl(suite, test, emulator, status);
     const filename = url.split('/').pop();
     this._loading = filename;
     this._error = null;

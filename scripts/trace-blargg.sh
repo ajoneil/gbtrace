@@ -13,19 +13,16 @@ OUT_DIR="$4"
 ROM_DIR="${5:-$(dirname "$ROM")}"
 CLI="${CLI:-target/release/gbtrace-cli}"
 
-NAME="$(basename "$ROM" .gb)"
 ADAPTER="$(basename "$BIN" | sed 's/gbtrace-//')"
 
-# Compute relative subdir from ROM_DIR to ROM (e.g. cpu_instrs/)
-ROM_REL="$(realpath --relative-to="$ROM_DIR" "$(dirname "$ROM")")"
-if [ "$ROM_REL" = "." ]; then
-    TRACE_SUBDIR="$OUT_DIR"
-else
-    TRACE_SUBDIR="$OUT_DIR/$ROM_REL"
-fi
+# Use relative path from ROM_DIR as the test name, flattening subdirs with __
+ROM_REL="$(realpath --relative-to="$ROM_DIR" "$ROM")"
+ROM_REL="${ROM_REL%.gb}"
+NAME="${ROM_REL//\//__}"
 
 # Check for .pix reference next to the ROM
-PIX_REF="$(dirname "$ROM")/${NAME}.pix"
+BASENAME="$(basename "$ROM" .gb)"
+PIX_REF="$(dirname "$ROM")/${BASENAME}.pix"
 
 MAX_FRAMES=1200
 TMP="/tmp/gbtrace_blargg_${NAME}_${ADAPTER}_$$"
@@ -62,8 +59,8 @@ if grep -q "Reference match" "$stderr_file" 2>/dev/null; then
 fi
 
 # --- Output ---
-mkdir -p "$TRACE_SUBDIR"
-out="${TRACE_SUBDIR}/${NAME}_${ADAPTER}_${status}.gbtrace"
+mkdir -p "$OUT_DIR"
+out="${OUT_DIR}/${NAME}_${ADAPTER}_${status}.gbtrace"
 mv "$tmp_trace" "$out"
 
 entries=$("$CLI" info "$out" 2>/dev/null | grep Entries | awk '{print $2}')

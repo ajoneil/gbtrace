@@ -460,8 +460,8 @@ export class TraceSelector extends LitElement {
   }
 
   async _loadEmu(emu, eventName, status = 'pass') {
-    if (!this.suite || !this.testRom) return;
-    const url = traceUrl(this.suite, this.testRom, emu, status);
+    if (!this.suite || !this.testInfo) return;
+    const url = traceUrl(this.suite, this.testInfo, emu, status);
     this._loading = emu;
     this._error = null;
 

@@ -17,19 +17,16 @@ OUT_DIR="$4"
 ROM_DIR="${5:-$(dirname "$ROM")}"
 CLI="${CLI:-target/release/gbtrace-cli}"
 
-NAME="$(basename "$ROM" .gb)"
 ADAPTER="$(basename "$BIN" | sed 's/gbtrace-//')"
 
 # Hard time limit per test (capture + verify)
 TEST_TIMEOUT=120
 
-# Compute relative subdir from ROM_DIR to ROM
-ROM_REL="$(realpath --relative-to="$ROM_DIR" "$(dirname "$ROM")")"
-if [ "$ROM_REL" = "." ]; then
-    TRACE_SUBDIR="$OUT_DIR"
-else
-    TRACE_SUBDIR="$OUT_DIR/$ROM_REL"
-fi
+# Use relative path from ROM_DIR as the test name, flattening subdirs with __
+# e.g. sprites/late_disable_1_dmg08_out0.gb → sprites__late_disable_1_dmg08_out0
+ROM_REL="$(realpath --relative-to="$ROM_DIR" "$ROM")"
+ROM_REL="${ROM_REL%.gb}"
+NAME="${ROM_REL//\//__}"
 
 # Skip expected-failure tests
 if echo "$NAME" | grep -q "_xout"; then
@@ -46,7 +43,8 @@ cleanup() { rm -f "$stderr_file" "$tmp_trace" "${ROM%.gb}.sav"; rm -rf "${TMP}_r
 trap cleanup EXIT
 
 # Check for .pix reference — Gambatte names DMG refs as {test}_dmg08.pix
-PIX_REF="$(dirname "$ROM")/${NAME}_dmg08.pix"
+BASENAME="$(basename "$ROM" .gb)"
+PIX_REF="$(dirname "$ROM")/${BASENAME}_dmg08.pix"
 EXTRA_ARGS=()
 if [[ -f "$PIX_REF" ]]; then
     EXTRA_ARGS+=(--reference "$PIX_REF")
@@ -88,8 +86,8 @@ elif echo "$NAME" | grep -qP '_out[0-9A-Fa-f]+$'; then
 fi
 
 # --- Output ---
-mkdir -p "$TRACE_SUBDIR"
-out="${TRACE_SUBDIR}/${NAME}_${ADAPTER}_${status}.gbtrace"
+mkdir -p "$OUT_DIR"
+out="${OUT_DIR}/${NAME}_${ADAPTER}_${status}.gbtrace"
 mv "$tmp_trace" "$out"
 
 entries=$("$CLI" info "$out" 2>/dev/null | grep Entries | awk '{print $2}')

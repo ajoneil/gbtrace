@@ -13,13 +13,14 @@ import sys
 EMULATORS = ['gateboy', 'missingno', 'gambatte', 'sameboy', 'mgba']
 
 def generate_manifest(trace_dir, rom_dir):
-    # Find all ROMs
+    # Find all ROMs — use relative path with / replaced by __ as the key
+    # to avoid collisions when different subdirs have the same basename
     roms = {}
     for dirpath, _, filenames in sorted(os.walk(rom_dir)):
         for fname in sorted(filenames):
             if fname.endswith('.gb'):
-                name = fname[:-3]
                 rel = os.path.relpath(os.path.join(dirpath, fname), rom_dir)
+                name = rel[:-3].replace(os.sep, '__')
                 roms[name] = rel
 
     # Find all traces
