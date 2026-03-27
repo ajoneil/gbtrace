@@ -4,10 +4,10 @@ on:
   workflow_dispatch:
     inputs:
       suite:
-        description: "Test suite (all, gbmicrotest, blargg, mooneye, gambatte-tests, dmg-acid2)"
+        description: "Test suite (all, gbmicrotest, blargg, mooneye, gambatte-tests, mealybug-tearoom, dmg-acid2)"
         default: "all"
         type: choice
-        options: [all, gbmicrotest, blargg, mooneye, gambatte-tests, dmg-acid2]
+        options: [all, gbmicrotest, blargg, mooneye, gambatte-tests, mealybug-tearoom, dmg-acid2]
       emulator:
         description: "Emulator (all, gambatte, sameboy, mgba, gateboy, missingno)"
         default: "all"
@@ -22,7 +22,7 @@ jobs:
     steps:
       - id: set
         run: |
-          SUITES='["gbmicrotest","blargg","mooneye","gambatte-tests","dmg-acid2"]'
+          SUITES='["gbmicrotest","blargg","mooneye","gambatte-tests","mealybug-tearoom","dmg-acid2"]'
           EMUS='["gambatte","sameboy","mgba","gateboy","missingno"]'
 
           if [ "${{ inputs.suite }}" != "" ] && [ "${{ inputs.suite }}" != "all" ]; then
@@ -83,9 +83,11 @@ jobs:
           EMU="${{ matrix.emulator }}"
           BIN="adapters/${EMU}/gbtrace-${EMU}"
           TRACE_DIR="build/traces/${SUITE}"
-          # ROM_DIR: gambatte-tests ROMs are in test-suites/gambatte
+          # ROM_DIR: some suites have a different ROM directory
           if [ "$SUITE" = "gambatte-tests" ]; then
             ROM_DIR="test-suites/gambatte"
+          elif [ "$SUITE" = "mealybug-tearoom" ]; then
+            ROM_DIR="test-suites/mealybug-tearoom"
           else
             ROM_DIR="test-suites/${SUITE}"
           fi
@@ -125,6 +127,13 @@ jobs:
               while IFS= read -r -d '' rom; do
                 run_parallel bash scripts/trace-gambatte-tests.sh "$BIN" "$rom" "$PROFILE" "$TRACE_DIR" "$ROM_DIR"
               done < <(find "$ROM_DIR" -name '*.gb' ! -name '*.gbc' -print0 | sort -z)
+              ;;
+            mealybug-tearoom)
+              PROFILE="test-suites/mealybug-tearoom/profile.toml"
+              make pix-refs 2>/dev/null || true
+              while IFS= read -r -d '' rom; do
+                run_parallel bash scripts/trace-mealybug-tearoom.sh "$BIN" "$rom" "$PROFILE" "$TRACE_DIR" "$ROM_DIR"
+              done < <(find "$ROM_DIR" -name '*.gb' -print0 | sort -z)
               ;;
             dmg-acid2)
               PROFILE="test-suites/dmg-acid2/profile.toml"

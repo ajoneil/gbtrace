@@ -70,6 +70,15 @@ const TEST_SUITES = [
     ],
   },
   {
+    name: 'mealybug-tearoom',
+    base: 'tests/mealybug-tearoom',
+    profile: 'tests/mealybug-tearoom/profile.toml',
+    manifest: 'tests/mealybug-tearoom/manifest.json',
+    preferredEmu: 'gateboy',
+    tests: null,
+    categories: [],
+  },
+  {
     name: 'dmg-acid2',
     base: 'tests/dmg-acid2',
     profile: 'tests/dmg-acid2/profile.toml',

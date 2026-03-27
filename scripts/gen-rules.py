@@ -82,6 +82,15 @@ def main():
         'scripts/trace-gambatte-tests.sh',
     )
 
+    mealybug_stamps = gen_suite(
+        'mealybug-tearoom',
+        'test-suites/mealybug-tearoom',
+        'test-suites/mealybug-tearoom/profile.toml',
+        '$(MEALYBUG_TEAROOM_TRACE_DIR)',
+        emus,
+        'scripts/trace-mealybug-tearoom.sh',
+    )
+
     # Output stamp lists as Make variables
     print(f"GBMICROTEST_STAMPS := {' '.join(micro_stamps)}")
     print()
@@ -90,6 +99,8 @@ def main():
     print(f"MOONEYE_STAMPS := {' '.join(mooneye_stamps)}")
     print()
     print(f"GAMBATTE_TESTS_STAMPS := {' '.join(gambatte_stamps)}")
+    print()
+    print(f"MEALYBUG_TEAROOM_STAMPS := {' '.join(mealybug_stamps)}")
 
 
 if __name__ == '__main__':
