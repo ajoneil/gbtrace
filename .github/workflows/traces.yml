@@ -72,22 +72,12 @@ jobs:
       - name: Make adapter executable
         run: chmod +x adapters/${{ matrix.emulator }}/gbtrace-${{ matrix.emulator }}
 
-      # Cache traces
-      - name: Cache traces
-        id: cache-traces
-        uses: actions/cache@v5
-        with:
-          path: build/traces/${{ matrix.suite }}
-          key: traces-${{ matrix.suite }}-${{ matrix.emulator }}-${{ hashFiles(format('adapters/{0}/gbtrace-{0}.cpp', matrix.emulator), format('adapters/{0}/gbtrace-{0}.c', matrix.emulator), format('adapters/{0}/src/**', matrix.emulator), format('adapters/{0}/Cargo.toml', matrix.emulator), format('test-suites/{0}/**', matrix.suite), format('scripts/trace-{0}.sh', matrix.suite), 'scripts/trace-screenshot.sh', 'crates/gbtrace/src/**') }}
-
       # Generate pix references if needed
       - name: Generate pix references
-        if: steps.cache-traces.outputs.cache-hit != 'true'
         run: make pix-refs
 
       # Generate traces by running scripts directly (no make, no adapter rebuild)
       - name: Generate traces
-        if: steps.cache-traces.outputs.cache-hit != 'true'
         run: |
           SUITE="${{ matrix.suite }}"
           EMU="${{ matrix.emulator }}"
