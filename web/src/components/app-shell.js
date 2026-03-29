@@ -183,6 +183,11 @@ export class AppShell extends LitElement {
     return this._header?.fields || [];
   }
 
+  get _fieldGroups() {
+    if (!this._store) return null;
+    try { return this._store.fieldGroups(); } catch { return null; }
+  }
+
   /** The effective cursor index: hover takes priority, falls back to current. */
   get _effectiveIndex() {
     return this._hoverIndex ?? this._currentIndex;
@@ -249,6 +254,7 @@ export class AppShell extends LitElement {
         .activeA=${this._nameA}
         .activeB=${this._nameB}
         .allFields=${this._allFields}
+        .fieldGroups=${this._fieldGroups}
         .hiddenFields=${this._hiddenFields}
         .excludedFields=${this._compareHiddenFields || null}
         .triggerA=${this._header?.trigger || null}

@@ -3,41 +3,40 @@ import { createTraceStore } from '../lib/wasm-bridge.js';
 import { EMULATORS, traceUrl, romUrl } from './test-picker.js';
 
 /** Field groups for toggling related columns together. */
-const FIELD_GROUPS = [
-  { name: 'cpu',       fields: ['pc', 'sp', 'a', 'f', 'b', 'c', 'd', 'e', 'h', 'l', 'ime', 'mcycles', 'tcycles'] },
-  { name: 'ppu',       fields: ['lcdc', 'stat', 'ly', 'lyc', 'scy', 'scx', 'wy', 'wx', 'bgp', 'obp0', 'obp1', 'dma'] },
-  { name: 'ppu_int',   fields: [
-    'pix', 'pix_x',
-    'oam0_x', 'oam0_id', 'oam0_attr', 'oam1_x', 'oam1_id', 'oam1_attr',
-    'oam2_x', 'oam2_id', 'oam2_attr', 'oam3_x', 'oam3_id', 'oam3_attr',
-    'oam4_x', 'oam4_id', 'oam4_attr', 'oam5_x', 'oam5_id', 'oam5_attr',
-    'oam6_x', 'oam6_id', 'oam6_attr', 'oam7_x', 'oam7_id', 'oam7_attr',
-    'oam8_x', 'oam8_id', 'oam8_attr', 'oam9_x', 'oam9_id', 'oam9_attr',
-    'bgw_fifo_a', 'bgw_fifo_b', 'spr_fifo_a', 'spr_fifo_b',
-    'mask_pipe', 'pal_pipe',
-    'tfetch_state', 'sfetch_state', 'tile_temp_a', 'tile_temp_b',
-    'pix_count', 'sprite_count', 'scan_count', 'rendering', 'win_mode',
-    'vram_addr', 'vram_data',
-  ]},
-  { name: 'apu',       fields: [
-    'nr10', 'nr11', 'nr12', 'nr13', 'nr14',
-    'nr21', 'nr22', 'nr23', 'nr24',
-    'nr30', 'nr31', 'nr32', 'nr33', 'nr34',
-    'nr41', 'nr42', 'nr43', 'nr44',
-    'nr50', 'nr51', 'nr52',
-  ]},
-  { name: 'apu_int',   fields: [
-    'ch1_active', 'ch1_freq_cnt', 'ch1_env_vol', 'ch1_phase', 'ch1_sweep_shadow', 'ch1_len_cnt',
-    'ch2_active', 'ch2_freq_cnt', 'ch2_env_vol', 'ch2_phase', 'ch2_len_cnt',
-    'ch3_active', 'ch3_freq_cnt', 'ch3_wave_idx', 'ch3_sample', 'ch3_len_cnt',
-    'ch4_active', 'ch4_freq_cnt', 'ch4_env_vol', 'ch4_lfsr', 'ch4_len_cnt',
-    'apu_write_addr', 'apu_write_data',
-  ]},
-  { name: 'timer',     fields: ['div', 'tima', 'tma', 'tac'] },
-  { name: 'interrupt', fields: ['if_', 'ie'] },
-  { name: 'serial',    fields: ['sb', 'sc'] },
-  { name: 'test',      fields: ['test_result', 'test_expect', 'test_pass', 'test_status', 'test_sig1'] },
-];
+/**
+ * Build field groups from the WASM fieldGroups() API.
+ * Returns [{name, fields}] grouped by "subsystem/layer" (e.g. "cpu/registers").
+ * Subsystems with only one layer use just the subsystem name.
+ */
+function buildFieldGroups(fieldGroupMap, allFields) {
+  if (!fieldGroupMap) return [];
+
+  // Collect fields per subsystem+layer
+  const buckets = new Map(); // "subsystem/layer" -> [field_names]
+  const subsystemLayers = new Map(); // subsystem -> Set of layers
+
+  for (const field of allFields) {
+    const group = fieldGroupMap[field];
+    if (!group) continue;
+    const [subsystem, layer] = group;
+    const key = `${subsystem}/${layer}`;
+    if (!buckets.has(key)) buckets.set(key, []);
+    buckets.get(key).push(field);
+    if (!subsystemLayers.has(subsystem)) subsystemLayers.set(subsystem, new Set());
+    subsystemLayers.get(subsystem).add(layer);
+  }
+
+  // Build groups — collapse subsystems with one layer to just the subsystem name
+  const groups = [];
+  for (const [key, fields] of buckets) {
+    const [subsystem, layer] = key.split('/');
+    const numLayers = subsystemLayers.get(subsystem)?.size ?? 1;
+    const name = numLayers > 1 ? `${subsystem}/${layer}` : subsystem;
+    groups.push({ name, fields });
+  }
+
+  return groups;
+}
 
 export class TraceSelector extends LitElement {
   static styles = css`
@@ -214,6 +213,7 @@ export class TraceSelector extends LitElement {
     activeA: { type: String },
     activeB: { type: String },
     allFields: { type: Array },
+    fieldGroups: { type: Object },
     hiddenFields: { type: Object },
     excludedFields: { type: Object },
     triggerA: { type: String },
@@ -334,8 +334,10 @@ export class TraceSelector extends LitElement {
     const grouped = new Set();
     const parts = [];
 
+    const groups = buildFieldGroups(this.fieldGroups, this.allFields || []);
+
     // Render each group that has fields in this trace
-    for (const group of FIELD_GROUPS) {
+    for (const group of groups) {
       const present = group.fields.filter(f => allFields.includes(f));
       if (present.length === 0) continue;
       present.forEach(f => grouped.add(f));
@@ -377,7 +379,8 @@ export class TraceSelector extends LitElement {
   }
 
   _toggleGroup(groupName) {
-    const group = FIELD_GROUPS.find(g => g.name === groupName);
+    const groups = buildFieldGroups(this.fieldGroups, this.allFields || []);
+    const group = groups.find(g => g.name === groupName);
     if (!group) return;
 
     const present = group.fields.filter(f => (this.allFields || []).includes(f));
