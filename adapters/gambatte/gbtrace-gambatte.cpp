@@ -54,83 +54,28 @@ struct Profile {
     std::unordered_map<std::string, unsigned short> memory; // name -> address
 };
 
-static Profile parse_profile(const std::string &path) {
-    Profile prof;
-    prof.trigger = "instruction";
-
-    std::ifstream f(path);
-    if (!f.is_open()) {
-        std::fprintf(stderr, "Error: cannot open profile '%s'\n", path.c_str());
+static Profile load_profile(const std::string &path) {
+    GbtraceProfile *p = gbtrace_profile_load(path.c_str());
+    if (!p) {
+        std::fprintf(stderr, "Error: cannot load profile '%s'\n", path.c_str());
         std::exit(1);
     }
 
-    // Minimal TOML parser — enough for our profile format.
-    auto trim = [](std::string &s) {
-        while (!s.empty() && std::isspace(s.front())) s.erase(0, 1);
-        while (!s.empty() && std::isspace(s.back())) s.pop_back();
-    };
-    auto strip_quotes = [](std::string &s) {
-        if (s.size() >= 2 && s.front() == '"' && s.back() == '"')
-            s = s.substr(1, s.size() - 2);
-    };
+    Profile prof;
+    prof.name = gbtrace_profile_name(p);
+    prof.trigger = gbtrace_profile_trigger(p);
 
-    std::string line;
-    bool in_memory_section = false;
-    while (std::getline(f, line)) {
-        auto hash = line.find('#');
-        if (hash != std::string::npos) line = line.substr(0, hash);
-        trim(line);
-
-        // Track TOML sections
-        if (line.size() >= 2 && line.front() == '[') {
-            in_memory_section = (line == "[fields.memory]");
-            continue;
-        }
-
-        auto eq = line.find('=');
-        if (eq == std::string::npos) continue;
-
-        std::string key = line.substr(0, eq);
-        std::string val = line.substr(eq + 1);
-        trim(key); trim(val);
-
-        if (in_memory_section) {
-            // Memory field: name = "hex_address"
-            strip_quotes(val);
-            unsigned long addr = std::strtoul(val.c_str(), nullptr, 16);
-            prof.memory[key] = static_cast<unsigned short>(addr);
-            prof.fields.push_back(key);
-        } else if (key == "name") {
-            strip_quotes(val);
-            prof.name = val;
-        } else if (key == "trigger") {
-            strip_quotes(val);
-            prof.trigger = val;
-        } else if (!val.empty() && val.front() == '[') {
-            // Handle multi-line arrays: accumulate lines until ']'
-            std::string array_str = val;
-            while (array_str.find(']') == std::string::npos && std::getline(f, line)) {
-                auto h = line.find('#');
-                if (h != std::string::npos) line = line.substr(0, h);
-                trim(line);
-                array_str += " " + line;
-            }
-            auto start = array_str.find('[');
-            auto end = array_str.find(']');
-            if (start != std::string::npos && end != std::string::npos) {
-                std::string inner = array_str.substr(start + 1, end - start - 1);
-                std::istringstream ss(inner);
-                std::string token;
-                while (std::getline(ss, token, ',')) {
-                    trim(token); strip_quotes(token);
-                    if (!token.empty() && token != "cy") {
-                        prof.fields.push_back(token);
-                    }
-                }
-            }
-        }
+    size_t nfields = gbtrace_profile_num_fields(p);
+    for (size_t i = 0; i < nfields; i++) {
+        prof.fields.push_back(gbtrace_profile_field_name(p, i));
     }
 
+    size_t nmem = gbtrace_profile_num_memory(p);
+    for (size_t i = 0; i < nmem; i++) {
+        prof.memory[gbtrace_profile_memory_name(p, i)] = gbtrace_profile_memory_addr(p, i);
+    }
+
+    gbtrace_profile_free(p);
     return prof;
 }
 
@@ -456,7 +401,7 @@ int main(int argc, char *argv[]) {
     }
 
     // Load profile
-    g_profile = parse_profile(profile_path);
+    g_profile = load_profile(profile_path);
     build_emitters(g_profile);
 
     std::fprintf(stderr, "Profile: %s (%zu fields)\n",

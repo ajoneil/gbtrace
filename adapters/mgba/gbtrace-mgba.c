@@ -83,97 +83,32 @@ struct Profile {
     int nmemory;
 };
 
-static void trim(char *s) {
-    while (*s && (*s == ' ' || *s == '\t')) memmove(s, s+1, strlen(s));
-    char *end = s + strlen(s) - 1;
-    while (end > s && (*end == ' ' || *end == '\t' || *end == '\n' || *end == '\r')) *end-- = '\0';
-}
-
-static void strip_quotes(char *s) {
-    size_t len = strlen(s);
-    if (len >= 2 && s[0] == '"' && s[len-1] == '"') {
-        memmove(s, s+1, len-2);
-        s[len-2] = '\0';
-    }
-}
-
-static struct Profile parse_profile(const char *path) {
+static struct Profile load_profile(const char *path) {
     struct Profile prof = {0};
-    strcpy(prof.trigger, "instruction");
-    prof.nfields = 0;
 
-    FILE *f = fopen(path, "r");
-    if (!f) { fprintf(stderr, "Error: cannot open profile '%s'\n", path); exit(1); }
-
-    int in_memory_section = 0;
-    char line[1024];
-    while (fgets(line, sizeof(line), f)) {
-        char *hash = strchr(line, '#');
-        if (hash) *hash = '\0';
-        trim(line);
-
-        // Track TOML sections
-        if (line[0] == '[') {
-            in_memory_section = (strcmp(line, "[fields.memory]") == 0);
-            continue;
-        }
-
-        char *eq = strchr(line, '=');
-        if (!eq) continue;
-
-        *eq = '\0';
-        char *key = line;
-        char *val = eq + 1;
-        trim(key); trim(val);
-
-        if (in_memory_section) {
-            strip_quotes(val);
-            if (prof.nmemory < MAX_MEMORY_FIELDS && prof.nfields < MAX_FIELDS) {
-                strncpy(prof.memory[prof.nmemory].name, key, MAX_NAME - 1);
-                prof.memory[prof.nmemory].addr = (unsigned short)strtoul(val, NULL, 16);
-                prof.nmemory++;
-                strncpy(prof.fields[prof.nfields], key, MAX_NAME - 1);
-                prof.nfields++;
-            }
-        } else if (strcmp(key, "name") == 0) {
-            strip_quotes(val);
-            strncpy(prof.name, val, MAX_NAME - 1);
-        } else if (strcmp(key, "trigger") == 0) {
-            strip_quotes(val);
-            strncpy(prof.trigger, val, MAX_NAME - 1);
-        } else if (val[0] == '[') {
-            /* Handle multi-line arrays: accumulate lines until ']' */
-            static char array_buf[8192];
-            strncpy(array_buf, val, sizeof(array_buf) - 1);
-            array_buf[sizeof(array_buf) - 1] = '\0';
-            while (!strchr(array_buf, ']') && fgets(line, sizeof(line), f)) {
-                /* strip comment */
-                char *h = strchr(line, '#');
-                if (h) *h = '\0';
-                trim(line);
-                size_t cur = strlen(array_buf);
-                if (cur + strlen(line) + 2 < sizeof(array_buf)) {
-                    array_buf[cur] = ' ';
-                    strcpy(array_buf + cur + 1, line);
-                }
-            }
-            char *start = strchr(array_buf, '[');
-            char *end = strchr(array_buf, ']');
-            if (start && end) {
-                *end = '\0';
-                char *tok = strtok(start + 1, ",");
-                while (tok && prof.nfields < MAX_FIELDS) {
-                    trim(tok); strip_quotes(tok);
-                    if (tok[0] && strcmp(tok, "cy") != 0) {
-                        strncpy(prof.fields[prof.nfields], tok, MAX_NAME - 1);
-                        prof.nfields++;
-                    }
-                    tok = strtok(NULL, ",");
-                }
-            }
-        }
+    GbtraceProfile *p = gbtrace_profile_load(path);
+    if (!p) {
+        fprintf(stderr, "Error: cannot load profile '%s'\n", path);
+        exit(1);
     }
-    fclose(f);
+
+    strncpy(prof.name, gbtrace_profile_name(p), MAX_NAME - 1);
+    strncpy(prof.trigger, gbtrace_profile_trigger(p), MAX_NAME - 1);
+
+    size_t nfields = gbtrace_profile_num_fields(p);
+    for (size_t i = 0; i < nfields && (int)i < MAX_FIELDS; i++) {
+        strncpy(prof.fields[prof.nfields], gbtrace_profile_field_name(p, i), MAX_NAME - 1);
+        prof.nfields++;
+    }
+
+    size_t nmem = gbtrace_profile_num_memory(p);
+    for (size_t i = 0; i < nmem && (int)i < MAX_MEMORY_FIELDS; i++) {
+        strncpy(prof.memory[prof.nmemory].name, gbtrace_profile_memory_name(p, i), MAX_NAME - 1);
+        prof.memory[prof.nmemory].addr = gbtrace_profile_memory_addr(p, i);
+        prof.nmemory++;
+    }
+
+    gbtrace_profile_free(p);
     return prof;
 }
 
@@ -229,7 +164,8 @@ static void build_emitters(const struct Profile *prof) {
     g_nemitters = 0;
     for (int i = 0; i < prof->nfields; i++) {
         const char *field = prof->fields[i];
-        if (strcmp(field, "cy") == 0) continue;
+
+
 
         struct FieldEmitter *em = &g_emitters[g_nemitters];
         strncpy(em->name, field, MAX_NAME - 1);
@@ -487,7 +423,7 @@ int main(int argc, char *argv[]) {
     }
 
     // Load profile
-    g_profile = parse_profile(profile_path);
+    g_profile = load_profile(profile_path);
     build_emitters(&g_profile);
     fprintf(stderr, "Profile: %s (%d fields)\n", g_profile.name, g_profile.nfields);
 
