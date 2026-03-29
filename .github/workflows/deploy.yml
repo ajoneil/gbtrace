@@ -31,73 +31,41 @@ jobs:
           path: web/pkg
           branch: main
 
-      # Download trace artifacts per suite, searching across workflow runs
-      # so that a partial rebuild of one suite doesn't lose the others.
-      - name: Download gbmicrotest traces
-        uses: dawidd6/action-download-artifact@v6
-        with:
-          workflow: traces.yml
-          name: traces-gbmicrotest-.*
-          name_is_regexp: true
-          path: _trace_artifacts
-          branch: main
-          if_no_artifact_found: warn
-          search_artifacts: true
+      # Download the latest trace artifact for each suite-emulator pair,
+      # searching across all workflow runs so partial rebuilds don't lose
+      # results from older runs.
+      - name: Download all trace artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          SUITES=(gbmicrotest blargg mooneye gambatte-tests mealybug-tearoom dmg-acid2)
+          EMUS=(gambatte sameboy mgba gateboy missingno)
 
-      - name: Download blargg traces
-        uses: dawidd6/action-download-artifact@v6
-        with:
-          workflow: traces.yml
-          name: traces-blargg-.*
-          name_is_regexp: true
-          path: _trace_artifacts
-          branch: main
-          if_no_artifact_found: warn
-          search_artifacts: true
+          mkdir -p _trace_artifacts
 
-      - name: Download mooneye traces
-        uses: dawidd6/action-download-artifact@v6
-        with:
-          workflow: traces.yml
-          name: traces-mooneye-.*
-          name_is_regexp: true
-          path: _trace_artifacts
-          branch: main
-          if_no_artifact_found: warn
-          search_artifacts: true
+          # Fetch all non-expired trace artifacts, newest first.
+          gh api --paginate \
+            "repos/${{ github.repository }}/actions/artifacts?per_page=100" \
+            --jq '.artifacts[] | select(.expired == false and (.name | startswith("traces-"))) | {name, id}' \
+            > /tmp/all_artifacts.json
 
-      - name: Download gambatte-tests traces
-        uses: dawidd6/action-download-artifact@v6
-        with:
-          workflow: traces.yml
-          name: traces-gambatte-tests-.*
-          name_is_regexp: true
-          path: _trace_artifacts
-          branch: main
-          if_no_artifact_found: warn
-          search_artifacts: true
-
-      - name: Download mealybug-tearoom traces
-        uses: dawidd6/action-download-artifact@v6
-        with:
-          workflow: traces.yml
-          name: traces-mealybug-tearoom-.*
-          name_is_regexp: true
-          path: _trace_artifacts
-          branch: main
-          if_no_artifact_found: warn
-          search_artifacts: true
-
-      - name: Download dmg-acid2 traces
-        uses: dawidd6/action-download-artifact@v6
-        with:
-          workflow: traces.yml
-          name: traces-dmg-acid2-.*
-          name_is_regexp: true
-          path: _trace_artifacts
-          branch: main
-          if_no_artifact_found: warn
-          search_artifacts: true
+          for suite in "${SUITES[@]}"; do
+            for emu in "${EMUS[@]}"; do
+              name="traces-${suite}-${emu}"
+              # First match is the newest since the API returns reverse-chronological
+              artifact_id=$(jq -r "select(.name == \"${name}\") | .id" /tmp/all_artifacts.json | head -1)
+              if [ -z "$artifact_id" ]; then
+                echo "Warning: no artifact found for ${name}"
+                continue
+              fi
+              echo "Downloading ${name} (artifact ${artifact_id})"
+              gh api "repos/${{ github.repository }}/actions/artifacts/${artifact_id}/zip" \
+                > "/tmp/${name}.zip"
+              mkdir -p "_trace_artifacts/${name}"
+              unzip -qo "/tmp/${name}.zip" -d "_trace_artifacts/${name}"
+              rm "/tmp/${name}.zip"
+            done
+          done
 
       # Merge trace artifacts into build/traces/
       # Artifacts are in _trace_artifacts/traces-{suite}-{emulator}/...
