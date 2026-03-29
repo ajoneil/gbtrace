@@ -5,6 +5,7 @@ trigger = "tcycle"
 
 [fields]
 cpu = "registers"
+ppu = "output"
 apu = ["registers", "internal", "writes"]
 timer = true
 interrupt = true
