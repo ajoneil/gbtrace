@@ -198,8 +198,8 @@ export class AppShell extends LitElement {
     return this._allFields.includes('oam0_x');
   }
 
-  get _hasApuInternals() {
-    return this._allFields.includes('ch1_active');
+  get _hasApuFields() {
+    return this._allFields.includes('ch1_sweep') || this._allFields.includes('ch1_active');
   }
 
   /** Fields the user has selected (all minus hidden). Used for queries, stats, diff. */
@@ -381,7 +381,7 @@ export class AppShell extends LitElement {
         </div>
         ${expanded ? html`
           <div style="border-top:1px solid var(--border);padding:8px;display:flex;gap:8px;align-items:flex-start;">
-            ${this._hasPpuInternals || this._hasApuInternals ? html`
+            ${this._hasPpuInternals || this._hasApuFields ? html`
               <div style="display:flex;flex-direction:column;gap:8px;min-width:0;">
                 ${this._hasPpuInternals ? html`
                   <ppu-fifo-visualizer
@@ -393,7 +393,7 @@ export class AppShell extends LitElement {
                     .cursorIndex=${this._effectiveIndex ?? this._viewStart}
                   ></ppu-sprite-table>
                 ` : ''}
-                ${this._hasApuInternals ? html`
+                ${this._hasApuFields ? html`
                   <apu-visualizer
                     .store=${this._store}
                     .cursorIndex=${this._effectiveIndex ?? this._viewStart}

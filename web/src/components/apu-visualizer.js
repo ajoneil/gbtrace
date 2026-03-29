@@ -201,13 +201,22 @@ export class ApuVisualizer extends LitElement {
   }
 
   render() {
-    if (!this._entry || this._entry.ch1_active === undefined) return html``;
+    if (!this._entry) return html``;
+    // Show if we have either APU registers or internal state
+    if (this._entry.ch1_sweep === undefined && this._entry.ch1_active === undefined) return html``;
     const e = this._entry;
 
     const masterVol = e.master_vol ?? 0;
     const soundPan = e.sound_pan ?? 0;
+    const soundOn = e.sound_on ?? 0;
     const volL = (masterVol >> 4) & 7;
     const volR = masterVol & 7;
+
+    // Derive active state from internal fields if available, else from NR52
+    const ch1Active = e.ch1_active ?? ((soundOn & 1) !== 0);
+    const ch2Active = e.ch2_active ?? ((soundOn & 2) !== 0);
+    const ch3Active = e.ch3_active ?? ((soundOn & 4) !== 0);
+    const ch4Active = e.ch4_active ?? ((soundOn & 8) !== 0);
 
     return html`
       <div class="apu">
@@ -215,14 +224,14 @@ export class ApuVisualizer extends LitElement {
           <span>APU Channels</span>
           <span class="master-vol">vol L:${volL} R:${volR}</span>
         </div>
-        ${this._renderPulseChannel('CH1', e.ch1_active, e.ch1_freq_cnt,
+        ${this._renderPulseChannel('CH1', ch1Active, e.ch1_freq_cnt,
           e.ch1_freq_lo, e.ch1_freq_hi, e.ch1_phase, e.ch1_env_vol,
           (e.ch1_duty_len >> 6) & 3, soundPan, 0)}
-        ${this._renderPulseChannel('CH2', e.ch2_active, e.ch2_freq_cnt,
+        ${this._renderPulseChannel('CH2', ch2Active, e.ch2_freq_cnt,
           e.ch2_freq_lo, e.ch2_freq_hi, e.ch2_phase, e.ch2_env_vol,
           (e.ch2_duty_len >> 6) & 3, soundPan, 1)}
-        ${this._renderWaveChannel(e, soundPan)}
-        ${this._renderNoiseChannel(e, soundPan)}
+        ${this._renderWaveChannel(e, soundPan, ch3Active)}
+        ${this._renderNoiseChannel(e, soundPan, ch4Active)}
       </div>
     `;
   }
@@ -284,8 +293,7 @@ export class ApuVisualizer extends LitElement {
     `;
   }
 
-  _renderWaveChannel(e, soundPan) {
-    const active = e.ch3_active;
+  _renderWaveChannel(e, soundPan, active) {
     const freqCnt = e.ch3_freq_cnt ?? 0;
     const period = ((e.ch3_freq_hi & 7) << 8) | (e.ch3_freq_lo ?? 0);
     const waveIdx = e.ch3_wave_idx ?? 0;
@@ -347,8 +355,7 @@ export class ApuVisualizer extends LitElement {
     `;
   }
 
-  _renderNoiseChannel(e, soundPan) {
-    const active = e.ch4_active;
+  _renderNoiseChannel(e, soundPan, active) {
     const envVol = e.ch4_env_vol ?? 0;
     const lfsr = e.ch4_lfsr ?? 0;
     const routing = this._channelRouting(soundPan, 3);
