@@ -1,6 +1,10 @@
 name: Deploy Site
 
 on:
+  workflow_run:
+    workflows: [Generate Traces]
+    types: [completed]
+    branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -15,6 +19,8 @@ concurrency:
 
 jobs:
   deploy:
+    # Skip if triggered by a failed trace run
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     environment:
       name: github-pages

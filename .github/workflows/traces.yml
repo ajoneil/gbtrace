@@ -1,6 +1,10 @@
 name: Generate Traces
 
 on:
+  workflow_run:
+    workflows: [Build]
+    types: [completed]
+    branches: [main]
   workflow_dispatch:
     inputs:
       suite:
@@ -16,6 +20,8 @@ on:
 
 jobs:
   matrix-setup:
+    # Skip if triggered by a failed build
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     outputs:
       matrix: ${{ steps.set.outputs.matrix }}
