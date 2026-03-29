@@ -233,10 +233,13 @@ fn step_tcycle(gb: &mut GameBoy, tracer: &mut Tracer) -> bool {
             tracer.push_pixel(pixel.shade);
         }
 
-        // Detect VRAM writes from the dot action (writes happen on fall)
+        // Detect bus writes from the dot action (writes happen on fall)
         if let DotAction::Write { address, value } = gb.last_dot_action() {
             if (0x8000..=0x9FFF).contains(address) {
                 tracer.push_vram_write(*address, *value);
+            }
+            if (0xFF30..=0xFF3F).contains(address) {
+                tracer.push_wave_write(*address, *value);
             }
         }
 

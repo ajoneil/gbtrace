@@ -157,6 +157,13 @@ static int g_writer_vram_data_col = -1;
 static uint16_t g_vram_write_addr = 0;
 static uint8_t g_vram_write_data = 0;
 
+// --- Wave RAM write tracking ---
+static bool g_has_wave = false;
+static int g_writer_wave_addr_col = -1;
+static int g_writer_wave_data_col = -1;
+static uint16_t g_wave_write_addr = 0;
+static uint8_t g_wave_write_data = 0;
+
 // --- Pixel capture ---
 // Uses GateBoy's pixel_callback in update_framebuffer() to capture each
 // pixel at the exact moment it's pushed to the LCD.
@@ -385,6 +392,10 @@ static void build_emitters(const Profile &prof) {
             // Handled separately via g_writer_vram_addr_col/g_writer_vram_data_col
             g_has_vram = true;
             continue;
+        } else if (field == "wave_addr" || field == "wave_data") {
+            // Handled separately via g_writer_wave_addr_col/g_writer_wave_data_col
+            g_has_wave = true;
+            continue;
         } else {
             std::fprintf(stderr, "Warning: unknown field '%s' (len=%zu), skipping\n", field.c_str(), field.size());
             continue;
@@ -499,6 +510,19 @@ static void emit_entry(GateBoy &gb) {
     }
     g_vram_write_addr = 0;
     g_vram_write_data = 0;
+
+    // Wave RAM write fields — null when no write this cycle
+    if (g_writer_wave_addr_col >= 0) {
+        if (g_wave_write_addr != 0) {
+            gbtrace_writer_set_u16(g_writer, g_writer_wave_addr_col, g_wave_write_addr);
+            gbtrace_writer_set_u8(g_writer, g_writer_wave_data_col, g_wave_write_data);
+        } else {
+            gbtrace_writer_set_null(g_writer, g_writer_wave_addr_col);
+            gbtrace_writer_set_null(g_writer, g_writer_wave_data_col);
+        }
+    }
+    g_wave_write_addr = 0;
+    g_wave_write_data = 0;
 
     gbtrace_writer_finish_entry(g_writer);
 }
@@ -688,6 +712,9 @@ int main(int argc, char *argv[]) {
         g_writer_vram_addr_col = gbtrace_writer_find_field(g_writer, "vram_addr");
         g_writer_vram_data_col = gbtrace_writer_find_field(g_writer, "vram_data");
         g_has_vram = (g_writer_vram_addr_col >= 0);
+        g_writer_wave_addr_col = gbtrace_writer_find_field(g_writer, "wave_addr");
+        g_writer_wave_data_col = gbtrace_writer_find_field(g_writer, "wave_data");
+        g_has_wave = (g_writer_wave_addr_col >= 0);
 
         // Mark entry 0 as a frame boundary
         gbtrace_writer_mark_frame(g_writer);
@@ -741,15 +768,20 @@ int main(int argc, char *argv[]) {
             collect_pixel(gb);
         }
 
-        // Detect VRAM writes from bus signals (check at T-cycle boundary)
-        if (g_has_vram && (phase_count % PHASES_PER_TCYCLE) == 0) {
+        // Detect bus writes at T-cycle boundary
+        if ((g_has_vram || g_has_wave) && (phase_count % PHASES_PER_TCYCLE) == 0) {
             const auto &s = gb.gb_state;
             // APOV_CPU_WRp is high when the CPU is writing
             if (s.cpu_signals.APOV_CPU_WRp.state & BIT_DATA) {
                 uint16_t addr = (uint16_t)bit_pack(s.cpu_abus);
-                if (addr >= 0x8000 && addr <= 0x9FFF) {
+                uint8_t data = (uint8_t)bit_pack(s.cpu_dbus);
+                if (g_has_vram && addr >= 0x8000 && addr <= 0x9FFF) {
                     g_vram_write_addr = addr;
-                    g_vram_write_data = (uint8_t)bit_pack(s.cpu_dbus);
+                    g_vram_write_data = data;
+                }
+                if (g_has_wave && addr >= 0xFF30 && addr <= 0xFF3F) {
+                    g_wave_write_addr = addr;
+                    g_wave_write_data = data;
                 }
             }
         }
