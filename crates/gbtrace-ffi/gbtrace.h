@@ -1,4 +1,4 @@
-/* gbtrace FFI — C bindings for the gbtrace parquet writer.
+/* gbtrace FFI — C bindings for the gbtrace trace writer.
  *
  * Link with: -lgbtrace_ffi -lm -ldl -lpthread
  *
@@ -33,7 +33,7 @@ typedef struct GbtraceWriter GbtraceWriter;
 #define GBTRACE_TYPE_BOOL 3
 #define GBTRACE_TYPE_STR  4
 
-/* Create a new parquet writer.
+/* Create a new trace writer.
  * path: null-terminated output file path.
  * header_json: pointer to JSON header string.
  * header_len: byte length of header_json (not null-terminated).
@@ -78,7 +78,7 @@ int gbtrace_writer_mark_frame(GbtraceWriter *w);
  * Returns 0 on success, -1 on error. */
 int gbtrace_writer_finish_entry(GbtraceWriter *w);
 
-/* Close the writer and finalize the parquet file.
+/* Close the writer and finalize the trace file.
  * Consumes the writer — do not use after this call.
  * Returns 0 on success, -1 on error. */
 int gbtrace_writer_close(GbtraceWriter *w);

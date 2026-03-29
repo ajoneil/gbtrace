@@ -197,13 +197,13 @@ static std::vector<FieldEmitter> g_emitters;
 static bool g_has_pix = false;
 static bool g_has_vram = false;
 
-// --- Parquet direct writer (FFI) ---
-static GbtraceWriter *g_parquet = nullptr;
-// Column indices into the parquet writer, parallel to g_emitters
-static std::vector<int> g_parquet_cols;
-static int g_parquet_ly_col = -1;
-static int g_parquet_vram_addr_col = -1;
-static int g_parquet_vram_data_col = -1;
+// --- Trace writer (FFI) ---
+static GbtraceWriter *g_writer = nullptr;
+// Column indices into the writer, parallel to g_emitters
+static std::vector<int> g_writer_cols;
+static int g_writer_ly_col = -1;
+static int g_writer_vram_addr_col = -1;
+static int g_writer_vram_data_col = -1;
 
 // --- VRAM write tracking ---
 static uint16_t g_vram_write_addr = 0;
@@ -405,7 +405,7 @@ static void build_emitters(const Profile &prof) {
             em.source = FieldEmitter::PPU_BOOL;
             em.read_ppu_bool = it4->second;
         } else if (field == "vram_addr" || field == "vram_data") {
-            // Handled separately via g_parquet_vram_addr_col/g_parquet_vram_data_col
+            // Handled separately via g_writer_vram_addr_col/g_writer_vram_data_col
             g_has_vram = true;
             continue;
         } else {
@@ -463,67 +463,67 @@ static void emit_entry(GateBoy &gb) {
     // Gather ly and pix_len for boundary check
     uint8_t ly_val = 255;
     size_t pix_len = 0;
-    if (g_parquet_ly_col >= 0) {
+    if (g_writer_ly_col >= 0) {
         ly_val = (uint8_t)bit_pack(gb.gb_state.reg_ly);
     }
     if (g_has_pix) {
         pix_len = g_pix_buf.size();
     }
-    gbtrace_writer_check_boundary(g_parquet, ly_val, pix_len);
+    gbtrace_writer_check_boundary(g_writer, ly_val, pix_len);
 
     // Set all field values
     for (size_t i = 0; i < g_emitters.size(); i++) {
-        int col = g_parquet_cols[i];
+        int col = g_writer_cols[i];
         if (col < 0) continue;
         const auto &em = g_emitters[i];
         switch (em.source) {
         case FieldEmitter::CPU_REG8:
-            gbtrace_writer_set_u8(g_parquet, col, read_cpu_reg8(reg, em.name));
+            gbtrace_writer_set_u8(g_writer, col, read_cpu_reg8(reg, em.name));
             break;
         case FieldEmitter::CPU_REG16:
-            gbtrace_writer_set_u16(g_parquet, col, read_cpu_reg16(reg, em.name));
+            gbtrace_writer_set_u16(g_writer, col, read_cpu_reg16(reg, em.name));
             break;
         case FieldEmitter::CPU_IME:
-            gbtrace_writer_set_bool(g_parquet, col, reg.ime);
+            gbtrace_writer_set_bool(g_writer, col, reg.ime);
             break;
         case FieldEmitter::IO_READ:
-            gbtrace_writer_set_u8(g_parquet, col, read_reg(gb, em.io_addr));
+            gbtrace_writer_set_u8(g_writer, col, read_reg(gb, em.io_addr));
             break;
         case FieldEmitter::PIX:
             if (g_pix_buf.empty()) {
-                gbtrace_writer_set_null(g_parquet, col);
+                gbtrace_writer_set_null(g_writer, col);
             } else {
-                gbtrace_writer_set_str(g_parquet, col,
+                gbtrace_writer_set_str(g_writer, col,
                                        g_pix_buf.c_str(), g_pix_buf.size());
             }
             g_pix_buf.clear();
             break;
         case FieldEmitter::PPU_U8:
-            gbtrace_writer_set_u8(g_parquet, col, em.read_ppu_u8(gb));
+            gbtrace_writer_set_u8(g_writer, col, em.read_ppu_u8(gb));
             break;
         case FieldEmitter::PPU_U16:
-            gbtrace_writer_set_u16(g_parquet, col, em.read_ppu_u16());
+            gbtrace_writer_set_u16(g_writer, col, em.read_ppu_u16());
             break;
         case FieldEmitter::PPU_BOOL:
-            gbtrace_writer_set_bool(g_parquet, col, em.read_ppu_bool(gb));
+            gbtrace_writer_set_bool(g_writer, col, em.read_ppu_bool(gb));
             break;
         }
     }
 
     // VRAM write fields — null when no write this cycle
-    if (g_parquet_vram_addr_col >= 0) {
+    if (g_writer_vram_addr_col >= 0) {
         if (g_vram_write_addr != 0) {
-            gbtrace_writer_set_u16(g_parquet, g_parquet_vram_addr_col, g_vram_write_addr);
-            gbtrace_writer_set_u8(g_parquet, g_parquet_vram_data_col, g_vram_write_data);
+            gbtrace_writer_set_u16(g_writer, g_writer_vram_addr_col, g_vram_write_addr);
+            gbtrace_writer_set_u8(g_writer, g_writer_vram_data_col, g_vram_write_data);
         } else {
-            gbtrace_writer_set_null(g_parquet, g_parquet_vram_addr_col);
-            gbtrace_writer_set_null(g_parquet, g_parquet_vram_data_col);
+            gbtrace_writer_set_null(g_writer, g_writer_vram_addr_col);
+            gbtrace_writer_set_null(g_writer, g_writer_vram_data_col);
         }
     }
     g_vram_write_addr = 0;
     g_vram_write_data = 0;
 
-    gbtrace_writer_finish_entry(g_parquet);
+    gbtrace_writer_finish_entry(g_writer);
 }
 
 // --- Main ---
@@ -670,7 +670,7 @@ int main(int argc, char *argv[]) {
         boot_rom_info = "built-in";
     }
 
-    // Write header / init parquet writer
+    // Write header / init trace writer
     std::string rom_hash = sha256_file(rom_path);
 
     {
@@ -694,26 +694,26 @@ int main(int argc, char *argv[]) {
         }
         header_json += "],\"trigger\":\"" + profile.trigger + "\"}";
 
-        g_parquet = gbtrace_writer_new(
+        g_writer = gbtrace_writer_new(
             output_path.c_str(), header_json.c_str(), header_json.size());
-        if (!g_parquet) {
+        if (!g_writer) {
             std::fprintf(stderr, "Error: failed to create trace writer\n");
             return 1;
         }
 
         // Cache column indices
-        g_parquet_cols.resize(g_emitters.size());
+        g_writer_cols.resize(g_emitters.size());
         for (size_t i = 0; i < g_emitters.size(); i++) {
-            g_parquet_cols[i] = gbtrace_writer_find_field(
-                g_parquet, g_emitters[i].name.c_str());
+            g_writer_cols[i] = gbtrace_writer_find_field(
+                g_writer, g_emitters[i].name.c_str());
         }
-        g_parquet_ly_col = gbtrace_writer_find_field(g_parquet, "ly");
-        g_parquet_vram_addr_col = gbtrace_writer_find_field(g_parquet, "vram_addr");
-        g_parquet_vram_data_col = gbtrace_writer_find_field(g_parquet, "vram_data");
-        g_has_vram = (g_parquet_vram_addr_col >= 0);
+        g_writer_ly_col = gbtrace_writer_find_field(g_writer, "ly");
+        g_writer_vram_addr_col = gbtrace_writer_find_field(g_writer, "vram_addr");
+        g_writer_vram_data_col = gbtrace_writer_find_field(g_writer, "vram_data");
+        g_has_vram = (g_writer_vram_addr_col >= 0);
 
         // Mark entry 0 as a frame boundary
-        gbtrace_writer_mark_frame(g_parquet);
+        gbtrace_writer_mark_frame(g_writer);
 
         std::fprintf(stderr, "Output: native format (FFI writer)\n");
     }
@@ -862,7 +862,7 @@ int main(int argc, char *argv[]) {
             if (!prev_vsync && vsync) {
                 // VSYNC started — previous frame is complete
                 g_frame_num++;
-                gbtrace_writer_mark_frame(g_parquet);
+                gbtrace_writer_mark_frame(g_writer);
                 // If a stop was requested, the LCD frame is now complete
                 if (stop_triggered) {
                     stopped_early = true;
@@ -896,8 +896,8 @@ int main(int argc, char *argv[]) {
         }
     }
 
-    gbtrace_writer_close(g_parquet);
-    g_parquet = nullptr;
+    gbtrace_writer_close(g_writer);
+    g_writer = nullptr;
 
     if (stopped_early) {
         std::fprintf(stderr, "Stop condition met at frame %d, output written.\n", frames);

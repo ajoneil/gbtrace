@@ -215,7 +215,7 @@ impl GbtraceWriter {
         })
     }
 
-    // --- Column setters (same API as the FFI/parquet writer) ---
+    // --- Column setters (same API as the FFI writer) ---
 
     pub fn set_u8(&mut self, col: usize, val: u8) { self.columns[col].append_u8(val); }
     pub fn set_u16(&mut self, col: usize, val: u16) { self.columns[col].append_u16(val); }

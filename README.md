@@ -1,24 +1,36 @@
 # gbtrace
 
-**Compare Game Boy emulators instruction-by-instruction.**
+**Capture and explore detailed execution traces from Game Boy emulators.**
 
-gbtrace captures execution traces from multiple Game Boy emulators and lets you compare them side-by-side to find exactly where emulation behaviour diverges — down to individual register values, CPU flags, and IO state.
+gbtrace records what happens inside a Game Boy — every instruction, register value, CPU flag, and IO state change — and provides tools to explore, query, and compare that data. Use it to understand how the hardware works, debug emulator behaviour, investigate how games use specific features, or verify accuracy against a gate-level reference.
 
-**[Try the web viewer](https://ajoneil.github.io/gbtrace/)** — browse pre-captured traces from 500+ test ROMs across four emulators, or upload your own traces to compare.
+**[Try the web viewer](https://ajoneil.github.io/gbtrace/)** — browse pre-captured traces from hundreds of test ROMs across multiple emulators, or upload your own.
 
-## Why?
+## Features
 
-Building an accurate Game Boy emulator means getting thousands of subtle hardware behaviours right. When your emulator fails a test, you need to know *exactly* which instruction produced the wrong result and *why*. gbtrace gives you that visibility:
-
-- **Side-by-side comparison** of two traces with per-field diff highlighting
-- **SM83 disassembly** inline with register state so you can follow program flow
-- **Per-flag diff highlighting** — see exactly which CPU flags (Z/N/H/C) differ
-- **Field value charts** with drag-to-zoom to spot patterns in divergence
-- **Pre-captured reference traces** from a gate-level accurate simulator (GateBoy) to compare against
+- **Detailed execution traces** — capture every register value, CPU flag, and IO state change, per-instruction or per-T-cycle
+- **Field value charts** with drag-to-zoom to visualise how registers and IO change over time
+- **Side-by-side trace comparison** with per-field and per-flag diff highlighting
+- **Pre-captured reference traces** from a gate-level simulator (GateBoy) and multiple emulators across 600+ test ROMs
+- **CLI query engine** — search traces by condition (e.g. `pc=0150`, `flag z becomes set`, `a changes`)
+- **SM83 disassembly** in the web viewer, inline with register state
+- **Open trace format** — any emulator can produce compatible traces
 
 ## Trace format
 
-A `.gbtrace` file is JSONL (one JSON object per line). The first line is a header describing the trace:
+gbtrace uses a compact binary format for efficient storage and querying. There are two ways to produce traces:
+
+**Native format** — use the `gbtrace` Rust library (or its C FFI bindings) to write `.gbtrace` files directly.
+
+**JSONL format** — for quick integration, emit `.gbtrace.jsonl` files (one JSON object per line). Both the CLI and web viewer can work with JSONL files directly, but you can convert them for smaller file sizes and faster loading:
+
+```bash
+gbtrace-cli convert trace.gbtrace.jsonl -o trace.gbtrace
+```
+
+### JSONL format
+
+The first line is a header describing the trace:
 
 ```json
 {"_header":true,"format_version":"0.1.0","emulator":"my-emulator","emulator_version":"1.0","rom_sha256":"...","model":"DMG-B","boot_rom":"skip","profile":"gbmicrotest","fields":["pc","sp","a","f","b","c","d","e","h","l","lcdc","stat","ly"],"trigger":"instruction"}
@@ -29,13 +41,6 @@ Each subsequent line is a trace entry with the fields listed in the header:
 ```json
 {"pc":256,"sp":65534,"a":1,"f":176,"b":0,"c":19,"d":0,"e":216,"h":1,"l":77,"lcdc":145,"stat":128,"ly":153}
 ```
-
-### Adding trace output to your emulator
-
-To produce traces compatible with gbtrace, emit one JSONL line per instruction (or per T-cycle for higher granularity) with:
-
-1. **Header line** — must include `_header`, `format_version`, `emulator`, `rom_sha256`, `model`, `boot_rom`, `fields`, and `trigger`
-2. **Entry lines** — one per instruction/T-cycle, containing numeric values for each field
 
 The `fields` array defines what's captured. Common configurations:
 
@@ -51,38 +56,27 @@ The `fields` array defines what's captured. Common configurations:
 
 Values should be numeric (not hex strings). 8-bit fields use 0-255, 16-bit fields (pc, sp) use 0-65535, booleans (ime) use `true`/`false`.
 
-The `trigger` field indicates granularity: `"instruction"` for one entry per instruction, `"tcycle"` for one entry per T-cycle. The web viewer can compare traces at different granularities by automatically downsampling T-cycle traces.
+The `trigger` field indicates granularity: `"instruction"` for one entry per instruction, `"mcycle"` for one entry per M-cycle, or `"tcycle"` for one entry per T-cycle. Traces at different granularities can be compared — the viewer automatically downsamples higher-granularity traces to match.
 
-### Capture profiles
-
-Profiles are TOML files that define which fields to capture:
-
-```toml
-[profile]
-name = "my_profile"
-trigger = "instruction"
-
-[fields]
-cpu = ["pc", "sp", "a", "f", "b", "c", "d", "e", "h", "l"]
-ppu = ["lcdc", "stat", "ly"]
-interrupt = ["if_", "ie", "ime"]
-
-[fields.memory]
-my_addr = "FF80"    # read memory at 0xFF80 each entry
-```
-
-The included adapters use these profiles, but you can produce traces however you like as long as the JSONL format matches.
+Capture profiles define which fields to record, but you don't need to provide all of them — include whatever level of detail your emulator can supply.
 
 ## Web viewer
 
 The [web viewer](https://ajoneil.github.io/gbtrace/) provides:
 
-- **Test ROM browser** — 500+ pre-captured gbmicrotest cycle-accuracy tests and 11 Blargg CPU instruction tests, with pass/fail indicators per emulator
-- **Single trace viewer** — virtual-scrolling table with inline disassembly, field value charts, and search/filter
-- **Comparison mode** — side-by-side diff table with synced scrolling, per-field and per-flag diff highlighting, match percentage statistics, and a diff lane on the chart
-- **Column toggles** — show/hide fields to focus on what matters; hidden fields are excluded from diff statistics
-- **Drag-to-zoom charts** — visualise any field's value over the trace timeline, with dual-trace overlay in comparison mode
-- **Upload your own traces** — drop a `.gbtrace`, `.gbtrace.gz`, or `.gbtrace.parquet` file to view or compare
+- **Test ROM browser** — pre-captured traces from hundreds of test ROMs across multiple emulators, with pass/fail indicators
+- **Trace viewer** — virtual-scrolling table with inline SM83 disassembly, field value charts, and search/filter
+- **Comparison mode** — side-by-side diff with synced scrolling, per-field and per-flag highlighting, and match percentage statistics
+- **Drag-to-zoom charts** — visualise any field over the trace timeline, with dual-trace overlay in comparison mode
+- **Upload your own traces** — drop a `.gbtrace` or `.gbtrace.jsonl` (or gzipped `.gbtrace.jsonl.gz`) file to view or compare
+
+### Included traces
+
+The pre-captured traces come from several emulators:
+
+- **[GateBoy](https://github.com/aappleby/metroboy)** — a gate-level simulation of the Game Boy CPU, providing the closest reference to actual hardware. Gate propagation delay and analogue effects mean it doesn't perfectly match real hardware behaviour in all cases.
+- **[Missingno](https://github.com/ajoneil/missingno)** — the author's emulator, with full support for all gbtrace trace features.
+- Traces from several well-regarded community emulators ([SameBoy](https://github.com/LIJI32/SameBoy), [gambatte](https://github.com/pokemon-speedrunning/gambatte-speedrun), [mGBA](https://github.com/mgba-emu/mgba)) are also included, though their traces capture less detail than GateBoy and Missingno.
 
 ## CLI
 
@@ -90,59 +84,29 @@ The `gbtrace-cli` tool provides offline trace inspection:
 
 ```bash
 # Show trace metadata
-gbtrace-cli info trace.gbtrace.parquet
+gbtrace-cli info trace.gbtrace
 
 # Find entries matching a condition
-gbtrace-cli query trace.parquet -w "pc=0150"
-gbtrace-cli query trace.parquet -w "a changes"
-gbtrace-cli query trace.parquet -w "flag z becomes set"
+gbtrace-cli query trace.gbtrace -w "pc=0x0150"
+gbtrace-cli query trace.gbtrace -w "a changes"
 
 # Compare two traces
-gbtrace-cli diff gateboy.parquet gambatte.parquet --fields pc,a,f
+gbtrace-cli diff gateboy.gbtrace gambatte.gbtrace --fields pc,a,f
 
-# Convert between formats
-gbtrace-cli convert trace.gbtrace -o trace.gbtrace.parquet
-
-# Trim a trace
-gbtrace-cli trim trace.parquet --until "test_pass=01"
+# Convert JSONL to native format
+gbtrace-cli convert trace.gbtrace.jsonl -o trace.gbtrace
 ```
 
-The diff command automatically handles traces at different granularities (T-cycle vs instruction) and aligns them by PC.
-
-## Included adapters
-
-Four adapters are included for reference. Each links against an emulator as a library and runs ROMs headlessly:
-
-| Adapter | Emulator | Granularity | Accuracy |
-|---------|----------|-------------|----------|
-| **gateboy** | [GateBoy](https://github.com/aappleby/metroboy) | T-cycle | Gate-level (reference) |
-| **gambatte** | [gambatte-speedrun](https://github.com/pokemon-speedrunning/gambatte-speedrun) | Instruction | High |
-| **sameboy** | [SameBoy](https://github.com/LIJI32/SameBoy) | Instruction | High |
-| **mgba** | [mGBA](https://github.com/mgba-emu/mgba) | Instruction | Good |
-
-You don't need to use these adapters — any emulator that produces the JSONL format above will work with the viewer and CLI.
+Run `gbtrace-cli --help` for a full list of commands.
 
 ## Building
 
+gbtrace is a Rust workspace. The crates are not yet published to crates.io — install from git:
+
 ```bash
-# Rust CLI
-cargo build --release
+# CLI
+cargo install --git https://github.com/ajoneil/gbtrace gbtrace-cli
 
-# Adapters (each Makefile handles dependencies)
-make -C adapters/gambatte
-make -C adapters/gateboy
-
-# WASM for web viewer (requires wasm-pack)
-bash build-web.sh
-
-# Run test suites
-bash scripts/run-gbmicrotest.sh
-bash scripts/run-blargg-tests.sh
-
-# Local dev server (no-cache headers)
-bash scripts/serve.sh
+# Local web viewer (requires wasm-pack)
+make serve
 ```
-
-## License
-
-MIT — see [LICENSE](LICENSE).

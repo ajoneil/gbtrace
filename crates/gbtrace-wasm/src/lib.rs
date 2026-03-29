@@ -39,7 +39,7 @@ pub struct TraceStore {
 #[wasm_bindgen]
 impl TraceStore {
     /// Load a trace from raw bytes (detects format automatically).
-    /// Supports native .gbtrace, legacy parquet, and JSONL.
+    /// Supports native .gbtrace and JSONL.
     #[wasm_bindgen(constructor)]
     pub fn from_bytes(data: &[u8]) -> Result<TraceStore, JsError> {
         let store = gbtrace::store::open_trace_store_from_bytes(data)
@@ -97,7 +97,7 @@ impl TraceStore {
 
     /// Get frame boundary entry indices as a Uint32Array.
     ///
-    /// Frame boundary entry indices. Uses explicit boundaries from parquet
+    /// Frame boundary entry indices. Uses explicit boundaries from trace
     /// metadata when available, otherwise falls back to reconstruct_frames.
     #[wasm_bindgen(js_name = frameBoundaries)]
     pub fn frame_boundaries(&self) -> js_sys::Uint32Array {

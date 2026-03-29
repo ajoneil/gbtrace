@@ -3,7 +3,7 @@ target/
 web/pkg/
 build/
 *.gbtrace
-*.gbtrace.parquet
+*.gbtrace.jsonl
 *.sav
 *.pix
 adapters/gambatte/gambatte-speedrun/

@@ -1,6 +1,6 @@
 //! Convert from any supported input format to the native `.gbtrace` format.
 //!
-//! Supports: JSONL, parquet (legacy), and existing `.gbtrace` files.
+//! Supports: JSONL and existing `.gbtrace` files.
 //! Produces a `GbtraceStore` either from a file or from in-memory bytes.
 
 use crate::entry::TraceEntry;

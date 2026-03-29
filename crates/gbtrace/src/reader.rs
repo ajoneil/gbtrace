@@ -6,7 +6,7 @@ use std::fs::File;
 use std::io::{BufRead, BufReader, Read};
 use std::path::Path;
 
-/// Streaming reader for `.gbtrace` and `.gbtrace.gz` files.
+/// Streaming reader for `.gbtrace.jsonl` and `.gbtrace.jsonl.gz` files.
 ///
 /// Reads entries one at a time — never loads the full file into memory.
 pub struct JsonlReader {
