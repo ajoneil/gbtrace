@@ -25,8 +25,8 @@ NAME="${ROM_REL//\//__}"
 BASENAME="$(basename "$ROM" .gb)"
 PIX_REF="$(dirname "$ROM")/${BASENAME}.pix"
 
-# Tests take ~36 emulated seconds (~2150 frames) to complete
-MAX_FRAMES=3000
+# Longest test (03-trigger) completes in ~1000 frames at tcycle granularity
+MAX_FRAMES=1200
 
 TMP="/tmp/gbtrace_dmg_sound_${NAME}_${ADAPTER}_$$"
 TRACE="${TMP}.gbtrace"
