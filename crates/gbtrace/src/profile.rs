@@ -233,8 +233,8 @@ pub static APU: SubsystemDef = SubsystemDef {
             field!("ch4_len_cnt", u8),
         ]),
         (Layer::Writes, &[
-            field!("wave_addr", u16, nullable),
-            field!("wave_data", u8, nullable),
+            field!("apu_write_addr", u16, nullable),
+            field!("apu_write_data", u8, nullable),
         ]),
     ],
 };

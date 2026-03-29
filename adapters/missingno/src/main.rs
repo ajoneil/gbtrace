@@ -238,8 +238,8 @@ fn step_tcycle(gb: &mut GameBoy, tracer: &mut Tracer) -> bool {
             if (0x8000..=0x9FFF).contains(address) {
                 tracer.push_vram_write(*address, *value);
             }
-            if (0xFF30..=0xFF3F).contains(address) {
-                tracer.push_wave_write(*address, *value);
+            if (0xFF10..=0xFF3F).contains(address) {
+                tracer.push_apu_write(*address, *value);
             }
         }
 
