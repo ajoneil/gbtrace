@@ -191,19 +191,19 @@ pub static APU: SubsystemDef = SubsystemDef {
     layers: &[
         (Layer::Registers, &[
             // Channel 1 — square with sweep
-            field!("nr10", u8), field!("nr11", u8), field!("nr12", u8),
-            field!("nr13", u8), field!("nr14", u8),
+            field!("ch1_sweep", u8), field!("ch1_duty_len", u8), field!("ch1_vol_env", u8),
+            field!("ch1_freq_lo", u8), field!("ch1_freq_hi", u8),
             // Channel 2 — square
-            field!("nr21", u8), field!("nr22", u8),
-            field!("nr23", u8), field!("nr24", u8),
+            field!("ch2_duty_len", u8), field!("ch2_vol_env", u8),
+            field!("ch2_freq_lo", u8), field!("ch2_freq_hi", u8),
             // Channel 3 — wave
-            field!("nr30", u8), field!("nr31", u8), field!("nr32", u8),
-            field!("nr33", u8), field!("nr34", u8),
+            field!("ch3_dac", u8), field!("ch3_len", u8), field!("ch3_vol", u8),
+            field!("ch3_freq_lo", u8), field!("ch3_freq_hi", u8),
             // Channel 4 — noise
-            field!("nr41", u8), field!("nr42", u8),
-            field!("nr43", u8), field!("nr44", u8),
+            field!("ch4_len", u8), field!("ch4_vol_env", u8),
+            field!("ch4_freq", u8), field!("ch4_control", u8),
             // Control
-            field!("nr50", u8), field!("nr51", u8), field!("nr52", u8),
+            field!("master_vol", u8), field!("sound_pan", u8), field!("sound_on", u8),
         ]),
         (Layer::Internal, &[
             // Channel 1 — square with sweep

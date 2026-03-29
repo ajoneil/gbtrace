@@ -204,10 +204,10 @@ export class ApuVisualizer extends LitElement {
     if (!this._entry || this._entry.ch1_active === undefined) return html``;
     const e = this._entry;
 
-    const nr50 = e.nr50 ?? 0;
-    const nr51 = e.nr51 ?? 0;
-    const volL = (nr50 >> 4) & 7;
-    const volR = nr50 & 7;
+    const masterVol = e.master_vol ?? 0;
+    const soundPan = e.sound_pan ?? 0;
+    const volL = (masterVol >> 4) & 7;
+    const volR = masterVol & 7;
 
     return html`
       <div class="apu">
@@ -216,19 +216,19 @@ export class ApuVisualizer extends LitElement {
           <span class="master-vol">vol L:${volL} R:${volR}</span>
         </div>
         ${this._renderPulseChannel('CH1', e.ch1_active, e.ch1_freq_cnt,
-          e.nr13, e.nr14, e.ch1_phase, e.ch1_env_vol,
-          (e.nr11 >> 6) & 3, nr51, 0)}
+          e.ch1_freq_lo, e.ch1_freq_hi, e.ch1_phase, e.ch1_env_vol,
+          (e.ch1_duty_len >> 6) & 3, soundPan, 0)}
         ${this._renderPulseChannel('CH2', e.ch2_active, e.ch2_freq_cnt,
-          e.nr23, e.nr24, e.ch2_phase, e.ch2_env_vol,
-          (e.nr21 >> 6) & 3, nr51, 1)}
-        ${this._renderWaveChannel(e, nr51)}
-        ${this._renderNoiseChannel(e, nr51)}
+          e.ch2_freq_lo, e.ch2_freq_hi, e.ch2_phase, e.ch2_env_vol,
+          (e.ch2_duty_len >> 6) & 3, soundPan, 1)}
+        ${this._renderWaveChannel(e, soundPan)}
+        ${this._renderNoiseChannel(e, soundPan)}
       </div>
     `;
   }
 
-  _renderPulseChannel(label, active, freqCnt, nrX3, nrX4, phase, envVol, duty, nr51, chIdx) {
-    const period = ((nrX4 & 7) << 8) | (nrX3 ?? 0);
+  _renderPulseChannel(label, active, freqCnt, freqLo, freqHi, phase, envVol, duty, soundPan, chIdx) {
+    const period = ((freqHi & 7) << 8) | (freqLo ?? 0);
     const dutyPattern = [
       [0,0,0,0,0,0,0,1], // 12.5%
       [1,0,0,0,0,0,0,1], // 25%
@@ -237,7 +237,7 @@ export class ApuVisualizer extends LitElement {
     ][duty & 3];
 
     const freqPct = period > 0 ? Math.min(100, ((freqCnt ?? 0) / period) * 100) : 0;
-    const routing = this._channelRouting(nr51, chIdx);
+    const routing = this._channelRouting(soundPan, chIdx);
 
     return html`
       <div class="channel ${active ? '' : 'inactive'}">
@@ -284,13 +284,13 @@ export class ApuVisualizer extends LitElement {
     `;
   }
 
-  _renderWaveChannel(e, nr51) {
+  _renderWaveChannel(e, soundPan) {
     const active = e.ch3_active;
     const freqCnt = e.ch3_freq_cnt ?? 0;
-    const period = ((e.nr34 & 7) << 8) | (e.nr33 ?? 0);
+    const period = ((e.ch3_freq_hi & 7) << 8) | (e.ch3_freq_lo ?? 0);
     const waveIdx = e.ch3_wave_idx ?? 0;
     const sample = e.ch3_sample ?? 0;
-    const volShift = (e.nr32 >> 5) & 3; // 0=mute, 1=100%, 2=50%, 3=25%
+    const volShift = (e.ch3_vol >> 5) & 3; // 0=mute, 1=100%, 2=50%, 3=25%
     const volLabels = ['0%', '100%', '50%', '25%'];
     const freqPct = period > 0 ? Math.min(100, (freqCnt / period) * 100) : 0;
     const routing = this._channelRouting(nr51, 2);
@@ -347,11 +347,11 @@ export class ApuVisualizer extends LitElement {
     `;
   }
 
-  _renderNoiseChannel(e, nr51) {
+  _renderNoiseChannel(e, soundPan) {
     const active = e.ch4_active;
     const envVol = e.ch4_env_vol ?? 0;
     const lfsr = e.ch4_lfsr ?? 0;
-    const routing = this._channelRouting(nr51, 3);
+    const routing = this._channelRouting(soundPan, 3);
 
     // Show 16 bits of LFSR
     const lfsrBits = [];
@@ -359,10 +359,10 @@ export class ApuVisualizer extends LitElement {
       lfsrBits.push((lfsr >> i) & 1);
     }
 
-    const nr43 = e.nr43 ?? 0;
-    const divider = nr43 & 7;
-    const width = (nr43 >> 3) & 1;
-    const shift = (nr43 >> 4) & 0xF;
+    const ch4Freq = e.ch4_freq ?? 0;
+    const divider = ch4Freq & 7;
+    const width = (ch4Freq >> 3) & 1;
+    const shift = (ch4Freq >> 4) & 0xF;
 
     return html`
       <div class="channel ${active ? '' : 'inactive'}">
