@@ -1,0 +1,13 @@
+[profile]
+name = "dmg_sound"
+description = "APU register capture for blargg dmg_sound tests."
+trigger = "instruction"
+
+[fields]
+cpu = "registers"
+apu = "registers"
+timer = true
+interrupt = true
+
+[fields.memory]
+test_status = "A000"

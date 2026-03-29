@@ -14,9 +14,12 @@ def sanitize(name):
     return ''.join(c if c.isalnum() or c in '-_' else '_' for c in name)
 
 
-def gen_suite(suite_name, rom_dir, profile, trace_dir, emus, script):
+def gen_suite(suite_name, rom_dir, profile, trace_dir, emus, script, exclude_dirs=None):
+    exclude_dirs = set(exclude_dirs or [])
     roms = []
-    for dirpath, _, filenames in os.walk(rom_dir):
+    for dirpath, dirnames, filenames in os.walk(rom_dir):
+        # Prune excluded subdirectories
+        dirnames[:] = [d for d in dirnames if os.path.join(dirpath, d) not in exclude_dirs]
         for f in sorted(filenames):
             if f.endswith('.gb'):
                 roms.append(os.path.join(dirpath, f))
@@ -62,6 +65,7 @@ def main():
         '$(BLARGG_TRACE_DIR)',
         blargg_emus,
         'scripts/trace-blargg.sh',
+        exclude_dirs={'test-suites/blargg/dmg_sound'},
     )
 
     mooneye_stamps = gen_suite(
@@ -91,6 +95,15 @@ def main():
         'scripts/trace-mealybug-tearoom.sh',
     )
 
+    dmg_sound_stamps = gen_suite(
+        'dmg-sound',
+        'test-suites/blargg/dmg_sound',
+        'test-suites/blargg/dmg_sound/profile.toml',
+        '$(DMG_SOUND_TRACE_DIR)',
+        emus,
+        'scripts/trace-dmg-sound.sh',
+    )
+
     # Output stamp lists as Make variables
     print(f"GBMICROTEST_STAMPS := {' '.join(micro_stamps)}")
     print()
@@ -101,6 +114,8 @@ def main():
     print(f"GAMBATTE_TESTS_STAMPS := {' '.join(gambatte_stamps)}")
     print()
     print(f"MEALYBUG_TEAROOM_STAMPS := {' '.join(mealybug_stamps)}")
+    print()
+    print(f"DMG_SOUND_STAMPS := {' '.join(dmg_sound_stamps)}")
 
 
 if __name__ == '__main__':
