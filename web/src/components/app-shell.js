@@ -12,6 +12,7 @@ import './trace-timeline.js';
 import './pixel-display.js';
 import './ppu-sprite-table.js';
 import './ppu-fifo-visualizer.js';
+import './apu-visualizer.js';
 import './vram-viewer.js';
 
 export class AppShell extends LitElement {
@@ -192,6 +193,10 @@ export class AppShell extends LitElement {
     return this._allFields.includes('oam0_x');
   }
 
+  get _hasApuInternals() {
+    return this._allFields.includes('ch1_active');
+  }
+
   /** Fields the user has selected (all minus hidden). Used for queries, stats, diff. */
   get _visibleFields() {
     return this._allFields.filter(f => !this._hiddenFields.has(f));
@@ -370,16 +375,24 @@ export class AppShell extends LitElement {
         </div>
         ${expanded ? html`
           <div style="border-top:1px solid var(--border);padding:8px;display:flex;gap:8px;align-items:flex-start;">
-            ${this._hasPpuInternals ? html`
+            ${this._hasPpuInternals || this._hasApuInternals ? html`
               <div style="display:flex;flex-direction:column;gap:8px;min-width:0;">
-                <ppu-fifo-visualizer
-                  .store=${this._store}
-                  .cursorIndex=${this._effectiveIndex ?? this._viewStart}
-                ></ppu-fifo-visualizer>
-                <ppu-sprite-table
-                  .store=${this._store}
-                  .cursorIndex=${this._effectiveIndex ?? this._viewStart}
-                ></ppu-sprite-table>
+                ${this._hasPpuInternals ? html`
+                  <ppu-fifo-visualizer
+                    .store=${this._store}
+                    .cursorIndex=${this._effectiveIndex ?? this._viewStart}
+                  ></ppu-fifo-visualizer>
+                  <ppu-sprite-table
+                    .store=${this._store}
+                    .cursorIndex=${this._effectiveIndex ?? this._viewStart}
+                  ></ppu-sprite-table>
+                ` : ''}
+                ${this._hasApuInternals ? html`
+                  <apu-visualizer
+                    .store=${this._store}
+                    .cursorIndex=${this._effectiveIndex ?? this._viewStart}
+                  ></apu-visualizer>
+                ` : ''}
               </div>
             ` : ''}
             <pixel-display

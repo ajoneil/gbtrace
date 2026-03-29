@@ -129,6 +129,21 @@ impl TraceStore {
         Ok(to_js(&filtered)?)
     }
 
+    /// Get field grouping info: returns a JS object mapping field name
+    /// to {subsystem, layer} for all fields in this trace.
+    /// Fields not in any subsystem (e.g. memory reads) are omitted.
+    #[wasm_bindgen(js_name = fieldGroups)]
+    pub fn field_groups(&self) -> Result<JsValue, JsError> {
+        use std::collections::BTreeMap;
+        let mut groups: BTreeMap<&str, (&str, &str)> = BTreeMap::new();
+        for field in &self.store.header().fields {
+            if let Some((subsystem, layer)) = gbtrace::profile::field_group(field) {
+                groups.insert(field, (subsystem, layer));
+            }
+        }
+        Ok(to_js(&groups)?)
+    }
+
     /// Whether this trace has pixel data (a `pix` column).
     #[wasm_bindgen(js_name = hasPixels)]
     pub fn has_pixels(&self) -> bool {

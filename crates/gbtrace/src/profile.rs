@@ -287,6 +287,26 @@ pub fn lookup_field(name: &str) -> Option<&'static FieldDef> {
         .find(|f| f.name == name)
 }
 
+/// Look up which subsystem and layer a field belongs to.
+/// Returns (subsystem_name, layer_name) or None for unknown/memory fields.
+pub fn field_group(name: &str) -> Option<(&'static str, &'static str)> {
+    for subsystem in ALL_SUBSYSTEMS {
+        for (layer, fields) in subsystem.layers {
+            if fields.iter().any(|f| f.name == name) {
+                let layer_name = match layer {
+                    Layer::Registers => "registers",
+                    Layer::Internal => "internal",
+                    Layer::Writes => "writes",
+                    Layer::Output => "output",
+                    Layer::Timing => "timing",
+                };
+                return Some((subsystem.name, layer_name));
+            }
+        }
+    }
+    None
+}
+
 /// Return the native type for a field name.
 /// Falls back to UInt8 for unknown fields (e.g. memory reads).
 pub fn field_type(name: &str) -> FieldType {
