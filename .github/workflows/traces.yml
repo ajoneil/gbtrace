@@ -6,10 +6,6 @@ on:
     types: [completed]
     branches: [main]
   workflow_dispatch:
-
-concurrency:
-  group: traces
-  cancel-in-progress: true
     inputs:
       suite:
         description: "Test suite (all, gbmicrotest, blargg, mooneye, gambatte-tests, mealybug-tearoom, dmg-acid2)"
@@ -21,6 +17,10 @@ concurrency:
         default: "all"
         type: choice
         options: [all, gambatte, sameboy, mgba, gateboy, missingno]
+
+concurrency:
+  group: traces
+  cancel-in-progress: true
 
 jobs:
   matrix-setup:
