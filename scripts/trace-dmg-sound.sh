@@ -31,13 +31,15 @@ stderr_file="${TMP}.stderr"
 cleanup() { rm -f "$TRACE" "$stderr_file" "${ROM%.gb}.sav"; }
 trap cleanup EXIT
 
-# Stop when the signature byte at $A001 is written ($DE).
-# Can't use $A000=00 because external RAM starts at 0 before the test runs.
+# Stop when $A000 is no longer $80 (test finished).
+# $A000 starts at $00 (uninit), gets set to $80 (running), then to result.
+# We use two conditions: stop on $00 (initial/pass) or stop when != $80
+# after it becomes $80. The != form handles both pass and fail.
 (
     set +eo pipefail
     "$BIN" --rom "$ROM" --profile "$PROFILE" --output "$TRACE" \
         --frames "$MAX_FRAMES" \
-        --stop-when A001=DE \
+        --stop-when A000!=80 \
         --extra-frames 2 \
         2>"$stderr_file" </dev/null
 ) || true

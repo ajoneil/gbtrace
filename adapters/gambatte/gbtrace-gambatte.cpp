@@ -311,21 +311,25 @@ static std::string sha256_file(const std::string &path) {
 struct StopCondition {
     unsigned short addr = 0;
     unsigned char value = 0;
+    bool negate = false;
     bool active = false;
 };
 
 static StopCondition parse_stop_when(const std::string &spec) {
-    // Format: ADDR=VAL (hex), e.g. A000=80
+    // Format: ADDR=VAL or ADDR!=VAL (hex), e.g. A000=80 or A000!=80
+    auto neq = spec.find("!=");
     auto eq = spec.find('=');
     if (eq == std::string::npos) {
-        std::fprintf(stderr, "Error: --stop-when format is ADDR=VAL (e.g. A000=80)\n");
+        std::fprintf(stderr, "Error: --stop-when format is ADDR=VAL or ADDR!=VAL (e.g. A000!=80)\n");
         std::exit(1);
     }
     StopCondition cond;
+    bool is_negate = (neq != std::string::npos && neq < eq);
     cond.addr = static_cast<unsigned short>(
-        std::strtoul(spec.substr(0, eq).c_str(), nullptr, 16));
+        std::strtoul(spec.substr(0, is_negate ? neq : eq).c_str(), nullptr, 16));
     cond.value = static_cast<unsigned char>(
         std::strtoul(spec.substr(eq + 1).c_str(), nullptr, 16));
+    cond.negate = is_negate;
     cond.active = true;
     return cond;
 }
@@ -552,7 +556,8 @@ int main(int argc, char *argv[]) {
 
             // Check stop conditions — start countdown instead of breaking
             for (const auto &cond : stop_conditions) {
-                if (gb.externalRead(cond.addr) == cond.value) {
+                bool match = gb.externalRead(cond.addr) == cond.value;
+                if (cond.negate ? !match : match) {
                     std::fprintf(stderr, "Stop condition met at frame %d, running %d extra frame%s\n",
                                  frames, extra_frames, extra_frames == 1 ? "" : "s");
                     remaining_extra = extra_frames;

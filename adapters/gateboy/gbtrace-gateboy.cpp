@@ -487,19 +487,23 @@ static std::string sha256_file(const std::string &path) {
 struct StopCondition {
     unsigned short addr = 0;
     unsigned char value = 0;
+    bool negate = false;
 };
 
 static StopCondition parse_stop_when(const std::string &spec) {
+    auto neq = spec.find("!=");
     auto eq = spec.find('=');
     if (eq == std::string::npos) {
-        std::fprintf(stderr, "Error: --stop-when format is ADDR=VAL (e.g. A000=80)\n");
+        std::fprintf(stderr, "Error: --stop-when format is ADDR=VAL or ADDR!=VAL (e.g. A000!=80)\n");
         std::exit(1);
     }
     StopCondition cond;
+    bool is_negate = (neq != std::string::npos && neq < eq);
     cond.addr = static_cast<unsigned short>(
-        std::strtoul(spec.substr(0, eq).c_str(), nullptr, 16));
+        std::strtoul(spec.substr(0, is_negate ? neq : eq).c_str(), nullptr, 16));
     cond.value = static_cast<unsigned char>(
         std::strtoul(spec.substr(eq + 1).c_str(), nullptr, 16));
+    cond.negate = is_negate;
     return cond;
 }
 
@@ -869,7 +873,8 @@ int main(int argc, char *argv[]) {
                 // Check stop-when conditions
                 for (const auto &cond : stop_conditions) {
                     uint8_t val = read_reg(gb, cond.addr);
-                    if (val == cond.value) {
+                    bool match = (val == cond.value);
+                    if (cond.negate ? !match : match) {
                         std::fprintf(stderr, "Stop condition met at frame %d, running %d extra frame%s\n",
                                      frames, extra_frames, extra_frames == 1 ? "" : "s");
                         stop_triggered = true;

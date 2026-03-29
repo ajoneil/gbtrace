@@ -383,7 +383,7 @@ int main(int argc, char *argv[]) {
     int extra_frames = 0;
     int max_frames = 3000;
     const char *model = "DMG-B";
-    struct { unsigned short addr; unsigned char value; } stop_conditions[16];
+    struct { unsigned short addr; unsigned char value; int negate; } stop_conditions[16];
     int num_stop_conditions = 0;
 
     for (int i = 1; i < argc; i++) {
@@ -397,11 +397,14 @@ int main(int argc, char *argv[]) {
             max_frames = atoi(argv[++i]);
         } else if (strcmp(argv[i], "--stop-when") == 0 && i + 1 < argc) {
             const char *spec = argv[++i];
+            const char *neq = strstr(spec, "!=");
             const char *eq = strchr(spec, '=');
-            if (!eq) { fprintf(stderr, "Error: --stop-when format is ADDR=VAL (e.g. A000=80)\n"); return 1; }
+            if (!eq) { fprintf(stderr, "Error: --stop-when format is ADDR=VAL or ADDR!=VAL\n"); return 1; }
             if (num_stop_conditions < 16) {
+                int is_negate = (neq && neq < eq);
                 stop_conditions[num_stop_conditions].addr = (unsigned short)strtoul(spec, NULL, 16);
                 stop_conditions[num_stop_conditions].value = (unsigned char)strtoul(eq + 1, NULL, 16);
+                stop_conditions[num_stop_conditions].negate = is_negate;
                 num_stop_conditions++;
             }
         } else if (strcmp(argv[i], "--stop-on-serial") == 0 && i + 1 < argc) {
@@ -617,7 +620,8 @@ int main(int argc, char *argv[]) {
 
         /* Check stop conditions — start countdown */
         for (int sc = 0; sc < num_stop_conditions; sc++) {
-            if (g_core->rawRead8(g_core, stop_conditions[sc].addr, -1) == stop_conditions[sc].value) {
+            int match = (g_core->rawRead8(g_core, stop_conditions[sc].addr, -1) == stop_conditions[sc].value);
+            if (stop_conditions[sc].negate ? !match : match) {
                 fprintf(stderr, "Stop condition met at frame %d, running %d extra frame%s\n",
                         frames + 1, extra_frames, extra_frames == 1 ? "" : "s");
                 remaining_extra = extra_frames;
