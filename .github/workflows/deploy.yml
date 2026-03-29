@@ -31,13 +31,68 @@ jobs:
           path: web/pkg
           branch: main
 
-      # Download all available trace artifacts and merge them
-      # Each trace artifact is named traces-{suite}-{emulator}
-      - name: Download all trace artifacts
+      # Download trace artifacts per suite, searching across workflow runs
+      # so that a partial rebuild of one suite doesn't lose the others.
+      - name: Download gbmicrotest traces
         uses: dawidd6/action-download-artifact@v6
         with:
           workflow: traces.yml
-          name: traces-*
+          name: traces-gbmicrotest-.*
+          name_is_regexp: true
+          path: _trace_artifacts
+          branch: main
+          if_no_artifact_found: warn
+          search_artifacts: true
+
+      - name: Download blargg traces
+        uses: dawidd6/action-download-artifact@v6
+        with:
+          workflow: traces.yml
+          name: traces-blargg-.*
+          name_is_regexp: true
+          path: _trace_artifacts
+          branch: main
+          if_no_artifact_found: warn
+          search_artifacts: true
+
+      - name: Download mooneye traces
+        uses: dawidd6/action-download-artifact@v6
+        with:
+          workflow: traces.yml
+          name: traces-mooneye-.*
+          name_is_regexp: true
+          path: _trace_artifacts
+          branch: main
+          if_no_artifact_found: warn
+          search_artifacts: true
+
+      - name: Download gambatte-tests traces
+        uses: dawidd6/action-download-artifact@v6
+        with:
+          workflow: traces.yml
+          name: traces-gambatte-tests-.*
+          name_is_regexp: true
+          path: _trace_artifacts
+          branch: main
+          if_no_artifact_found: warn
+          search_artifacts: true
+
+      - name: Download mealybug-tearoom traces
+        uses: dawidd6/action-download-artifact@v6
+        with:
+          workflow: traces.yml
+          name: traces-mealybug-tearoom-.*
+          name_is_regexp: true
+          path: _trace_artifacts
+          branch: main
+          if_no_artifact_found: warn
+          search_artifacts: true
+
+      - name: Download dmg-acid2 traces
+        uses: dawidd6/action-download-artifact@v6
+        with:
+          workflow: traces.yml
+          name: traces-dmg-acid2-.*
           name_is_regexp: true
           path: _trace_artifacts
           branch: main
