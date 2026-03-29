@@ -25,7 +25,7 @@ fn test_header() -> TraceHeader {
             "vram_addr".into(), "vram_data".into(),
         ],
         trigger: Trigger::Tcycle,
-        cy_unit: gbtrace::header::CycleUnit::Tcycle,
+
         notes: String::new(),
     }
 }
@@ -194,7 +194,7 @@ fn test_large_chunk_boundary() {
         profile: "test".into(),
         fields: vec!["pc".into(), "a".into()],
         trigger: Trigger::Instruction,
-        cy_unit: gbtrace::header::CycleUnit::Tcycle,
+
         notes: String::new(),
     };
 
@@ -249,7 +249,7 @@ fn test_framebuffer() {
         profile: "test".into(),
         fields: vec!["pc".into()],
         trigger: Trigger::Instruction,
-        cy_unit: gbtrace::header::CycleUnit::Tcycle,
+
         notes: String::new(),
     };
 
@@ -318,7 +318,7 @@ fn test_empty_trace() {
         profile: "test".into(),
         fields: vec!["pc".into()],
         trigger: Trigger::Instruction,
-        cy_unit: gbtrace::header::CycleUnit::Tcycle,
+
         notes: String::new(),
     };
 

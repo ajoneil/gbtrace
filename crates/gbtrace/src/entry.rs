@@ -3,9 +3,7 @@ use std::collections::BTreeMap;
 
 /// A single trace entry — one row of emulator state.
 ///
-/// Fields are stored as a ordered map of field name → JSON value.
-/// The `cy` field is always present as an integer; register fields
-/// are hex strings like `"0x0F"`.
+/// Fields are stored as an ordered map of field name → JSON value.
 #[derive(Debug, Clone, PartialEq)]
 pub struct TraceEntry {
     fields: BTreeMap<String, Value>,
@@ -16,17 +14,6 @@ impl TraceEntry {
         Self {
             fields: BTreeMap::new(),
         }
-    }
-
-    /// Set the cycle count.
-    pub fn set_cy(&mut self, cy: u64) {
-        self.fields
-            .insert("cy".to_string(), Value::Number(cy.into()));
-    }
-
-    /// Get the cycle count, if present.
-    pub fn cy(&self) -> Option<u64> {
-        self.fields.get("cy").and_then(|v| v.as_u64())
     }
 
     /// Set an 8-bit field (e.g. `"a"`, `"f"`, `"lcdc"`).

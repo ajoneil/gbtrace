@@ -1,16 +1,18 @@
-/* gbtrace FFI — C bindings for the gbtrace trace writer.
+/* gbtrace FFI — C bindings for the gbtrace profile loader and trace writer.
  *
  * Link with: -lgbtrace_ffi -lm -ldl -lpthread
  *
  * Usage:
- *   1. Build the header JSON string (same format as .gbtrace header line)
- *   2. Create a writer with gbtrace_writer_new()
- *   3. Look up field indices with gbtrace_writer_find_field()
- *   4. For each trace entry:
+ *   1. Load a profile with gbtrace_profile_load()
+ *   2. Build the header JSON string using profile field names
+ *   3. Create a writer with gbtrace_writer_new()
+ *   4. Look up field indices with gbtrace_writer_find_field()
+ *   5. For each trace entry:
  *      a. Call gbtrace_writer_check_boundary() with ly and pix_len
  *      b. Call gbtrace_writer_set_* for each field
  *      c. Call gbtrace_writer_finish_entry()
- *   5. Call gbtrace_writer_close() to finalize
+ *   6. Call gbtrace_writer_close() to finalize
+ *   7. Free the profile with gbtrace_profile_free()
  */
 #ifndef GBTRACE_H
 #define GBTRACE_H
@@ -22,6 +24,45 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+/* ---- Profile ---- */
+
+/* Opaque profile handle */
+typedef struct GbtraceProfile GbtraceProfile;
+
+/* Load a profile from a TOML file.
+ * path: null-terminated file path.
+ * Returns profile handle, or NULL on error. */
+GbtraceProfile *gbtrace_profile_load(const char *path);
+
+/* Get the profile name. */
+const char *gbtrace_profile_name(const GbtraceProfile *p);
+
+/* Get the profile description. */
+const char *gbtrace_profile_description(const GbtraceProfile *p);
+
+/* Get the trigger string (e.g. "instruction", "tcycle"). */
+const char *gbtrace_profile_trigger(const GbtraceProfile *p);
+
+/* Get the number of fields in the profile. */
+size_t gbtrace_profile_num_fields(const GbtraceProfile *p);
+
+/* Get a field name by index. Returns NULL if out of bounds. */
+const char *gbtrace_profile_field_name(const GbtraceProfile *p, size_t index);
+
+/* Get the number of memory address fields. */
+size_t gbtrace_profile_num_memory(const GbtraceProfile *p);
+
+/* Get a memory field name by index. Returns NULL if out of bounds. */
+const char *gbtrace_profile_memory_name(const GbtraceProfile *p, size_t index);
+
+/* Get a memory field address by index. Returns 0 if out of bounds. */
+uint16_t gbtrace_profile_memory_addr(const GbtraceProfile *p, size_t index);
+
+/* Free a profile handle. */
+void gbtrace_profile_free(GbtraceProfile *p);
+
+/* ---- Writer ---- */
 
 /* Opaque writer handle */
 typedef struct GbtraceWriter GbtraceWriter;

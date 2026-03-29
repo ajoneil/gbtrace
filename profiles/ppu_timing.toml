@@ -1,9 +1,0 @@
-[profile]
-name = "ppu_timing"
-description = "CPU + PPU registers per instruction. For PPU timing tests."
-trigger = "instruction"
-
-[fields]
-cpu = ["pc", "sp", "a", "f"]
-ppu = ["lcdc", "stat", "ly", "lyc", "scy", "scx"]
-interrupt = ["if_", "ie", "ime"]

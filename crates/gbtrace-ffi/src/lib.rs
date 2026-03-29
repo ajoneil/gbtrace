@@ -20,14 +20,164 @@
 //! gbtrace_writer_close(w);
 //! ```
 
-use std::ffi::CStr;
+use std::ffi::{CStr, CString};
 use std::os::raw::c_char;
 use std::slice;
 
 use gbtrace::format::write::GbtraceWriter as NativeWriter;
 use gbtrace::format::read::derive_groups_pub;
 use gbtrace::header::TraceHeader;
-use gbtrace::profile::{field_type, FieldType};
+use gbtrace::profile::{field_type, FieldType, Profile};
+
+// ---------------------------------------------------------------------------
+// Profile handle
+// ---------------------------------------------------------------------------
+
+/// Opaque profile handle exposed to C.
+pub struct GbtraceProfile {
+    profile: Profile,
+    /// Cached CStrings for field names (kept alive for pointer stability).
+    field_cstrings: Vec<CString>,
+    /// Cached CStrings for memory field names.
+    memory_names: Vec<CString>,
+    /// Memory addresses in the same order as memory_names.
+    memory_addrs: Vec<u16>,
+    /// Cached trigger string.
+    trigger_cstring: CString,
+    /// Cached name string.
+    name_cstring: CString,
+    /// Cached description string.
+    description_cstring: CString,
+}
+
+/// Load a profile from a TOML file.
+/// Returns an opaque pointer, or null on error.
+#[no_mangle]
+pub unsafe extern "C" fn gbtrace_profile_load(path: *const c_char) -> *mut GbtraceProfile {
+    let path_str = match CStr::from_ptr(path).to_str() {
+        Ok(s) => s,
+        Err(_) => return std::ptr::null_mut(),
+    };
+
+    let profile = match Profile::load(path_str) {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!("gbtrace_profile_load: {e}");
+            return std::ptr::null_mut();
+        }
+    };
+
+    let field_cstrings: Vec<CString> = profile
+        .fields
+        .iter()
+        .map(|f| CString::new(f.as_str()).unwrap())
+        .collect();
+
+    let memory_names: Vec<CString> = profile
+        .memory
+        .keys()
+        .map(|k| CString::new(k.as_str()).unwrap())
+        .collect();
+
+    let memory_addrs: Vec<u16> = profile.memory.values().copied().collect();
+
+    let trigger_str = match profile.trigger {
+        gbtrace::header::Trigger::Instruction => "instruction",
+        gbtrace::header::Trigger::Mcycle => "mcycle",
+        gbtrace::header::Trigger::Tcycle => "tcycle",
+        gbtrace::header::Trigger::Scanline => "scanline",
+        gbtrace::header::Trigger::Frame => "frame",
+        gbtrace::header::Trigger::Custom => "custom",
+    };
+    let trigger_cstring = CString::new(trigger_str).unwrap();
+    let name_cstring = CString::new(profile.name.as_str()).unwrap();
+    let description_cstring = CString::new(profile.description.as_str()).unwrap();
+
+    Box::into_raw(Box::new(GbtraceProfile {
+        profile,
+        field_cstrings,
+        memory_names,
+        memory_addrs,
+        trigger_cstring,
+        name_cstring,
+        description_cstring,
+    }))
+}
+
+/// Get the profile name.
+#[no_mangle]
+pub unsafe extern "C" fn gbtrace_profile_name(p: *const GbtraceProfile) -> *const c_char {
+    (*p).name_cstring.as_ptr()
+}
+
+/// Get the profile description.
+#[no_mangle]
+pub unsafe extern "C" fn gbtrace_profile_description(p: *const GbtraceProfile) -> *const c_char {
+    (*p).description_cstring.as_ptr()
+}
+
+/// Get the trigger string (e.g. "instruction", "tcycle").
+#[no_mangle]
+pub unsafe extern "C" fn gbtrace_profile_trigger(p: *const GbtraceProfile) -> *const c_char {
+    (*p).trigger_cstring.as_ptr()
+}
+
+/// Get the number of fields in the profile.
+#[no_mangle]
+pub unsafe extern "C" fn gbtrace_profile_num_fields(p: *const GbtraceProfile) -> usize {
+    (*p).profile.fields.len()
+}
+
+/// Get a field name by index. Returns null if out of bounds.
+#[no_mangle]
+pub unsafe extern "C" fn gbtrace_profile_field_name(
+    p: *const GbtraceProfile,
+    index: usize,
+) -> *const c_char {
+    match (&(*p).field_cstrings).get(index) {
+        Some(cs) => cs.as_ptr(),
+        None => std::ptr::null(),
+    }
+}
+
+/// Get the number of memory address fields.
+#[no_mangle]
+pub unsafe extern "C" fn gbtrace_profile_num_memory(p: *const GbtraceProfile) -> usize {
+    (*p).memory_names.len()
+}
+
+/// Get a memory field name by index. Returns null if out of bounds.
+#[no_mangle]
+pub unsafe extern "C" fn gbtrace_profile_memory_name(
+    p: *const GbtraceProfile,
+    index: usize,
+) -> *const c_char {
+    match (&(*p).memory_names).get(index) {
+        Some(cs) => cs.as_ptr(),
+        None => std::ptr::null(),
+    }
+}
+
+/// Get a memory field address by index. Returns 0 if out of bounds.
+#[no_mangle]
+pub unsafe extern "C" fn gbtrace_profile_memory_addr(
+    p: *const GbtraceProfile,
+    index: usize,
+) -> u16 {
+    (&(*p).memory_addrs).get(index).copied().unwrap_or(0)
+}
+
+/// Free a profile handle.
+#[no_mangle]
+pub unsafe extern "C" fn gbtrace_profile_free(p: *mut GbtraceProfile) {
+    if !p.is_null() {
+        drop(Box::from_raw(p));
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Writer handle
+// ---------------------------------------------------------------------------
 
 /// Opaque writer handle exposed to C.
 pub struct GbtraceWriter {
