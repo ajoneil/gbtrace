@@ -8,7 +8,7 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: traces-${{ github.ref }}
+  group: traces
   cancel-in-progress: true
     inputs:
       suite:
