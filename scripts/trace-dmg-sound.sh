@@ -3,6 +3,7 @@
 #
 # Pass/fail: test writes result to $A000 (0x00 = pass, 0x80 = still running).
 # Signature $DE,$B0,$61 at $A001-$A003 indicates valid output.
+# Tests take ~36 emulated seconds (~2150 frames) to complete.
 #
 # Usage: trace-dmg-sound.sh <adapter-binary> <rom> <profile> <output-dir> [<rom-dir>]
 set -euo pipefail
@@ -21,10 +22,7 @@ ROM_REL="$(realpath --relative-to="$ROM_DIR" "$ROM")"
 ROM_REL="${ROM_REL%.gb}"
 NAME="${ROM_REL//\//__}"
 
-# dmg_sound tests need time to complete — use generous frame limit.
-# Stop when the signature byte at $A001 is written ($DE), indicating
-# the test has produced output. Initial RAM value is $00/$FF, not $DE.
-MAX_FRAMES=6000
+MAX_FRAMES=3000
 
 TMP="/tmp/gbtrace_dmg_sound_${NAME}_${ADAPTER}_$$"
 TRACE="${TMP}.gbtrace"
@@ -33,7 +31,8 @@ stderr_file="${TMP}.stderr"
 cleanup() { rm -f "$TRACE" "$stderr_file" "${ROM%.gb}.sav"; }
 trap cleanup EXIT
 
-# Capture — stop when signature appears at A001 (test has finished)
+# Stop when the signature byte at $A001 is written ($DE).
+# Can't use $A000=00 because external RAM starts at 0 before the test runs.
 (
     set +eo pipefail
     "$BIN" --rom "$ROM" --profile "$PROFILE" --output "$TRACE" \

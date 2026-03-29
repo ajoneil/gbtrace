@@ -88,6 +88,62 @@ static uint8_t read_reg(const GateBoy& gb, unsigned short addr) {
         // SB (0xFF01) and SC (0xFF02): serial is not simulated in GateBoy.
         case 0xFF01: return 0;
         case 0xFF02: return 0;
+
+        // APU registers — packed from gate-level DFFs.
+        // Values reflect the full DFF state, not the masked read values.
+
+        // Channel 1 — square with sweep
+        case 0xFF10: return (uint8_t)bit_pack(&s.ch1.BANY_NR10_SWEEP_SHIFT0p, 7); // NR10
+        case 0xFF11: return (uint8_t)(
+            (bit_pack(&s.ch1.CENA_NR11_DUTY0p, 2) << 6) |
+             bit_pack(&s.ch1.BACY_NR11_LEN0, 6)); // NR11
+        case 0xFF12: return (uint8_t)bit_pack(&s.ch1.JUSA_NR12_PERIOD0p, 8); // NR12
+        case 0xFF13: return (uint8_t)bit_pack(&s.ch1.HYKA_NR13_FREQ00, 8); // NR13
+        case 0xFF14: return (uint8_t)(
+            ((s.ch1.DUPE_NR14_TRIGp.state & 1) << 7) |
+            ((s.ch1.BOKO_NR14_LENENp.state & 1) << 6) |
+             bit_pack(&s.ch1.DYGY_NR14_FREQ08, 3)); // NR14
+
+        // Channel 2 — square
+        case 0xFF16: return (uint8_t)(
+            (bit_pack(&s.ch2.BERA_NR21_DUTY0, 2) << 6) |
+             bit_pack(&s.ch2.ERYC_NR21_LEN0, 6)); // NR21
+        case 0xFF17: return (uint8_t)bit_pack(&s.ch2.HYFU_NR22_P0p, 8); // NR22
+        case 0xFF18: return (uint8_t)bit_pack(&s.ch2.FOFE_NR23_FREQ00p, 8); // NR23
+        case 0xFF19: return (uint8_t)(
+            ((s.ch2.ETAP_NR24_TRIGp.state & 1) << 7) |
+            ((s.ch2.EMER_NR24_LENENp.state & 1) << 6) |
+             bit_pack(&s.ch2.JEFU_NR24_FREQ08p, 3)); // NR24
+
+        // Channel 3 — wave
+        case 0xFF1A: return (uint8_t)((s.ch3.GUXE_NR30_AMP_ENp.state & 1) << 7); // NR30
+        case 0xFF1B: return (uint8_t)bit_pack(&s.ch3.GEVO_NR31_LEN0p, 8); // NR31
+        case 0xFF1C: return (uint8_t)(bit_pack(&s.ch3.HUKY_NR32_VOL0p, 2) << 5); // NR32
+        case 0xFF1D: return (uint8_t)bit_pack(&s.ch3.KOGA_NR33_FREQ00p, 8); // NR33
+        case 0xFF1E: return (uint8_t)(
+            ((s.ch3.GAVU_NR34_TRIGp.state & 1) << 7) |
+            ((s.ch3.HOTO_NR34_LENENp.state & 1) << 6) |
+             bit_pack(&s.ch3.JEMO_NR34_FREQ08p, 3)); // NR34
+
+        // Channel 4 — noise
+        case 0xFF20: return (uint8_t)bit_pack(&s.ch4.DANO_NR41_LEN0p, 6); // NR41
+        case 0xFF21: return (uint8_t)bit_pack(&s.ch4.EMOK_NR42_ENV_DELAY0p, 8); // NR42
+        case 0xFF22: return (uint8_t)bit_pack(&s.ch4.JARE_NR43_DIV0p, 8); // NR43
+        case 0xFF23: return (uint8_t)(
+            ((s.ch4.HOGA_NR44_TRIGp.state & 1) << 7) |
+            ((s.ch4.CUNY_NR44_LEN_ENp.state & 1) << 6)); // NR44
+
+        // Control
+        case 0xFF24: return (uint8_t)bit_pack(&s.spu.APEG_NR50_VOL_L0, 8); // NR50
+        case 0xFF25: return (uint8_t)bit_pack(&s.spu.ANEV_NR51_RCH1_ENp, 8); // NR51
+        case 0xFF26: { // NR52
+            uint8_t power = (s.spu.HADA_NR52_ALL_SOUND_ON.state & 1) << 7;
+            uint8_t ch1_on = (s.ch1.CYTO_CH1_ACTIVEp.state & 1);
+            uint8_t ch2_on = (s.ch2.DANE_CH2_ACTIVEp.state & 1) << 1;
+            uint8_t ch3_on = (s.ch3.DAVO_CH3_ACTIVEp.state & 1) << 2;
+            uint8_t ch4_on = (s.ch4.GENA_CH4_ACTIVEp.state & 1) << 3;
+            return power | 0x70 | ch4_on | ch3_on | ch2_on | ch1_on;
+        }
     }
 
     // RAM regions: peek() reads from memory arrays directly.
