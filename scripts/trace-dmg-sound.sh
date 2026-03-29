@@ -46,6 +46,7 @@ fi
     "$BIN" --rom "$ROM" --profile "$PROFILE" --output "$TRACE" \
         --frames "$MAX_FRAMES" \
         --extra-frames 2 \
+        --stop-when A000!=80 \
         "${EXTRA_ARGS[@]}" \
         2>"$stderr_file" </dev/null
 ) || true
