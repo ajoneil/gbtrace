@@ -2,7 +2,7 @@
 #
 # Usage:
 #   make adapters            - Build all adapter binaries
-#   make cli                 - Build gbtrace-cli
+#   make cli                 - Build gbtrace CLI
 #   make wasm                - Build WASM module
 #   make traces              - Generate all traces (use -jN for parallelism)
 #   make traces-gbmicrotest  - Generate gbmicrotest traces only
@@ -21,7 +21,7 @@ SHELL := /bin/bash
 .SHELLFLAGS := -euo pipefail -c
 
 PROJECT_DIR := $(shell pwd)
-CLI := $(PROJECT_DIR)/target/release/gbtrace-cli
+CLI := $(PROJECT_DIR)/target/release/gbtrace
 BUILD_DIR := $(PROJECT_DIR)/build
 PAGES_URL ?= https://ajoneil.github.io/gbtrace
 
@@ -188,9 +188,9 @@ adapters/missingno/gbtrace-missingno:
 FFI_LIB := $(PROJECT_DIR)/target/release/libgbtrace_ffi.a
 FFI_HEADER := $(PROJECT_DIR)/crates/gbtrace-ffi/gbtrace.h
 
-$(CLI): $(wildcard crates/gbtrace-cli/src/*.rs crates/gbtrace/src/*.rs)
-	@echo "Building gbtrace-cli..."
-	@cargo build --release -p gbtrace-cli 2>&1 | tail -1
+$(CLI): $(wildcard crates/gbtrace/src/*.rs crates/gbtrace/src/**/*.rs)
+	@echo "Building gbtrace..."
+	@cargo build --release --features cli 2>&1 | tail -1
 
 $(FFI_LIB): $(wildcard crates/gbtrace-ffi/src/*.rs crates/gbtrace/src/*.rs)
 	@echo "Building gbtrace-ffi..."

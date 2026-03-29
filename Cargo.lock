@@ -531,6 +531,7 @@ name = "gbtrace"
 version = "0.1.0"
 dependencies = [
  "arrow",
+ "clap",
  "flate2",
  "png",
  "serde",
@@ -540,14 +541,6 @@ dependencies = [
  "thiserror",
  "toml",
  "zstd",
-]
-
-[[package]]
-name = "gbtrace-cli"
-version = "0.1.0"
-dependencies = [
- "clap",
- "gbtrace",
 ]
 
 [[package]]

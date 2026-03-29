@@ -63,12 +63,12 @@ jobs:
         uses: dawidd6/action-download-artifact@v6
         with:
           workflow: build.yml
-          name: gbtrace-cli
+          name: gbtrace-bin
           path: target/release
           branch: main
 
       - name: Make CLI executable
-        run: chmod +x target/release/gbtrace-cli
+        run: chmod +x target/release/gbtrace
 
       # Download adapter from latest build
       - name: Download adapter
@@ -164,7 +164,7 @@ jobs:
           python3 scripts/manifest.py "$TRACE_DIR" "$ROM_DIR"
         env:
           LD_LIBRARY_PATH: ${{ github.workspace }}/adapters/sameboy/SameBoy/build/lib
-          CLI: ${{ github.workspace }}/target/release/gbtrace-cli
+          CLI: ${{ github.workspace }}/target/release/gbtrace
         timeout-minutes: 120
 
       - name: Upload traces

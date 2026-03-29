@@ -6,7 +6,7 @@ use gbtrace::JsonlReader;
 use gbtrace::header::TraceHeader;
 
 #[derive(Parser)]
-#[command(name = "gbtrace-cli", about = "Inspect and compare GB Trace files")]
+#[command(name = "gbtrace", about = "Inspect and compare GB Trace files")]
 struct Cli {
     #[command(subcommand)]
     command: Command,

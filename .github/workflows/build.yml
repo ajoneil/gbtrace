@@ -36,8 +36,8 @@ jobs:
       - name: Upload CLI
         uses: actions/upload-artifact@v6
         with:
-          name: gbtrace-cli
-          path: target/release/gbtrace-cli
+          name: gbtrace-bin
+          path: target/release/gbtrace
           retention-days: 90
 
       - name: Upload FFI library

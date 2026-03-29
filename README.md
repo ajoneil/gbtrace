@@ -25,7 +25,7 @@ gbtrace uses a compact binary format for efficient storage and querying. There a
 **JSONL format** — for quick integration, emit `.gbtrace.jsonl` files (one JSON object per line). Both the CLI and web viewer can work with JSONL files directly, but you can convert them for smaller file sizes and faster loading:
 
 ```bash
-gbtrace-cli convert trace.gbtrace.jsonl -o trace.gbtrace
+gbtrace convert trace.gbtrace.jsonl -o trace.gbtrace
 ```
 
 ### JSONL format
@@ -80,24 +80,24 @@ The pre-captured traces come from several emulators:
 
 ## CLI
 
-The `gbtrace-cli` tool provides offline trace inspection:
+The `gbtrace` tool provides offline trace inspection:
 
 ```bash
 # Show trace metadata
-gbtrace-cli info trace.gbtrace
+gbtrace info trace.gbtrace
 
 # Find entries matching a condition
-gbtrace-cli query trace.gbtrace -w "pc=0x0150"
-gbtrace-cli query trace.gbtrace -w "a changes"
+gbtrace query trace.gbtrace -w "pc=0x0150"
+gbtrace query trace.gbtrace -w "a changes"
 
 # Compare two traces
-gbtrace-cli diff gateboy.gbtrace gambatte.gbtrace --fields pc,a,f
+gbtrace diff gateboy.gbtrace gambatte.gbtrace --fields pc,a,f
 
 # Convert JSONL to native format
-gbtrace-cli convert trace.gbtrace.jsonl -o trace.gbtrace
+gbtrace convert trace.gbtrace.jsonl -o trace.gbtrace
 ```
 
-Run `gbtrace-cli --help` for a full list of commands.
+Run `gbtrace --help` for a full list of commands.
 
 ## Building
 
@@ -105,7 +105,7 @@ gbtrace is a Rust workspace. The crates are not yet published to crates.io — i
 
 ```bash
 # CLI
-cargo install --git https://github.com/ajoneil/gbtrace gbtrace-cli
+cargo install --git https://github.com/ajoneil/gbtrace --features cli gbtrace
 
 # Local web viewer (requires wasm-pack)
 make serve

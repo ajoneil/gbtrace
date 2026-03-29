@@ -7,7 +7,7 @@ BIN="$1"
 ROM="$2"
 PROFILE="$3"
 OUT_DIR="$4"
-CLI="${CLI:-target/release/gbtrace-cli}"
+CLI="${CLI:-target/release/gbtrace}"
 
 NAME="$(basename "$ROM" .gb)"
 ADAPTER="$(basename "$BIN" | sed 's/gbtrace-//')"

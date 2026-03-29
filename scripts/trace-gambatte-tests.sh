@@ -15,7 +15,7 @@ ROM="$2"
 PROFILE="$3"
 OUT_DIR="$4"
 ROM_DIR="${5:-$(dirname "$ROM")}"
-CLI="${CLI:-target/release/gbtrace-cli}"
+CLI="${CLI:-target/release/gbtrace}"
 
 ADAPTER="$(basename "$BIN" | sed 's/gbtrace-//')"
 

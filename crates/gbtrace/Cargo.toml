@@ -4,8 +4,14 @@ version = "0.1.0"
 edition = "2021"
 description = "Reader, writer, and profile parser for the GB Trace emulator comparison format"
 
+[[bin]]
+name = "gbtrace"
+path = "src/main.rs"
+required-features = ["cli"]
+
 [features]
 default = []
+cli = ["dep:clap", "png"]
 png = ["dep:png"]
 
 [dependencies]
@@ -18,6 +24,7 @@ thiserror = "2"
 arrow = { version = "54", default-features = false, features = ["ipc"] }
 zstd = "0.13"
 png = { version = "0.17", optional = true }
+clap = { version = "4", features = ["derive"], optional = true }
 tempfile = "3"
 
 [dev-dependencies]
