@@ -69,15 +69,15 @@ pub struct GbtraceStore {
     /// Maps field name → (group_id, index within group's RecordBatch)
     field_to_group: HashMap<String, (u8, usize)>,
 
-    /// The full file data (for seeking to chunks).
+    /// The full file data (for seeking to chunks/snapshots).
     data: Vec<u8>,
 
     /// Chunk index from footer.
     chunk_index: Vec<ChunkIndexEntry>,
     /// Cumulative entry counts for mapping global row → chunk.
     cumulative: Vec<usize>,
-    /// Frame index from footer.
-    frame_index: Vec<FrameIndexEntry>,
+    /// Snapshot index from footer.
+    snapshot_index: Vec<SnapshotIndexEntry>,
     total_entries: usize,
 
     /// LRU cache of decoded chunks.
@@ -130,17 +130,19 @@ impl GbtraceStore {
             cumulative.push(total);
         }
 
-        // Frame index
-        let num_frames = read_u32(&data, &mut pos) as usize;
-        let mut frame_index = Vec::with_capacity(num_frames);
-        for _ in 0..num_frames {
+        // Snapshot index
+        let num_snapshots = read_u32(&data, &mut pos) as usize;
+        let mut snapshot_index = Vec::with_capacity(num_snapshots);
+        for _ in 0..num_snapshots {
+            let snapshot_type = data[pos]; pos += 1;
             let entry_index = read_u64(&data, &mut pos);
-            let fb_offset = read_u64(&data, &mut pos);
-            let fb_size = read_u32(&data, &mut pos);
-            frame_index.push(FrameIndexEntry {
+            let offset = read_u64(&data, &mut pos);
+            let payload_size = read_u32(&data, &mut pos);
+            snapshot_index.push(SnapshotIndexEntry {
+                snapshot_type,
                 entry_index,
-                framebuffer_offset: fb_offset,
-                framebuffer_size: fb_size,
+                offset,
+                payload_size,
             });
         }
 
@@ -164,7 +166,7 @@ impl GbtraceStore {
             data: data.to_vec(),
             chunk_index,
             cumulative,
-            frame_index,
+            snapshot_index,
             total_entries,
             cache: RefCell::new(ChunkCache::new(8)),
         })
@@ -260,16 +262,31 @@ impl GbtraceStore {
         Some(read_arrow_value(col, local_row))
     }
 
-    /// Get a framebuffer for a specific frame.
+    /// Get a framebuffer for a specific frame (by frame index, not snapshot index).
     pub fn framebuffer(&self, frame_idx: usize) -> Option<Vec<u8>> {
-        let fi = self.frame_index.get(frame_idx)?;
-        if fi.framebuffer_offset == 0 || fi.framebuffer_size == 0 { return None; }
+        let frame_snapshots: Vec<&SnapshotIndexEntry> = self.snapshot_index.iter()
+            .filter(|s| s.snapshot_type == SnapshotType::Frame as u8)
+            .collect();
+        let snap = frame_snapshots.get(frame_idx)?;
+        if snap.payload_size == 0 { return None; }
+        self.read_snapshot_payload(snap)
+    }
 
-        let start = fi.framebuffer_offset as usize;
-        let end = start + fi.framebuffer_size as usize;
-        if end > self.data.len() { return None; }
+    /// Read and decompress a snapshot's payload.
+    pub fn read_snapshot_payload(&self, snap: &SnapshotIndexEntry) -> Option<Vec<u8>> {
+        if snap.payload_size == 0 { return None; }
+        // In v2, snapshot payload is at offset + 17 (tag:4 + type:1 + entry_index:8 + payload_len:4)
+        let payload_start = snap.offset as usize + 17;
+        let payload_end = payload_start + snap.payload_size as usize;
+        if payload_end > self.data.len() { return None; }
+        zstd::decode_all(Cursor::new(&self.data[payload_start..payload_end])).ok()
+    }
 
-        zstd::decode_all(Cursor::new(&self.data[start..end])).ok()
+    /// Get all snapshots of a given type.
+    pub fn snapshots_of_type(&self, snapshot_type: SnapshotType) -> Vec<&SnapshotIndexEntry> {
+        self.snapshot_index.iter()
+            .filter(|s| s.snapshot_type == snapshot_type as u8)
+            .collect()
     }
 }
 
@@ -284,7 +301,10 @@ impl TraceStore for GbtraceStore {
     }
 
     fn frame_boundaries(&self) -> Vec<u32> {
-        self.frame_index.iter().map(|f| f.entry_index as u32).collect()
+        self.snapshot_index.iter()
+            .filter(|s| s.snapshot_type == SnapshotType::Frame as u8)
+            .map(|s| s.entry_index as u32)
+            .collect()
     }
 
     fn get_str(&self, col: usize, row: usize) -> String {

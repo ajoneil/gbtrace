@@ -166,8 +166,7 @@ pub struct GbtraceWriter {
 
     // Footer data accumulated during writing
     chunk_index: Vec<ChunkIndexEntry>,
-    frame_index: Vec<FrameIndexEntry>,
-    framebuffer_blobs: Vec<(u64, Vec<u8>)>, // (frame_idx, compressed_blob)
+    snapshot_index: Vec<SnapshotIndexEntry>,
 }
 
 impl GbtraceWriter {
@@ -210,8 +209,7 @@ impl GbtraceWriter {
             entries_in_chunk: 0,
             total_entries: 0,
             chunk_index: Vec::new(),
-            frame_index: Vec::new(),
-            framebuffer_blobs: Vec::new(),
+            snapshot_index: Vec::new(),
         })
     }
 
@@ -239,24 +237,37 @@ impl GbtraceWriter {
     /// Mark a frame boundary at the current entry position.
     /// Optionally attach a framebuffer snapshot (23040 shade values).
     pub fn mark_frame(&mut self, framebuffer: Option<&[u8]>) -> Result<()> {
-        let fb_data = if let Some(fb) = framebuffer {
-            let compressed = zstd::encode_all(fb, 3)
-                .map_err(|e| Error::Io(io::Error::new(io::ErrorKind::Other, e)))?;
-            Some(compressed)
+        let payload = framebuffer.unwrap_or(&[]);
+        self.write_snapshot(SnapshotType::Frame, payload)
+    }
+
+    /// Write a typed snapshot record at the current entry position.
+    /// The payload is compressed with zstd and written inline.
+    pub fn write_snapshot(&mut self, snapshot_type: SnapshotType, payload: &[u8]) -> Result<()> {
+        let compressed = if payload.is_empty() {
+            Vec::new()
         } else {
-            None
+            zstd::encode_all(payload, 3)
+                .map_err(|e| Error::Io(io::Error::new(io::ErrorKind::Other, e)))?
         };
 
-        self.frame_index.push(FrameIndexEntry {
-            entry_index: self.total_entries,
-            framebuffer_offset: 0, // filled in during finish()
-            framebuffer_size: fb_data.as_ref().map(|b| b.len() as u32).unwrap_or(0),
-        });
+        let offset = self.out.stream_position()?;
 
-        if let Some(blob) = fb_data {
-            let frame_idx = self.frame_index.len() as u64 - 1;
-            self.framebuffer_blobs.push((frame_idx, blob));
+        // Write snapshot record: tag + type + entry_index + payload_len + payload
+        self.out.write_all(SNAPSHOT_TAG)?;
+        self.out.write_all(&[snapshot_type as u8])?;
+        self.out.write_all(&self.total_entries.to_le_bytes())?;
+        self.out.write_all(&(compressed.len() as u32).to_le_bytes())?;
+        if !compressed.is_empty() {
+            self.out.write_all(&compressed)?;
         }
+
+        self.snapshot_index.push(SnapshotIndexEntry {
+            snapshot_type: snapshot_type as u8,
+            offset,
+            entry_index: self.total_entries,
+            payload_size: compressed.len() as u32,
+        });
 
         Ok(())
     }
@@ -357,13 +368,6 @@ impl GbtraceWriter {
         // Flush any remaining entries
         self.flush_chunk()?;
 
-        // Write framebuffer blobs and record their offsets
-        for (frame_idx, blob) in &self.framebuffer_blobs {
-            let offset = self.out.stream_position()?;
-            self.out.write_all(blob)?;
-            self.frame_index[*frame_idx as usize].framebuffer_offset = offset;
-        }
-
         // Write footer
         let footer_offset = self.out.stream_position()?;
 
@@ -374,12 +378,13 @@ impl GbtraceWriter {
             self.out.write_all(&chunk.entry_count.to_le_bytes())?;
         }
 
-        // Frame index
-        self.out.write_all(&(self.frame_index.len() as u32).to_le_bytes())?;
-        for frame in &self.frame_index {
-            self.out.write_all(&frame.entry_index.to_le_bytes())?;
-            self.out.write_all(&frame.framebuffer_offset.to_le_bytes())?;
-            self.out.write_all(&frame.framebuffer_size.to_le_bytes())?;
+        // Snapshot index
+        self.out.write_all(&(self.snapshot_index.len() as u32).to_le_bytes())?;
+        for snap in &self.snapshot_index {
+            self.out.write_all(&[snap.snapshot_type])?;
+            self.out.write_all(&snap.entry_index.to_le_bytes())?;
+            self.out.write_all(&snap.offset.to_le_bytes())?;
+            self.out.write_all(&snap.payload_size.to_le_bytes())?;
         }
 
         // Total entries
