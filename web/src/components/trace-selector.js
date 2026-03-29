@@ -4,13 +4,10 @@ import { EMULATORS, traceUrl, romUrl } from './test-picker.js';
 
 /** Field groups for toggling related columns together. */
 const FIELD_GROUPS = [
-  { name: 'cpu',       fields: ['pc', 'sp', 'a', 'f', 'b', 'c', 'd', 'e', 'h', 'l'] },
-  { name: 'ppu',       fields: ['lcdc', 'stat', 'ly', 'lyc', 'scy', 'scx', 'wy', 'wx', 'bgp', 'obp0', 'obp1'] },
-  { name: 'interrupt', fields: ['if_', 'ie', 'ime'] },
-  { name: 'timer',     fields: ['div', 'tima', 'tma', 'tac'] },
-  { name: 'serial',    fields: ['sb', 'sc'] },
+  { name: 'cpu',       fields: ['pc', 'sp', 'a', 'f', 'b', 'c', 'd', 'e', 'h', 'l', 'ime', 'mcycles', 'tcycles'] },
+  { name: 'ppu',       fields: ['lcdc', 'stat', 'ly', 'lyc', 'scy', 'scx', 'wy', 'wx', 'bgp', 'obp0', 'obp1', 'dma'] },
   { name: 'ppu_int',   fields: [
-    'pix',
+    'pix', 'pix_x',
     'oam0_x', 'oam0_id', 'oam0_attr', 'oam1_x', 'oam1_id', 'oam1_attr',
     'oam2_x', 'oam2_id', 'oam2_attr', 'oam3_x', 'oam3_id', 'oam3_attr',
     'oam4_x', 'oam4_id', 'oam4_attr', 'oam5_x', 'oam5_id', 'oam5_attr',
@@ -20,9 +17,26 @@ const FIELD_GROUPS = [
     'mask_pipe', 'pal_pipe',
     'tfetch_state', 'sfetch_state', 'tile_temp_a', 'tile_temp_b',
     'pix_count', 'sprite_count', 'scan_count', 'rendering', 'win_mode',
+    'vram_addr', 'vram_data',
   ]},
-  { name: 'vram',      fields: ['vram_addr', 'vram_data'] },
-  { name: 'test',      fields: ['test_result', 'test_expect', 'test_pass'] },
+  { name: 'apu',       fields: [
+    'nr10', 'nr11', 'nr12', 'nr13', 'nr14',
+    'nr21', 'nr22', 'nr23', 'nr24',
+    'nr30', 'nr31', 'nr32', 'nr33', 'nr34',
+    'nr41', 'nr42', 'nr43', 'nr44',
+    'nr50', 'nr51', 'nr52',
+  ]},
+  { name: 'apu_int',   fields: [
+    'ch1_active', 'ch1_freq_cnt', 'ch1_env_vol', 'ch1_phase', 'ch1_sweep_shadow', 'ch1_len_cnt',
+    'ch2_active', 'ch2_freq_cnt', 'ch2_env_vol', 'ch2_phase', 'ch2_len_cnt',
+    'ch3_active', 'ch3_freq_cnt', 'ch3_wave_idx', 'ch3_sample', 'ch3_len_cnt',
+    'ch4_active', 'ch4_freq_cnt', 'ch4_env_vol', 'ch4_lfsr', 'ch4_len_cnt',
+    'apu_write_addr', 'apu_write_data',
+  ]},
+  { name: 'timer',     fields: ['div', 'tima', 'tma', 'tac'] },
+  { name: 'interrupt', fields: ['if_', 'ie'] },
+  { name: 'serial',    fields: ['sb', 'sc'] },
+  { name: 'test',      fields: ['test_result', 'test_expect', 'test_pass', 'test_status', 'test_sig1'] },
 ];
 
 export class TraceSelector extends LitElement {
