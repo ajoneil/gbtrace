@@ -42,6 +42,7 @@ jobs:
           path: _trace_artifacts
           branch: main
           if_no_artifact_found: warn
+          search_artifacts: true
 
       # Merge trace artifacts into build/traces/
       # Artifacts are in _trace_artifacts/traces-{suite}-{emulator}/...
