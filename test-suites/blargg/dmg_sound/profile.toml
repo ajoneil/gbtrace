@@ -9,6 +9,3 @@ apu = ["registers", "internal", "writes"]
 timer = true
 interrupt = true
 
-[fields.memory]
-test_status = "A000"
-test_sig1   = "A001"
