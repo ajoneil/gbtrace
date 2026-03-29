@@ -136,9 +136,9 @@ struct FieldEmitter {
     enum Source { CPU_REG8, CPU_REG16, CPU_IME, IO_READ, PIX, PPU_U8, PPU_U16, PPU_BOOL } source;
     unsigned short io_addr; // for IO_READ
     // For PPU_U8/PPU_U16/PPU_BOOL: function pointer to read the value
-    uint8_t (*read_ppu_u8)(const GateBoy &gb);
-    uint16_t (*read_ppu_u16)();
-    bool (*read_ppu_bool)(const GateBoy &gb);
+    uint8_t (*read_u8)(const GateBoy &gb);
+    uint16_t (*read_u16)(const GateBoy &gb);
+    bool (*read_bool)(const GateBoy &gb);
 };
 
 static std::vector<FieldEmitter> g_emitters;
@@ -271,16 +271,16 @@ static const std::unordered_map<std::string, unsigned short> IO_FIELD_ADDR = {
     {"nr50", 0xFF24}, {"nr51", 0xFF25}, {"nr52", 0xFF26},
 };
 
-// --- PPU internal readers ---
-// Each returns a u8 from gate-level state via bit_pack().
+// --- Internal state readers ---
+// Each reads gate-level state via bit_pack().
 
 // Sprite store: 10 sprites, each with x (8-bit), id (6-bit index), attr (4-bit flags)
 #define SPRITE_X(N) [](const GateBoy &gb) -> uint8_t { return (uint8_t)bit_pack(gb.gb_state.store_x##N); }
 #define SPRITE_ID(N) [](const GateBoy &gb) -> uint8_t { return (uint8_t)bit_pack(gb.gb_state.store_i##N); }
 #define SPRITE_ATTR(N) [](const GateBoy &gb) -> uint8_t { return (uint8_t)bit_pack(gb.gb_state.store_l##N); }
 
-static const std::unordered_map<std::string, uint8_t(*)(const GateBoy &)> PPU_U8_READERS = {
-    // Sprite store
+static const std::unordered_map<std::string, uint8_t(*)(const GateBoy &)> INTERNAL_U8_READERS = {
+    // PPU — sprite store
     {"oam0_x", SPRITE_X(0)}, {"oam0_id", SPRITE_ID(0)}, {"oam0_attr", SPRITE_ATTR(0)},
     {"oam1_x", SPRITE_X(1)}, {"oam1_id", SPRITE_ID(1)}, {"oam1_attr", SPRITE_ATTR(1)},
     {"oam2_x", SPRITE_X(2)}, {"oam2_id", SPRITE_ID(2)}, {"oam2_attr", SPRITE_ATTR(2)},
@@ -291,31 +291,56 @@ static const std::unordered_map<std::string, uint8_t(*)(const GateBoy &)> PPU_U8
     {"oam7_x", SPRITE_X(7)}, {"oam7_id", SPRITE_ID(7)}, {"oam7_attr", SPRITE_ATTR(7)},
     {"oam8_x", SPRITE_X(8)}, {"oam8_id", SPRITE_ID(8)}, {"oam8_attr", SPRITE_ATTR(8)},
     {"oam9_x", SPRITE_X(9)}, {"oam9_id", SPRITE_ID(9)}, {"oam9_attr", SPRITE_ATTR(9)},
-    // Pixel FIFO
+    // PPU — pixel FIFO
     {"bgw_fifo_a", [](const GateBoy &gb) -> uint8_t { return (uint8_t)bit_pack(gb.gb_state.bgw_pipe_a); }},
     {"bgw_fifo_b", [](const GateBoy &gb) -> uint8_t { return (uint8_t)bit_pack(gb.gb_state.bgw_pipe_b); }},
     {"spr_fifo_a", [](const GateBoy &gb) -> uint8_t { return (uint8_t)bit_pack(gb.gb_state.spr_pipe_a); }},
     {"spr_fifo_b", [](const GateBoy &gb) -> uint8_t { return (uint8_t)bit_pack(gb.gb_state.spr_pipe_b); }},
     {"mask_pipe",  [](const GateBoy &gb) -> uint8_t { return (uint8_t)bit_pack(gb.gb_state.mask_pipe); }},
     {"pal_pipe",   [](const GateBoy &gb) -> uint8_t { return (uint8_t)bit_pack(gb.gb_state.pal_pipe); }},
-    // Fetcher state
+    // PPU — fetcher state
     {"tfetch_state", [](const GateBoy &gb) -> uint8_t { return (uint8_t)bit_pack(gb.gb_state.tfetch_counter); }},
     {"sfetch_state", [](const GateBoy &gb) -> uint8_t { return (uint8_t)bit_pack(gb.gb_state.sfetch_counter_evn); }},
     {"tile_temp_a",  [](const GateBoy &gb) -> uint8_t { return (uint8_t)bit_pack(gb.gb_state.tile_temp_a); }},
     {"tile_temp_b",  [](const GateBoy &gb) -> uint8_t { return (uint8_t)bit_pack(gb.gb_state.tile_temp_b); }},
-    // Counters
+    // PPU — counters
     {"pix_count",    [](const GateBoy &gb) -> uint8_t { return (uint8_t)bit_pack(gb.gb_state.pix_count); }},
     {"sprite_count", [](const GateBoy &gb) -> uint8_t { return (uint8_t)bit_pack(gb.gb_state.sprite_counter); }},
     {"scan_count",   [](const GateBoy &gb) -> uint8_t { return (uint8_t)bit_pack(gb.gb_state.scan_counter); }},
+    // APU — envelope volume (4 bits packed)
+    {"ch1_env_vol", [](const GateBoy &gb) -> uint8_t { return (uint8_t)bit_pack(&gb.gb_state.ch1.HAFO_CH1_ENV0p, 4); }},
+    {"ch1_phase",   [](const GateBoy &gb) -> uint8_t { return (uint8_t)bit_pack(&gb.gb_state.ch1.ESUT_PHASE_xBxDxFxH, 3); }},
+    {"ch1_len_cnt", [](const GateBoy &gb) -> uint8_t { return (uint8_t)bit_pack(&gb.gb_state.ch1.BACY_NR11_LEN0, 6); }},
+    {"ch2_env_vol", [](const GateBoy &gb) -> uint8_t { return (uint8_t)bit_pack(&gb.gb_state.ch2.FENO_ENV_VOL0, 4); }},
+    {"ch2_phase",   [](const GateBoy &gb) -> uint8_t { return (uint8_t)bit_pack(&gb.gb_state.ch2.CANO_PHASE0, 3); }},
+    {"ch2_len_cnt", [](const GateBoy &gb) -> uint8_t { return (uint8_t)bit_pack(&gb.gb_state.ch2.ERYC_NR21_LEN0, 6); }},
+    {"ch3_wave_idx",[](const GateBoy &gb) -> uint8_t { return (uint8_t)bit_pack(&gb.gb_state.ch3.EFAR_WAVE_IDX0, 5); }},
+    {"ch3_sample",  [](const GateBoy &gb) -> uint8_t { return (uint8_t)bit_pack(&gb.gb_state.ch3.CYFO_SAMPLE0p, 8); }},
+    {"ch3_len_cnt", [](const GateBoy &gb) -> uint8_t { return (uint8_t)bit_pack(&gb.gb_state.ch3.GEVO_NR31_LEN0p, 8); }},
+    {"ch4_env_vol", [](const GateBoy &gb) -> uint8_t { return (uint8_t)bit_pack(&gb.gb_state.ch4.FEKO_CH4_VOL0, 4); }},
+    {"ch4_len_cnt", [](const GateBoy &gb) -> uint8_t { return (uint8_t)bit_pack(&gb.gb_state.ch4.DANO_NR41_LEN0p, 6); }},
 };
 
-// Special u16 readers (not gate-level state, adapter-maintained counters)
-static const std::unordered_map<std::string, uint16_t(*)()> PPU_U16_READERS = {
+static const std::unordered_map<std::string, uint16_t(*)(const GateBoy &)> INTERNAL_U16_READERS = {
+    // APU — frequency counters (11 bits)
+    {"ch1_freq_cnt",    [](const GateBoy &gb) -> uint16_t { return (uint16_t)bit_pack(&gb.gb_state.ch1.GAXE_CH1_FREQ_CNT_00, 11); }},
+    {"ch1_sweep_shadow",[](const GateBoy &gb) -> uint16_t { return (uint16_t)bit_pack(&gb.gb_state.ch1.FABU_CH1_SHIFT00, 11); }},
+    {"ch2_freq_cnt",    [](const GateBoy &gb) -> uint16_t { return (uint16_t)bit_pack(&gb.gb_state.ch2.DONE_COUNT00, 11); }},
+    {"ch3_freq_cnt",    [](const GateBoy &gb) -> uint16_t { return (uint16_t)bit_pack(&gb.gb_state.ch3.KUTU_COUNT00, 11); }},
+    {"ch4_freq_cnt",    [](const GateBoy &gb) -> uint16_t { return (uint16_t)bit_pack(&gb.gb_state.ch4.CEXO_FREQ_00, 14); }},
+    // APU — LFSR (16 bits)
+    {"ch4_lfsr",        [](const GateBoy &gb) -> uint16_t { return (uint16_t)bit_pack(&gb.gb_state.ch4.JOTO_LFSR_00, 16); }},
 };
 
-static const std::unordered_map<std::string, bool(*)(const GateBoy &)> PPU_BOOL_READERS = {
+static const std::unordered_map<std::string, bool(*)(const GateBoy &)> INTERNAL_BOOL_READERS = {
+    // PPU
     {"rendering", [](const GateBoy &gb) -> bool { return !(gb.gb_state.XYMU_RENDERING_LATCHn.state & 1); }},
     {"win_mode",  [](const GateBoy &gb) -> bool { return gb.gb_state.win_ctrl.PYNU_WIN_MODE_LATCHp.state != 0; }},
+    // APU — channel active flags
+    {"ch1_active", [](const GateBoy &gb) -> bool { return gb.gb_state.ch1.CYTO_CH1_ACTIVEp.state & 1; }},
+    {"ch2_active", [](const GateBoy &gb) -> bool { return gb.gb_state.ch2.DANE_CH2_ACTIVEp.state & 1; }},
+    {"ch3_active", [](const GateBoy &gb) -> bool { return gb.gb_state.ch3.DAVO_CH3_ACTIVEp.state & 1; }},
+    {"ch4_active", [](const GateBoy &gb) -> bool { return gb.gb_state.ch4.GENA_CH4_ACTIVEp.state & 1; }},
 };
 
 static void build_emitters(const Profile &prof) {
@@ -347,15 +372,15 @@ static void build_emitters(const Profile &prof) {
         } else if (auto it2 = prof.memory.find(field); it2 != prof.memory.end()) {
             em.source = FieldEmitter::IO_READ;
             em.io_addr = it2->second;
-        } else if (auto it3 = PPU_U8_READERS.find(field); it3 != PPU_U8_READERS.end()) {
+        } else if (auto it3 = INTERNAL_U8_READERS.find(field); it3 != INTERNAL_U8_READERS.end()) {
             em.source = FieldEmitter::PPU_U8;
-            em.read_ppu_u8 = it3->second;
-        } else if (auto it3b = PPU_U16_READERS.find(field); it3b != PPU_U16_READERS.end()) {
+            em.read_u8 = it3->second;
+        } else if (auto it3b = INTERNAL_U16_READERS.find(field); it3b != INTERNAL_U16_READERS.end()) {
             em.source = FieldEmitter::PPU_U16;
-            em.read_ppu_u16 = it3b->second;
-        } else if (auto it4 = PPU_BOOL_READERS.find(field); it4 != PPU_BOOL_READERS.end()) {
+            em.read_u16 = it3b->second;
+        } else if (auto it4 = INTERNAL_BOOL_READERS.find(field); it4 != INTERNAL_BOOL_READERS.end()) {
             em.source = FieldEmitter::PPU_BOOL;
-            em.read_ppu_bool = it4->second;
+            em.read_bool = it4->second;
         } else if (field == "vram_addr" || field == "vram_data") {
             // Handled separately via g_writer_vram_addr_col/g_writer_vram_data_col
             g_has_vram = true;
@@ -451,13 +476,13 @@ static void emit_entry(GateBoy &gb) {
             g_pix_buf.clear();
             break;
         case FieldEmitter::PPU_U8:
-            gbtrace_writer_set_u8(g_writer, col, em.read_ppu_u8(gb));
+            gbtrace_writer_set_u8(g_writer, col, em.read_u8(gb));
             break;
         case FieldEmitter::PPU_U16:
-            gbtrace_writer_set_u16(g_writer, col, em.read_ppu_u16());
+            gbtrace_writer_set_u16(g_writer, col, em.read_u16(gb));
             break;
         case FieldEmitter::PPU_BOOL:
-            gbtrace_writer_set_bool(g_writer, col, em.read_ppu_bool(gb));
+            gbtrace_writer_set_bool(g_writer, col, em.read_bool(gb));
             break;
         }
     }
