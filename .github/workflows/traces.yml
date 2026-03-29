@@ -6,6 +6,10 @@ on:
     types: [completed]
     branches: [main]
   workflow_dispatch:
+
+concurrency:
+  group: traces-${{ github.ref }}
+  cancel-in-progress: true
     inputs:
       suite:
         description: "Test suite (all, gbmicrotest, blargg, mooneye, gambatte-tests, mealybug-tearoom, dmg-acid2)"

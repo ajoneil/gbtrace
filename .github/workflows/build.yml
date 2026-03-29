@@ -3,13 +3,11 @@ name: Build
 on:
   push:
     branches: [main]
-    paths:
-      - "crates/**"
-      - "web/**"
-      - "adapters/**"
-      - "Cargo.*"
-      - ".github/workflows/build.yml"
   workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   cli-and-wasm:
