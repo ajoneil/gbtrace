@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Generate a single dmg_sound trace: adapter + ROM → .gbtrace
 #
-# Pass/fail: test writes result to $A000 (0x00 = pass, 0x80 = still running)
+# Pass/fail: test writes result to $A000 (0x00 = pass, 0x80 = still running).
+# Signature $DE,$B0,$61 at $A001-$A003 indicates valid output.
 #
 # Usage: trace-dmg-sound.sh <adapter-binary> <rom> <profile> <output-dir> [<rom-dir>]
 set -euo pipefail
@@ -20,8 +21,10 @@ ROM_REL="$(realpath --relative-to="$ROM_DIR" "$ROM")"
 ROM_REL="${ROM_REL%.gb}"
 NAME="${ROM_REL//\//__}"
 
-# dmg_sound tests take longer than microtests
-MAX_FRAMES=3000
+# dmg_sound tests need time to complete — use generous frame limit.
+# Stop when the signature byte at $A001 is written ($DE), indicating
+# the test has produced output. Initial RAM value is $00/$FF, not $DE.
+MAX_FRAMES=6000
 
 TMP="/tmp/gbtrace_dmg_sound_${NAME}_${ADAPTER}_$$"
 TRACE="${TMP}.gbtrace"
@@ -30,12 +33,13 @@ stderr_file="${TMP}.stderr"
 cleanup() { rm -f "$TRACE" "$stderr_file" "${ROM%.gb}.sav"; }
 trap cleanup EXIT
 
-# Capture — stop when test_status changes from 0x80 (running) to a result
+# Capture — stop when signature appears at A001 (test has finished)
 (
     set +eo pipefail
     "$BIN" --rom "$ROM" --profile "$PROFILE" --output "$TRACE" \
         --frames "$MAX_FRAMES" \
-        --stop-when A000=00 \
+        --stop-when A001=DE \
+        --extra-frames 2 \
         2>"$stderr_file" </dev/null
 ) || true
 
@@ -45,7 +49,7 @@ if [[ ! -s "$TRACE" ]]; then
     exit 1
 fi
 
-# Determine pass/fail from the trace data
+# Determine pass/fail: $A000 == 0 means all tests passed
 status="fail"
 match_count=$("$CLI" query "$TRACE" -w "test_status=00" --max 1 2>&1 | grep -oP '^\d+(?= match)' || echo "0")
 if [ "$match_count" -gt 0 ]; then

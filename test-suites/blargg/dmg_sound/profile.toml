@@ -1,7 +1,7 @@
 [profile]
 name = "dmg_sound"
 description = "APU register capture for blargg dmg_sound tests."
-trigger = "instruction"
+trigger = "tcycle"
 
 [fields]
 cpu = "registers"
@@ -11,3 +11,4 @@ interrupt = true
 
 [fields.memory]
 test_status = "A000"
+test_sig1   = "A001"
