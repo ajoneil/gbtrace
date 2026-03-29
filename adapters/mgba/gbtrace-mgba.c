@@ -279,7 +279,14 @@ static void emit_entry(struct mCore *core) {
             gbtrace_writer_set_u16(g_writer, col, read_reg16(cpu, em->name));
             break;
         case SRC_IO:
-            gbtrace_writer_set_u8(g_writer, col, core->rawRead8(core, em->io_addr, -1));
+            if (em->io_addr >= 0xFF10 && em->io_addr <= 0xFF3F) {
+                /* Read APU registers directly from memory.io[] to avoid
+                   mGBA logging warnings for write-only registers. */
+                struct GB *gb = (struct GB *) core->board;
+                gbtrace_writer_set_u8(g_writer, col, gb->memory.io[em->io_addr & 0xFF]);
+            } else {
+                gbtrace_writer_set_u8(g_writer, col, core->rawRead8(core, em->io_addr, -1));
+            }
             break;
         case SRC_IME:
             gbtrace_writer_set_bool(g_writer, col, cpu->irqPending);
