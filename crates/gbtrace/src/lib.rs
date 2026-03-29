@@ -10,6 +10,7 @@ pub mod header;
 pub mod profile;
 pub mod query;
 pub mod reader;
+pub mod snapshot;
 pub mod vram;
 
 pub use store::TraceStore;
