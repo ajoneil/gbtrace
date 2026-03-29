@@ -41,6 +41,12 @@ static const struct IOField IO_FIELDS[] = {
     {"div",  0xFF04}, {"tima", 0xFF05}, {"tma",  0xFF06}, {"tac",  0xFF07},
     {"if_",  0xFF0F}, {"ie",   0xFFFF},
     {"sb",   0xFF01}, {"sc",   0xFF02},
+    /* APU registers */
+    {"nr10", 0xFF10}, {"nr11", 0xFF11}, {"nr12", 0xFF12}, {"nr13", 0xFF13}, {"nr14", 0xFF14},
+    {"nr21", 0xFF16}, {"nr22", 0xFF17}, {"nr23", 0xFF18}, {"nr24", 0xFF19},
+    {"nr30", 0xFF1A}, {"nr31", 0xFF1B}, {"nr32", 0xFF1C}, {"nr33", 0xFF1D}, {"nr34", 0xFF1E},
+    {"nr41", 0xFF20}, {"nr42", 0xFF21}, {"nr43", 0xFF22}, {"nr44", 0xFF23},
+    {"nr50", 0xFF24}, {"nr51", 0xFF25}, {"nr52", 0xFF26},
     {NULL, 0}
 };
 
