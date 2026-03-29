@@ -1,10 +1,11 @@
 [profile]
 name = "blargg"
-description = "CPU fields and pixel output for blargg tests."
+description = "CPU fields, timer registers, and pixel output for blargg tests."
 trigger = "tcycle"
 
 [fields]
 cpu = ["pc", "sp", "a", "f", "b", "c", "d", "e", "h", "l"]
 ppu = ["ly"]
 interrupt = ["if_", "ie", "ime"]
+timer = ["div", "tima", "tma", "tac"]
 pixel = ["pix"]
