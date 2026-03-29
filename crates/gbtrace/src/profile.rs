@@ -206,8 +206,31 @@ pub static APU: SubsystemDef = SubsystemDef {
             field!("nr50", u8), field!("nr51", u8), field!("nr52", u8),
         ]),
         (Layer::Internal, &[
-            // TODO: channel counters, envelope state, LFSR, wave position, etc.
-            // These will be defined as Missingno's APU crate exposes them.
+            // Channel 1 — square with sweep
+            field!("ch1_active", bool),
+            field!("ch1_freq_cnt", u16),
+            field!("ch1_env_vol", u8),
+            field!("ch1_phase", u8),
+            field!("ch1_sweep_shadow", u16),
+            field!("ch1_len_cnt", u8),
+            // Channel 2 — square
+            field!("ch2_active", bool),
+            field!("ch2_freq_cnt", u16),
+            field!("ch2_env_vol", u8),
+            field!("ch2_phase", u8),
+            field!("ch2_len_cnt", u8),
+            // Channel 3 — wave
+            field!("ch3_active", bool),
+            field!("ch3_freq_cnt", u16),
+            field!("ch3_wave_idx", u8),
+            field!("ch3_sample", u8),
+            field!("ch3_len_cnt", u8),
+            // Channel 4 — noise
+            field!("ch4_active", bool),
+            field!("ch4_freq_cnt", u16),
+            field!("ch4_env_vol", u8),
+            field!("ch4_lfsr", u16),
+            field!("ch4_len_cnt", u8),
         ]),
         (Layer::Writes, &[
             field!("wave_addr", u16, nullable),
