@@ -14,8 +14,10 @@ def sanitize(name):
     return ''.join(c if c.isalnum() or c in '-_' else '_' for c in name)
 
 
-def gen_suite(suite_name, rom_dir, profile, trace_dir, emus, script, exclude_dirs=None):
+def gen_suite(suite_name, rom_dir, profile, trace_dir, emus, script, exclude_dirs=None, name_base=None):
     exclude_dirs = set(exclude_dirs or [])
+    # name_base: directory used for relative path naming (defaults to rom_dir)
+    name_base = name_base or rom_dir
     roms = []
     for dirpath, dirnames, filenames in os.walk(rom_dir):
         # Prune excluded subdirectories
@@ -29,7 +31,7 @@ def gen_suite(suite_name, rom_dir, profile, trace_dir, emus, script, exclude_dir
     for emu in emus:
         for rom in roms:
             # Include relative path in stamp name to avoid collisions
-            rel = os.path.relpath(rom, rom_dir)
+            rel = os.path.relpath(rom, name_base)
             name = os.path.splitext(rel)[0]
             safe = sanitize(name)
             stamp = f'{trace_dir}/.stamp_{safe}_{emu}'
@@ -38,7 +40,7 @@ def gen_suite(suite_name, rom_dir, profile, trace_dir, emus, script, exclude_dir
             # Use single quotes around the ROM path to handle spaces
             print(f"{stamp}: adapters/{emu}/gbtrace-{emu} {profile} | $(CLI)")
             print(f"\t@mkdir -p {trace_dir}")
-            print(f"\t@bash {script} adapters/{emu}/gbtrace-{emu} '{rom}' {profile} {trace_dir} {rom_dir} || true")
+            print(f"\t@bash {script} adapters/{emu}/gbtrace-{emu} '{rom}' {profile} {trace_dir} {name_base} || true")
             print(f"\t@touch $@")
             print()
 
@@ -99,23 +101,22 @@ def main():
         'dmg-sound',
         'test-suites/blargg/dmg_sound',
         'test-suites/blargg/dmg_sound/profile.toml',
-        '$(DMG_SOUND_TRACE_DIR)',
+        '$(BLARGG_TRACE_DIR)',
         emus,
         'scripts/trace-dmg-sound.sh',
+        name_base='test-suites/blargg',
     )
 
     # Output stamp lists as Make variables
     print(f"GBMICROTEST_STAMPS := {' '.join(micro_stamps)}")
     print()
-    print(f"BLARGG_STAMPS := {' '.join(blargg_stamps)}")
+    print(f"BLARGG_STAMPS := {' '.join(blargg_stamps + dmg_sound_stamps)}")
     print()
     print(f"MOONEYE_STAMPS := {' '.join(mooneye_stamps)}")
     print()
     print(f"GAMBATTE_TESTS_STAMPS := {' '.join(gambatte_stamps)}")
     print()
     print(f"MEALYBUG_TEAROOM_STAMPS := {' '.join(mealybug_stamps)}")
-    print()
-    print(f"DMG_SOUND_STAMPS := {' '.join(dmg_sound_stamps)}")
 
 
 if __name__ == '__main__':

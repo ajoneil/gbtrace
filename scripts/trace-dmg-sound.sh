@@ -3,17 +3,22 @@
 #
 # Pass/fail: test writes result to $A000 (0x00 = pass, 0x80 = still running)
 #
-# Usage: trace-dmg-sound.sh <adapter-binary> <rom> <profile> <output-dir>
+# Usage: trace-dmg-sound.sh <adapter-binary> <rom> <profile> <output-dir> [<rom-dir>]
 set -euo pipefail
 
 BIN="$1"
 ROM="$2"
 PROFILE="$3"
 OUT_DIR="$4"
+ROM_DIR="${5:-$(dirname "$ROM")}"
 CLI="${CLI:-target/release/gbtrace-cli}"
 
-NAME="$(basename "$ROM" .gb)"
 ADAPTER="$(basename "$BIN" | sed 's/gbtrace-//')"
+
+# Use relative path from ROM_DIR as the test name, flattening subdirs with __
+ROM_REL="$(realpath --relative-to="$ROM_DIR" "$ROM")"
+ROM_REL="${ROM_REL%.gb}"
+NAME="${ROM_REL//\//__}"
 
 # dmg_sound tests take longer than microtests
 MAX_FRAMES=3000

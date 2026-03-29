@@ -34,6 +34,7 @@ const TEST_SUITES = [
     categories: [
       { name: 'cpu instrs', filter: 'cpu_instrs__' },
       { name: 'instr timing', filter: 'instr_timing' },
+      { name: 'dmg sound', filter: 'dmg_sound__' },
     ],
   },
   {

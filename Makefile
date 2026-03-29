@@ -38,7 +38,6 @@ BLARGG_TRACE_DIR := $(BUILD_DIR)/traces/blargg
 MOONEYE_TRACE_DIR := $(BUILD_DIR)/traces/mooneye
 GAMBATTE_TESTS_TRACE_DIR := $(BUILD_DIR)/traces/gambatte-tests
 MEALYBUG_TEAROOM_TRACE_DIR := $(BUILD_DIR)/traces/mealybug-tearoom
-DMG_SOUND_TRACE_DIR := $(BUILD_DIR)/traces/dmg-sound
 
 export LD_LIBRARY_PATH := $(PROJECT_DIR)/adapters/sameboy/SameBoy/build/lib:$(LD_LIBRARY_PATH)
 export CLI
@@ -74,7 +73,7 @@ pix-refs: scripts/png-to-pix.py
 DMG_ACID2_REF := test-suites/dmg-acid2/reference.pix
 
 .PHONY: all adapters cli wasm traces traces-gbmicrotest traces-blargg \
-        traces-mooneye traces-gambatte-tests traces-mealybug-tearoom traces-dmg-acid2 traces-dmg-sound manifests site serve clean
+        traces-mooneye traces-gambatte-tests traces-mealybug-tearoom traces-dmg-acid2 manifests site serve clean
 
 all: site
 
@@ -82,7 +81,7 @@ adapters: $(ADAPTER_BINS)
 
 cli: $(CLI)
 
-traces: traces-gbmicrotest traces-blargg traces-mooneye traces-gambatte-tests traces-mealybug-tearoom traces-dmg-acid2 traces-dmg-sound
+traces: traces-gbmicrotest traces-blargg traces-mooneye traces-gambatte-tests traces-mealybug-tearoom traces-dmg-acid2
 
 traces-gbmicrotest: $(RULES_MK) $(GBMICROTEST_STAMPS)
 	@echo "Generating gbmicrotest manifest..."
@@ -108,11 +107,6 @@ traces-mealybug-tearoom: $(RULES_MK) pix-refs $(MEALYBUG_TEAROOM_STAMPS)
 	@echo "Generating mealybug-tearoom manifest..."
 	@python3 scripts/manifest.py "$(MEALYBUG_TEAROOM_TRACE_DIR)" "test-suites/mealybug-tearoom"
 	@echo "=== mealybug-tearoom complete ==="
-
-traces-dmg-sound: $(RULES_MK) $(DMG_SOUND_STAMPS)
-	@echo "Generating dmg-sound manifest..."
-	@python3 scripts/manifest.py "$(DMG_SOUND_TRACE_DIR)" "test-suites/blargg/dmg_sound"
-	@echo "=== dmg-sound complete ==="
 
 DMG_ACID2_TRACE_DIR := $(BUILD_DIR)/traces/dmg-acid2
 DMG_ACID2_ROM := test-suites/dmg-acid2/dmg-acid2.gb
@@ -149,7 +143,6 @@ site: wasm traces
 	@if [ -d "$(MOONEYE_TRACE_DIR)" ]; then cp -r $(MOONEYE_TRACE_DIR) $(BUILD_DIR)/site/tests/mooneye; fi
 	@if [ -d "$(MEALYBUG_TEAROOM_TRACE_DIR)" ]; then cp -r $(MEALYBUG_TEAROOM_TRACE_DIR) $(BUILD_DIR)/site/tests/mealybug-tearoom; fi
 	@if [ -d "$(DMG_ACID2_TRACE_DIR)" ]; then cp -r $(DMG_ACID2_TRACE_DIR) $(BUILD_DIR)/site/tests/dmg-acid2; fi
-	@if [ -d "$(DMG_SOUND_TRACE_DIR)" ]; then cp -r $(DMG_SOUND_TRACE_DIR) $(BUILD_DIR)/site/tests/dmg-sound; fi
 	@# Copy ROMs so the viewer can load them for disassembly
 	@find test-suites/gbmicrotest -name '*.gb' -exec cp {} $(BUILD_DIR)/site/tests/gbmicrotest/ \;
 	@cd test-suites/blargg && find . -name '*.gb' -exec sh -c 'mkdir -p "$(BUILD_DIR)/site/tests/blargg/$$(dirname "{}")" && cp "{}" "$(BUILD_DIR)/site/tests/blargg/{}"' \;
@@ -162,8 +155,6 @@ site: wasm traces
 	@if [ -d "$(BUILD_DIR)/site/tests/mooneye" ]; then cp test-suites/mooneye/profile.toml $(BUILD_DIR)/site/tests/mooneye/; fi
 	@if [ -d "$(BUILD_DIR)/site/tests/mealybug-tearoom" ]; then cp test-suites/mealybug-tearoom/profile.toml $(BUILD_DIR)/site/tests/mealybug-tearoom/; fi
 	@if [ -d "$(BUILD_DIR)/site/tests/dmg-acid2" ]; then cp test-suites/dmg-acid2/profile.toml $(BUILD_DIR)/site/tests/dmg-acid2/; fi
-	@if [ -d "$(BUILD_DIR)/site/tests/dmg-sound" ]; then cp test-suites/blargg/dmg_sound/*.gb $(BUILD_DIR)/site/tests/dmg-sound/ 2>/dev/null || true; fi
-	@if [ -d "$(BUILD_DIR)/site/tests/dmg-sound" ]; then cp test-suites/blargg/dmg_sound/profile.toml $(BUILD_DIR)/site/tests/dmg-sound/; fi
 	@echo "Site ready: $(BUILD_DIR)/site/"
 
 serve: wasm
