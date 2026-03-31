@@ -11,7 +11,7 @@ CLI="${CLI:-target/release/gbtrace}"
 
 NAME="$(basename "$ROM" .gb)"
 ADAPTER="$(basename "$BIN" | sed 's/gbtrace-//')"
-FRAMES=2
+FRAMES=30
 
 TMP="/tmp/gbtrace_micro_${NAME}_${ADAPTER}_$$"
 TRACE="${TMP}.gbtrace"
