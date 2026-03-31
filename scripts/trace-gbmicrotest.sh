@@ -23,7 +23,7 @@ trap cleanup EXIT
 # Capture — adapter stops when test_pass is set
 if ! "$BIN" --rom "$ROM" --profile "$PROFILE" --output "$TRACE" \
     --frames "$FRAMES" \
-    --stop-when FF82=01 --stop-when FF82=FF 2>"$stderr_file" </dev/null; then
+    --stop-when FF82=01 --stop-when FF82=FF >/dev/null 2>"$stderr_file" </dev/null; then
     printf "%-40s %-10s ERROR\n" "$NAME" "$ADAPTER"
     exit 1
 fi

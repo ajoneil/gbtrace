@@ -815,6 +815,7 @@ int main(int argc, char *argv[]) {
     int prev_op_state = gb.cpu.core.reg.op_state;
     bool stopped_early = false;
     bool stop_triggered = false;
+    bool ref_matched = false;
     int remaining_extra = -1;  // -1 = not triggered yet
     int stop_serial_seen = 0;
     bool prev_sc_high = false;
@@ -953,9 +954,14 @@ int main(int argc, char *argv[]) {
             // Check reference match at phase-counter boundary.
             // Don't stop immediately — continue until the next VSYNC
             // so the last LCD frame is complete.
-            if (has_reference && !stop_triggered && check_frame_matches_reference()) {
+            // Allow reference checking during extra frames after --stop-when,
+            // but not after a reference match already triggered.
+            if (has_reference && !ref_matched && check_frame_matches_reference()) {
                 std::fprintf(stderr, "Reference match at frame %d, finishing LCD frame...\n", frames);
-                stop_triggered = true;
+                ref_matched = true;
+                if (!stop_triggered) {
+                    stop_triggered = true;
+                }
                 // remaining_extra not used here — we stop at next VSYNC instead
             }
 

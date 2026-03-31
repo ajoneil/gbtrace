@@ -339,6 +339,17 @@ static void trace_custom(struct mDebuggerModule *mod) {
     check_stop_conditions(mod->p->core);
 }
 
+static void trace_entered(struct mDebuggerModule *mod,
+                          enum mDebuggerEntryReason reason,
+                          struct mDebuggerEntryInfo *info) {
+    (void)info;
+    /* When mGBA hits an illegal opcode it pauses the debugger module.
+       Unpause immediately so mDebuggerRunFrame can continue. */
+    if (reason == DEBUGGER_ENTER_ILLEGAL_OP) {
+        mod->isPaused = false;
+    }
+}
+
 // --- SHA-256 ---
 
 static char *sha256_file(const char *path) {
@@ -563,6 +574,7 @@ int main(int argc, char *argv[]) {
     memset(&trace_mod, 0, sizeof(trace_mod));
     trace_mod.d.type = DEBUGGER_CUSTOM;
     trace_mod.d.custom = trace_custom;
+    trace_mod.d.entered = trace_entered;
 
     mDebuggerAttachModule(&debugger, &trace_mod.d);
     mDebuggerModuleSetNeedsCallback(&trace_mod.d);

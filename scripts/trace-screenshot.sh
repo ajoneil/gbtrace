@@ -28,7 +28,7 @@ trap cleanup EXIT
 "$BIN" --rom "$ROM" --profile "$PROFILE" --output "$tmp_trace" \
     --reference "$REFERENCE" \
     --frames "$MAX_FRAMES" \
-    2>"$stderr_file" </dev/null || true
+    >/dev/null 2>"$stderr_file" </dev/null || true
 
 if [[ ! -s "$tmp_trace" ]]; then
     printf "%-30s %-10s ERROR (capture)\n" "$NAME" "$ADAPTER"

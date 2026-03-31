@@ -48,7 +48,7 @@ fi
         --extra-frames 2 \
         --stop-when A000!=80 \
         "${EXTRA_ARGS[@]}" \
-        2>"$stderr_file" </dev/null
+        >/dev/null 2>"$stderr_file" </dev/null
 ) || true
 
 if [[ ! -s "$TRACE" ]]; then

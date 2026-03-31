@@ -44,7 +44,7 @@ fi
     timeout 120 "$BIN" --rom "$ROM" --profile "$PROFILE" \
         --frames "$MAX_FRAMES" \
         "${EXTRA_ARGS[@]}" \
-        --output "$tmp_trace" 2>"$stderr_file" </dev/null
+        --output "$tmp_trace" >/dev/null 2>"$stderr_file" </dev/null
 ) || true
 
 if [[ ! -s "$tmp_trace" ]]; then
