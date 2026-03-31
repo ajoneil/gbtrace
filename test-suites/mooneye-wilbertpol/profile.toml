@@ -1,0 +1,11 @@
+[profile]
+name = "mooneye-wilbertpol"
+description = "Full dump for Mooneye wilbertpol fork tests."
+trigger = "tcycle"
+
+[fields]
+cpu = "registers"
+ppu = "all"
+timer = true
+interrupt = true
+serial = true

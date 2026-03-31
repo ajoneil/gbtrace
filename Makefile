@@ -38,6 +38,15 @@ BLARGG_TRACE_DIR := $(BUILD_DIR)/traces/blargg
 MOONEYE_TRACE_DIR := $(BUILD_DIR)/traces/mooneye
 GAMBATTE_TESTS_TRACE_DIR := $(BUILD_DIR)/traces/gambatte-tests
 MEALYBUG_TEAROOM_TRACE_DIR := $(BUILD_DIR)/traces/mealybug-tearoom
+AGE_TRACE_DIR := $(BUILD_DIR)/traces/age
+MOONEYE_WILBERTPOL_TRACE_DIR := $(BUILD_DIR)/traces/mooneye-wilbertpol
+SAMESUITE_TRACE_DIR := $(BUILD_DIR)/traces/samesuite
+SCRIBBLTESTS_TRACE_DIR := $(BUILD_DIR)/traces/scribbltests
+BULLY_TRACE_DIR := $(BUILD_DIR)/traces/bully
+LITTLE_THINGS_TRACE_DIR := $(BUILD_DIR)/traces/little-things
+MBC3_TESTER_TRACE_DIR := $(BUILD_DIR)/traces/mbc3-tester
+STRIKETHROUGH_TRACE_DIR := $(BUILD_DIR)/traces/strikethrough
+TURTLE_TESTS_TRACE_DIR := $(BUILD_DIR)/traces/turtle-tests
 
 export LD_LIBRARY_PATH := $(PROJECT_DIR)/adapters/sameboy/SameBoy/build/lib:$(LD_LIBRARY_PATH)
 export CLI
@@ -62,7 +71,10 @@ $(RULES_MK): scripts/gen-rules.py
 pix-refs: scripts/png-to-pix.py
 	@for png in test-suites/blargg/*.png test-suites/blargg/**/*.png test-suites/dmg-acid2/*.png \
 	            test-suites/gambatte/**/*.png test-suites/gambatte/**/**/*.png \
-	            test-suites/mealybug-tearoom/*.png; do \
+	            test-suites/mealybug-tearoom/*.png \
+	            test-suites/age/*.png test-suites/bully/*.png test-suites/little-things/*.png \
+	            test-suites/mbc3-tester/*.png test-suites/scribbltests/*.png \
+	            test-suites/strikethrough/*.png test-suites/turtle-tests/*.png; do \
 		[ -f "$$png" ] || continue; \
 		pix="$${png%.png}.pix"; \
 		if [ ! -f "$$pix" ] || [ "$$png" -nt "$$pix" ]; then \
@@ -73,7 +85,10 @@ pix-refs: scripts/png-to-pix.py
 DMG_ACID2_REF := test-suites/dmg-acid2/reference.pix
 
 .PHONY: all adapters cli wasm traces traces-gbmicrotest traces-blargg \
-        traces-mooneye traces-gambatte-tests traces-mealybug-tearoom traces-dmg-acid2 manifests site serve clean
+        traces-mooneye traces-gambatte-tests traces-mealybug-tearoom traces-dmg-acid2 \
+        traces-age traces-mooneye-wilbertpol traces-samesuite traces-scribbltests \
+        traces-bully traces-little-things traces-mbc3-tester traces-strikethrough \
+        traces-turtle-tests manifests site serve clean
 
 all: site
 
@@ -81,7 +96,10 @@ adapters: $(ADAPTER_BINS)
 
 cli: $(CLI)
 
-traces: traces-gbmicrotest traces-blargg traces-mooneye traces-gambatte-tests traces-mealybug-tearoom traces-dmg-acid2
+traces: traces-gbmicrotest traces-blargg traces-mooneye traces-gambatte-tests traces-mealybug-tearoom traces-dmg-acid2 \
+        traces-age traces-mooneye-wilbertpol traces-samesuite traces-scribbltests \
+        traces-bully traces-little-things traces-mbc3-tester traces-strikethrough \
+        traces-turtle-tests
 
 traces-gbmicrotest: $(RULES_MK) $(GBMICROTEST_STAMPS)
 	@echo "Generating gbmicrotest manifest..."
@@ -129,6 +147,51 @@ traces-dmg-acid2: pix-refs | $(CLI)
 	@python3 scripts/manifest.py "$(DMG_ACID2_TRACE_DIR)" "test-suites/dmg-acid2"
 	@echo "=== dmg-acid2 complete ==="
 
+traces-age: $(RULES_MK) pix-refs $(AGE_STAMPS)
+	@echo "Generating age manifest..."
+	@python3 scripts/manifest.py "$(AGE_TRACE_DIR)" "test-suites/age"
+	@echo "=== age complete ==="
+
+traces-mooneye-wilbertpol: $(RULES_MK) $(MOONEYE_WILBERTPOL_STAMPS)
+	@echo "Generating mooneye-wilbertpol manifest..."
+	@python3 scripts/manifest.py "$(MOONEYE_WILBERTPOL_TRACE_DIR)" "test-suites/mooneye-wilbertpol"
+	@echo "=== mooneye-wilbertpol complete ==="
+
+traces-samesuite: $(RULES_MK) $(SAMESUITE_STAMPS)
+	@echo "Generating samesuite manifest..."
+	@python3 scripts/manifest.py "$(SAMESUITE_TRACE_DIR)" "test-suites/samesuite"
+	@echo "=== samesuite complete ==="
+
+traces-scribbltests: $(RULES_MK) pix-refs $(SCRIBBLTESTS_STAMPS)
+	@echo "Generating scribbltests manifest..."
+	@python3 scripts/manifest.py "$(SCRIBBLTESTS_TRACE_DIR)" "test-suites/scribbltests"
+	@echo "=== scribbltests complete ==="
+
+traces-bully: $(RULES_MK) pix-refs $(BULLY_STAMPS)
+	@echo "Generating bully manifest..."
+	@python3 scripts/manifest.py "$(BULLY_TRACE_DIR)" "test-suites/bully"
+	@echo "=== bully complete ==="
+
+traces-little-things: $(RULES_MK) pix-refs $(LITTLE_THINGS_STAMPS)
+	@echo "Generating little-things manifest..."
+	@python3 scripts/manifest.py "$(LITTLE_THINGS_TRACE_DIR)" "test-suites/little-things"
+	@echo "=== little-things complete ==="
+
+traces-mbc3-tester: $(RULES_MK) pix-refs $(MBC3_TESTER_STAMPS)
+	@echo "Generating mbc3-tester manifest..."
+	@python3 scripts/manifest.py "$(MBC3_TESTER_TRACE_DIR)" "test-suites/mbc3-tester"
+	@echo "=== mbc3-tester complete ==="
+
+traces-strikethrough: $(RULES_MK) pix-refs $(STRIKETHROUGH_STAMPS)
+	@echo "Generating strikethrough manifest..."
+	@python3 scripts/manifest.py "$(STRIKETHROUGH_TRACE_DIR)" "test-suites/strikethrough"
+	@echo "=== strikethrough complete ==="
+
+traces-turtle-tests: $(RULES_MK) pix-refs $(TURTLE_TESTS_STAMPS)
+	@echo "Generating turtle-tests manifest..."
+	@python3 scripts/manifest.py "$(TURTLE_TESTS_TRACE_DIR)" "test-suites/turtle-tests"
+	@echo "=== turtle-tests complete ==="
+
 comma := ,
 
 site: wasm traces
@@ -138,23 +201,21 @@ site: wasm traces
 	@cp web/index.html $(BUILD_DIR)/site/
 	@cp -r web/src $(BUILD_DIR)/site/
 	@cp web/pkg/gbtrace_wasm.js web/pkg/gbtrace_wasm_bg.wasm $(BUILD_DIR)/site/pkg/
-	@cp -r $(GBMICROTEST_TRACE_DIR) $(BUILD_DIR)/site/tests/gbmicrotest
-	@cp -r $(BLARGG_TRACE_DIR) $(BUILD_DIR)/site/tests/blargg
-	@if [ -d "$(MOONEYE_TRACE_DIR)" ]; then cp -r $(MOONEYE_TRACE_DIR) $(BUILD_DIR)/site/tests/mooneye; fi
-	@if [ -d "$(MEALYBUG_TEAROOM_TRACE_DIR)" ]; then cp -r $(MEALYBUG_TEAROOM_TRACE_DIR) $(BUILD_DIR)/site/tests/mealybug-tearoom; fi
-	@if [ -d "$(DMG_ACID2_TRACE_DIR)" ]; then cp -r $(DMG_ACID2_TRACE_DIR) $(BUILD_DIR)/site/tests/dmg-acid2; fi
-	@# Copy ROMs so the viewer can load them for disassembly
-	@find test-suites/gbmicrotest -name '*.gb' -exec cp {} $(BUILD_DIR)/site/tests/gbmicrotest/ \;
-	@cd test-suites/blargg && find . -name '*.gb' -exec sh -c 'mkdir -p "$(BUILD_DIR)/site/tests/blargg/$$(dirname "{}")" && cp "{}" "$(BUILD_DIR)/site/tests/blargg/{}"' \;
-	@if [ -d "$(BUILD_DIR)/site/tests/dmg-acid2" ]; then cp test-suites/dmg-acid2/dmg-acid2.gb $(BUILD_DIR)/site/tests/dmg-acid2/; fi
-	@if [ -d "$(BUILD_DIR)/site/tests/mooneye" ]; then cd test-suites/mooneye && find . -name '*.gb' -exec sh -c 'mkdir -p "$(BUILD_DIR)/site/tests/mooneye/$$(dirname "{}")" && cp "{}" "$(BUILD_DIR)/site/tests/mooneye/{}"' \; ; fi
-	@if [ -d "$(BUILD_DIR)/site/tests/mealybug-tearoom" ]; then cp test-suites/mealybug-tearoom/*.gb $(BUILD_DIR)/site/tests/mealybug-tearoom/; fi
-	@# Copy profile TOMLs so the viewer can offer them for download
-	@cp test-suites/gbmicrotest/profile.toml $(BUILD_DIR)/site/tests/gbmicrotest/
-	@cp test-suites/blargg/profile.toml $(BUILD_DIR)/site/tests/blargg/
-	@if [ -d "$(BUILD_DIR)/site/tests/mooneye" ]; then cp test-suites/mooneye/profile.toml $(BUILD_DIR)/site/tests/mooneye/; fi
-	@if [ -d "$(BUILD_DIR)/site/tests/mealybug-tearoom" ]; then cp test-suites/mealybug-tearoom/profile.toml $(BUILD_DIR)/site/tests/mealybug-tearoom/; fi
-	@if [ -d "$(BUILD_DIR)/site/tests/dmg-acid2" ]; then cp test-suites/dmg-acid2/profile.toml $(BUILD_DIR)/site/tests/dmg-acid2/; fi
+	@# Copy traces, ROMs, and profiles for each suite
+	@for suite_dir in $(BUILD_DIR)/traces/*/; do \
+		[ -d "$$suite_dir" ] || continue; \
+		suite=$$(basename "$$suite_dir"); \
+		cp -r "$$suite_dir" "$(BUILD_DIR)/site/tests/$$suite"; \
+		rom_dir="test-suites/$$suite"; \
+		if [ "$$suite" = "gambatte-tests" ]; then rom_dir="test-suites/gambatte"; fi; \
+		if [ -d "$$rom_dir" ]; then \
+			cd "$$rom_dir" && find . -name '*.gb' -exec sh -c \
+				'mkdir -p "$(BUILD_DIR)/site/tests/'"$$suite"'/$$(dirname "{}")" && cp "{}" "$(BUILD_DIR)/site/tests/'"$$suite"'/{}"' \; && cd $(PROJECT_DIR); \
+			if [ -f "$$rom_dir/profile.toml" ]; then \
+				cp "$$rom_dir/profile.toml" "$(BUILD_DIR)/site/tests/$$suite/"; \
+			fi; \
+		fi; \
+	done
 	@echo "Site ready: $(BUILD_DIR)/site/"
 
 serve: wasm

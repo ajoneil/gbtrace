@@ -1,0 +1,10 @@
+[profile]
+name = "bully"
+description = "PPU accuracy test with screenshot comparison."
+trigger = "tcycle"
+
+[fields]
+cpu = "registers"
+ppu = "all"
+timer = true
+interrupt = true

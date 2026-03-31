@@ -1,0 +1,10 @@
+[profile]
+name = "strikethrough"
+description = "CPU/timing test with screenshot comparison."
+trigger = "tcycle"
+
+[fields]
+cpu = "registers"
+ppu = "all"
+timer = true
+interrupt = true

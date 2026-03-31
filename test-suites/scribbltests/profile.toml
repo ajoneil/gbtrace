@@ -1,0 +1,10 @@
+[profile]
+name = "scribbltests"
+description = "PPU timing tests with screenshot comparison."
+trigger = "tcycle"
+
+[fields]
+cpu = "registers"
+ppu = "all"
+timer = true
+interrupt = true

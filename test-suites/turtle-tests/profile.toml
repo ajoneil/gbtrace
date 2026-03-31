@@ -1,0 +1,10 @@
+[profile]
+name = "turtle-tests"
+description = "PPU window edge-case tests with screenshot comparison."
+trigger = "tcycle"
+
+[fields]
+cpu = "registers"
+ppu = "all"
+timer = true
+interrupt = true

@@ -1,0 +1,11 @@
+[profile]
+name = "samesuite"
+description = "Full dump for SameSuite accuracy tests."
+trigger = "tcycle"
+
+[fields]
+cpu = "registers"
+ppu = "all"
+timer = true
+interrupt = true
+serial = true

@@ -1,0 +1,11 @@
+[profile]
+name = "age"
+description = "Full dump for AGE accuracy tests."
+trigger = "tcycle"
+
+[fields]
+cpu = "registers"
+ppu = "all"
+timer = true
+interrupt = true
+serial = true

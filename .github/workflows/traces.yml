@@ -8,10 +8,10 @@ on:
   workflow_dispatch:
     inputs:
       suite:
-        description: "Test suite (all, gbmicrotest, blargg, mooneye, gambatte-tests, mealybug-tearoom, dmg-acid2)"
+        description: "Test suite"
         default: "all"
         type: choice
-        options: [all, gbmicrotest, blargg, mooneye, gambatte-tests, mealybug-tearoom, dmg-acid2]
+        options: [all, gbmicrotest, blargg, mooneye, gambatte-tests, mealybug-tearoom, dmg-acid2, age, mooneye-wilbertpol, samesuite, scribbltests, bully, little-things, mbc3-tester, strikethrough, turtle-tests]
       emulator:
         description: "Emulator (all, gambatte, sameboy, mgba, gateboy, missingno)"
         default: "all"
@@ -32,7 +32,7 @@ jobs:
     steps:
       - id: set
         run: |
-          SUITES='["gbmicrotest","blargg","mooneye","gambatte-tests","mealybug-tearoom","dmg-acid2"]'
+          SUITES='["gbmicrotest","blargg","mooneye","gambatte-tests","mealybug-tearoom","dmg-acid2","age","mooneye-wilbertpol","samesuite","scribbltests","bully","little-things","mbc3-tester","strikethrough","turtle-tests"]'
           EMUS='["gambatte","sameboy","mgba","gateboy","missingno"]'
 
           if [ "${{ inputs.suite }}" != "" ] && [ "${{ inputs.suite }}" != "all" ]; then
@@ -96,8 +96,6 @@ jobs:
           # ROM_DIR: some suites have a different ROM directory
           if [ "$SUITE" = "gambatte-tests" ]; then
             ROM_DIR="test-suites/gambatte"
-          elif [ "$SUITE" = "mealybug-tearoom" ]; then
-            ROM_DIR="test-suites/mealybug-tearoom"
           else
             ROM_DIR="test-suites/${SUITE}"
           fi
@@ -155,6 +153,60 @@ jobs:
               REF="test-suites/dmg-acid2/reference.pix"
               bash scripts/trace-screenshot.sh "$BIN" \
                 "test-suites/dmg-acid2/dmg-acid2.gb" "$PROFILE" "$REF" "$TRACE_DIR" 30 || true
+              ;;
+            age)
+              PROFILE="test-suites/age/profile.toml"
+              while IFS= read -r -d '' rom; do
+                run_parallel bash scripts/trace-age.sh "$BIN" "$rom" "$PROFILE" "$TRACE_DIR" "$ROM_DIR"
+              done < <(find "$ROM_DIR" -name '*.gb' -print0 | sort -z)
+              ;;
+            mooneye-wilbertpol)
+              PROFILE="test-suites/mooneye-wilbertpol/profile.toml"
+              while IFS= read -r -d '' rom; do
+                run_parallel bash scripts/trace-mooneye-wilbertpol.sh "$BIN" "$rom" "$PROFILE" "$TRACE_DIR" "$ROM_DIR"
+              done < <(find "$ROM_DIR" -name '*.gb' -print0 | sort -z)
+              ;;
+            samesuite)
+              PROFILE="test-suites/samesuite/profile.toml"
+              while IFS= read -r -d '' rom; do
+                run_parallel bash scripts/trace-samesuite.sh "$BIN" "$rom" "$PROFILE" "$TRACE_DIR" "$ROM_DIR"
+              done < <(find "$ROM_DIR" -name '*.gb' -print0 | sort -z)
+              ;;
+            scribbltests)
+              PROFILE="test-suites/scribbltests/profile.toml"
+              while IFS= read -r -d '' rom; do
+                run_parallel bash scripts/trace-screenshot-suite.sh "$BIN" "$rom" "$PROFILE" "$TRACE_DIR" "$ROM_DIR" 300
+              done < <(find "$ROM_DIR" -name '*.gb' -print0 | sort -z)
+              ;;
+            bully)
+              PROFILE="test-suites/bully/profile.toml"
+              while IFS= read -r -d '' rom; do
+                run_parallel bash scripts/trace-screenshot-suite.sh "$BIN" "$rom" "$PROFILE" "$TRACE_DIR" "$ROM_DIR" 30
+              done < <(find "$ROM_DIR" -name '*.gb' -print0 | sort -z)
+              ;;
+            little-things)
+              PROFILE="test-suites/little-things/profile.toml"
+              while IFS= read -r -d '' rom; do
+                run_parallel bash scripts/trace-screenshot-suite.sh "$BIN" "$rom" "$PROFILE" "$TRACE_DIR" "$ROM_DIR" 30
+              done < <(find "$ROM_DIR" -name '*.gb' -print0 | sort -z)
+              ;;
+            mbc3-tester)
+              PROFILE="test-suites/mbc3-tester/profile.toml"
+              while IFS= read -r -d '' rom; do
+                run_parallel bash scripts/trace-screenshot-suite.sh "$BIN" "$rom" "$PROFILE" "$TRACE_DIR" "$ROM_DIR" 40
+              done < <(find "$ROM_DIR" -name '*.gb' -print0 | sort -z)
+              ;;
+            strikethrough)
+              PROFILE="test-suites/strikethrough/profile.toml"
+              while IFS= read -r -d '' rom; do
+                run_parallel bash scripts/trace-screenshot-suite.sh "$BIN" "$rom" "$PROFILE" "$TRACE_DIR" "$ROM_DIR" 30
+              done < <(find "$ROM_DIR" -name '*.gb' -print0 | sort -z)
+              ;;
+            turtle-tests)
+              PROFILE="test-suites/turtle-tests/profile.toml"
+              while IFS= read -r -d '' rom; do
+                run_parallel bash scripts/trace-screenshot-suite.sh "$BIN" "$rom" "$PROFILE" "$TRACE_DIR" "$ROM_DIR" 30
+              done < <(find "$ROM_DIR" -name '*.gb' -print0 | sort -z)
               ;;
           esac
 

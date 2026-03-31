@@ -88,6 +88,100 @@ const TEST_SUITES = [
     tests: null,
     categories: [],
   },
+  {
+    name: 'age',
+    base: 'tests/age',
+    profile: 'tests/age/profile.toml',
+    manifest: 'tests/age/manifest.json',
+    preferredEmu: 'gateboy',
+    tests: null,
+    categories: [
+      { name: 'halt', filter: 'halt' },
+      { name: 'stat', filter: 'stat' },
+      { name: 'oam', filter: 'oam' },
+      { name: 'vram', filter: 'vram' },
+      { name: 'm3 bg', filter: 'm3-bg' },
+    ],
+  },
+  {
+    name: 'mooneye-wilbertpol',
+    base: 'tests/mooneye-wilbertpol',
+    profile: 'tests/mooneye-wilbertpol/profile.toml',
+    manifest: 'tests/mooneye-wilbertpol/manifest.json',
+    preferredEmu: 'gateboy',
+    tests: null,
+    categories: [
+      { name: 'gpu', filter: 'acceptance__gpu' },
+      { name: 'timer', filter: 'acceptance__timer' },
+      { name: 'mbc', filter: 'emulator-only' },
+    ],
+  },
+  {
+    name: 'samesuite',
+    base: 'tests/samesuite',
+    profile: 'tests/samesuite/profile.toml',
+    manifest: 'tests/samesuite/manifest.json',
+    preferredEmu: 'gateboy',
+    tests: null,
+    categories: [
+      { name: 'apu', filter: 'apu' },
+      { name: 'interrupt', filter: 'interrupt' },
+    ],
+  },
+  {
+    name: 'scribbltests',
+    base: 'tests/scribbltests',
+    profile: 'tests/scribbltests/profile.toml',
+    manifest: 'tests/scribbltests/manifest.json',
+    preferredEmu: 'gateboy',
+    tests: null,
+    categories: [],
+  },
+  {
+    name: 'bully',
+    base: 'tests/bully',
+    profile: 'tests/bully/profile.toml',
+    manifest: 'tests/bully/manifest.json',
+    preferredEmu: 'gateboy',
+    tests: null,
+    categories: [],
+  },
+  {
+    name: 'little-things',
+    base: 'tests/little-things',
+    profile: 'tests/little-things/profile.toml',
+    manifest: 'tests/little-things/manifest.json',
+    preferredEmu: 'gateboy',
+    tests: null,
+    categories: [],
+  },
+  {
+    name: 'mbc3-tester',
+    base: 'tests/mbc3-tester',
+    profile: 'tests/mbc3-tester/profile.toml',
+    manifest: 'tests/mbc3-tester/manifest.json',
+    preferredEmu: 'gateboy',
+    tests: null,
+    categories: [],
+  },
+  {
+    name: 'strikethrough',
+    base: 'tests/strikethrough',
+    profile: 'tests/strikethrough/profile.toml',
+    manifest: 'tests/strikethrough/manifest.json',
+    preferredEmu: 'gateboy',
+    tests: null,
+    categories: [],
+  },
+  {
+    name: 'turtle-tests',
+    base: 'tests/turtle-tests',
+    profile: 'tests/turtle-tests/profile.toml',
+    manifest: 'tests/turtle-tests/manifest.json',
+    preferredEmu: 'gateboy',
+    tests: null,
+    categories: [],
+  },
 ];
 
 const EMULATORS = ['gateboy', 'missingno', 'gambatte', 'sameboy', 'mgba'];
@@ -120,7 +214,7 @@ export class TestPicker extends LitElement {
     }
     h3 { margin: 0 0 10px; font-size: 0.95rem; font-weight: 600; }
 
-    .suite-tabs { display: flex; gap: 0; margin-bottom: 10px; border-bottom: 1px solid var(--border); }
+    .suite-tabs { display: flex; flex-wrap: wrap; gap: 0; margin-bottom: 10px; border-bottom: 1px solid var(--border); }
     .suite-tab {
       padding: 6px 14px; background: none; border: none;
       border-bottom: 2px solid transparent; color: var(--text-muted);

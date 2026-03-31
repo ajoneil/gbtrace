@@ -1,0 +1,10 @@
+[profile]
+name = "mbc3-tester"
+description = "MBC3 cartridge hardware test with screenshot comparison."
+trigger = "tcycle"
+
+[fields]
+cpu = "registers"
+ppu = "all"
+timer = true
+interrupt = true

@@ -107,6 +107,87 @@ def main():
         name_base='test-suites/blargg',
     )
 
+    age_stamps = gen_suite(
+        'age',
+        'test-suites/age',
+        'test-suites/age/profile.toml',
+        '$(AGE_TRACE_DIR)',
+        emus,
+        'scripts/trace-age.sh',
+    )
+
+    wilbertpol_stamps = gen_suite(
+        'mooneye-wilbertpol',
+        'test-suites/mooneye-wilbertpol',
+        'test-suites/mooneye-wilbertpol/profile.toml',
+        '$(MOONEYE_WILBERTPOL_TRACE_DIR)',
+        emus,
+        'scripts/trace-mooneye-wilbertpol.sh',
+    )
+
+    samesuite_stamps = gen_suite(
+        'samesuite',
+        'test-suites/samesuite',
+        'test-suites/samesuite/profile.toml',
+        '$(SAMESUITE_TRACE_DIR)',
+        emus,
+        'scripts/trace-samesuite.sh',
+    )
+
+    scribbltests_stamps = gen_suite(
+        'scribbltests',
+        'test-suites/scribbltests',
+        'test-suites/scribbltests/profile.toml',
+        '$(SCRIBBLTESTS_TRACE_DIR)',
+        emus,
+        'scripts/trace-screenshot-suite.sh',
+    )
+
+    bully_stamps = gen_suite(
+        'bully',
+        'test-suites/bully',
+        'test-suites/bully/profile.toml',
+        '$(BULLY_TRACE_DIR)',
+        emus,
+        'scripts/trace-screenshot-suite.sh',
+    )
+
+    little_things_stamps = gen_suite(
+        'little-things',
+        'test-suites/little-things',
+        'test-suites/little-things/profile.toml',
+        '$(LITTLE_THINGS_TRACE_DIR)',
+        emus,
+        'scripts/trace-screenshot-suite.sh',
+    )
+
+    mbc3_tester_stamps = gen_suite(
+        'mbc3-tester',
+        'test-suites/mbc3-tester',
+        'test-suites/mbc3-tester/profile.toml',
+        '$(MBC3_TESTER_TRACE_DIR)',
+        emus,
+        'scripts/trace-screenshot-suite.sh',
+    )
+
+    strikethrough_stamps = gen_suite(
+        'strikethrough',
+        'test-suites/strikethrough',
+        'test-suites/strikethrough/profile.toml',
+        '$(STRIKETHROUGH_TRACE_DIR)',
+        emus,
+        'scripts/trace-screenshot-suite.sh',
+    )
+
+    turtle_tests_stamps = gen_suite(
+        'turtle-tests',
+        'test-suites/turtle-tests',
+        'test-suites/turtle-tests/profile.toml',
+        '$(TURTLE_TESTS_TRACE_DIR)',
+        emus,
+        'scripts/trace-screenshot-suite.sh',
+    )
+
     # Output stamp lists as Make variables
     print(f"GBMICROTEST_STAMPS := {' '.join(micro_stamps)}")
     print()
@@ -117,6 +198,24 @@ def main():
     print(f"GAMBATTE_TESTS_STAMPS := {' '.join(gambatte_stamps)}")
     print()
     print(f"MEALYBUG_TEAROOM_STAMPS := {' '.join(mealybug_stamps)}")
+    print()
+    print(f"AGE_STAMPS := {' '.join(age_stamps)}")
+    print()
+    print(f"MOONEYE_WILBERTPOL_STAMPS := {' '.join(wilbertpol_stamps)}")
+    print()
+    print(f"SAMESUITE_STAMPS := {' '.join(samesuite_stamps)}")
+    print()
+    print(f"SCRIBBLTESTS_STAMPS := {' '.join(scribbltests_stamps)}")
+    print()
+    print(f"BULLY_STAMPS := {' '.join(bully_stamps)}")
+    print()
+    print(f"LITTLE_THINGS_STAMPS := {' '.join(little_things_stamps)}")
+    print()
+    print(f"MBC3_TESTER_STAMPS := {' '.join(mbc3_tester_stamps)}")
+    print()
+    print(f"STRIKETHROUGH_STAMPS := {' '.join(strikethrough_stamps)}")
+    print()
+    print(f"TURTLE_TESTS_STAMPS := {' '.join(turtle_tests_stamps)}")
 
 
 if __name__ == '__main__':
