@@ -185,12 +185,17 @@ pub trait TraceStore {
 
 /// Parse a query value as a number. Supports:
 /// - `0x1A` or `0X1A` (hex with prefix)
+/// - `0d256` or `0D256` (decimal with prefix)
 /// - `1a` (bare hex)
-/// - `256` (decimal)
+/// - `256` (decimal fallback)
 fn parse_query_value(s: &str) -> Option<u64> {
     // Explicit hex prefix
     if let Some(hex) = s.strip_prefix("0x").or_else(|| s.strip_prefix("0X")) {
         return u64::from_str_radix(hex, 16).ok();
+    }
+    // Explicit decimal prefix (RGBDS convention)
+    if let Some(dec) = s.strip_prefix("0d").or_else(|| s.strip_prefix("0D")) {
+        return dec.parse::<u64>().ok();
     }
     // Try bare hex first (most values in traces are hex)
     if let Ok(v) = u64::from_str_radix(s, 16) {
