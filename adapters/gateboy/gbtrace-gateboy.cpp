@@ -811,6 +811,15 @@ int main(int argc, char *argv[]) {
     bool tcycle_mode = (profile.trigger == "tcycle");
 
 
+    // After fastboot, GateBoy's CPU is 2 T-cycles before the first
+    // instruction at 0x0100 actually begins. Skip those so the trace
+    // starts aligned with the other adapters.
+    if (fastboot) {
+        for (int i = 0; i < 2 * PHASES_PER_TCYCLE; i++) {
+            gb.next_phase(cart_blob);
+        }
+    }
+
     uint16_t prev_op_addr = gb.cpu.core.reg.op_addr;
     int prev_op_state = gb.cpu.core.reg.op_state;
     bool stopped_early = false;
