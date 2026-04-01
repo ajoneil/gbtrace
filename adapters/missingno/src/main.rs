@@ -156,7 +156,7 @@ fn main() {
         if !stop_triggered {
             // Opcode check
             if let Some(opcode) = args.stop_opcode {
-                let pc = gb.cpu().program_counter;
+                let pc = gb.cpu().pc;
                 if gb.peek(pc) == opcode {
                     eprintln!("Stop condition met: opcode 0x{:02X} at PC=0x{:04X}", opcode, pc);
                     stop_triggered = true;
