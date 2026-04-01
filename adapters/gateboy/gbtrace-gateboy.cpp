@@ -48,8 +48,7 @@ static uint8_t read_reg(const GateBoy& gb, unsigned short addr) {
             //   bits 6-3: interrupt enable DFFs (stored inverted in reg_stat)
             //   bit 2: LYC coincidence flag (from RUPO latch, inverted)
             //   bits 1-0: PPU mode (from rendering latch, vblank, scan state)
-            uint8_t ly = (uint8_t)bit_pack(s.reg_ly);
-            bool vblank = ly >= 144;
+            bool vblank = s.lcd.POPU_VBLANKp_odd.state & 1;
             bool rendering = !(s.XYMU_RENDERING_LATCHn.state & 1);
             bool scanning = s.ACYL_SCANNINGp_odd.state & 1;
 
@@ -941,7 +940,7 @@ int main(int argc, char *argv[]) {
         // sits between the last pixel of scanline 143 and the vblank period.
         // The next frame's first pixel (scanline 0) comes after vblank ends.
         {
-            bool vsync = gb.gb_state.lcd.MEDA_VSYNC_OUTn.state & 1;
+            bool vsync = !(gb.gb_state.lcd.MEDA_VSYNC_OUTn.state & 1);
             static bool prev_vsync = false;
             if (!prev_vsync && vsync) {
                 // VSYNC started — previous frame is complete
