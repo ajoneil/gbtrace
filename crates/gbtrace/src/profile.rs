@@ -127,6 +127,9 @@ pub static CPU: SubsystemDef = SubsystemDef {
             field!("h", u8),
             field!("l", u8),
             field!("ime", bool),
+            field!("op_state", u8),
+            field!("mcycle_phase", u8),
+            field!("halted", bool),
         ]),
         (Layer::Timing, &[
             field!("mcycles", u8),

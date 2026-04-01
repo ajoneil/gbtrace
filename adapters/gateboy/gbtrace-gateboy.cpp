@@ -346,6 +346,15 @@ static const std::unordered_map<std::string, unsigned short> IO_FIELD_ADDR = {
 #define SPRITE_ATTR(N) [](const GateBoy &gb) -> uint8_t { return (uint8_t)bit_pack(gb.gb_state.store_l##N); }
 
 static const std::unordered_map<std::string, uint8_t(*)(const GateBoy &)> INTERNAL_U8_READERS = {
+    // CPU internals
+    {"op_state", [](const GateBoy &gb) -> uint8_t { return (uint8_t)gb.cpu.core.reg.op_state; }},
+    {"mcycle_phase", [](const GateBoy &gb) -> uint8_t {
+        return (uint8_t)(
+            ((gb.gb_state.sys_clk.AFUR_ABCDxxxx.state & 1) << 3) |
+            ((gb.gb_state.sys_clk.ALEF_xBCDExxx.state & 1) << 2) |
+            ((gb.gb_state.sys_clk.APUK_xxCDEFxx.state & 1) << 1) |
+            ((gb.gb_state.sys_clk.ADYK_xxxDEFGx.state & 1) << 0));
+    }},
     // PPU — sprite store
     {"oam0_x", SPRITE_X(0)}, {"oam0_id", SPRITE_ID(0)}, {"oam0_attr", SPRITE_ATTR(0)},
     {"oam1_x", SPRITE_X(1)}, {"oam1_id", SPRITE_ID(1)}, {"oam1_attr", SPRITE_ATTR(1)},
@@ -407,6 +416,8 @@ static const std::unordered_map<std::string, bool(*)(const GateBoy &)> INTERNAL_
     {"ch2_active", [](const GateBoy &gb) -> bool { return gb.gb_state.ch2.DANE_CH2_ACTIVEp.state & 1; }},
     {"ch3_active", [](const GateBoy &gb) -> bool { return gb.gb_state.ch3.DAVO_CH3_ACTIVEp.state & 1; }},
     {"ch4_active", [](const GateBoy &gb) -> bool { return gb.gb_state.ch4.GENA_CH4_ACTIVEp.state & 1; }},
+    // CPU — halt latch
+    {"halted", [](const GateBoy &gb) -> bool { return gb.cpu.core.reg.halt_latch != 0; }},
 };
 
 static void build_emitters(const Profile &prof) {

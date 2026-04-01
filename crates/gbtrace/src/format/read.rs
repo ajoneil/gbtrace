@@ -439,7 +439,7 @@ pub fn derive_groups_pub(fields: &[String]) -> Vec<FieldGroup> {
 
 fn derive_groups(fields: &[String]) -> Vec<FieldGroup> {
     let cpu_fields: Vec<String> = fields.iter()
-        .filter(|f| matches!(f.as_str(), "pc"|"sp"|"a"|"f"|"b"|"c"|"d"|"e"|"h"|"l"|"op"|"ime"))
+        .filter(|f| matches!(f.as_str(), "pc"|"sp"|"a"|"f"|"b"|"c"|"d"|"e"|"h"|"l"|"op"|"ime"|"op_state"|"mcycle_phase"|"halted"))
         .cloned().collect();
     let ppu_fields: Vec<String> = fields.iter()
         .filter(|f| matches!(f.as_str(), "lcdc"|"stat"|"ly"|"lyc"|"scy"|"scx"|"wy"|"wx"|"bgp"|"obp0"|"obp1"|"dma"))
