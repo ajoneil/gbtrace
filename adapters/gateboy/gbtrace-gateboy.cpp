@@ -417,8 +417,8 @@ static const std::unordered_map<std::string, bool(*)(const GateBoy &)> INTERNAL_
     {"ch2_active", [](const GateBoy &gb) -> bool { return gb.gb_state.ch2.DANE_CH2_ACTIVEp.state & 1; }},
     {"ch3_active", [](const GateBoy &gb) -> bool { return gb.gb_state.ch3.DAVO_CH3_ACTIVEp.state & 1; }},
     {"ch4_active", [](const GateBoy &gb) -> bool { return gb.gb_state.ch4.GENA_CH4_ACTIVEp.state & 1; }},
-    // CPU — halt latch
-    {"halted", [](const GateBoy &gb) -> bool { return gb.cpu.core.reg.halt_latch != 0; }},
+    // CPU — halted state: HALT instruction (0x76) in idle loop (op_state >= 1)
+    {"halted", [](const GateBoy &gb) -> bool { return gb.cpu.core.reg.op_next == 0x76 && gb.cpu.core.reg.op_state >= 1; }},
 };
 
 static void build_emitters(const Profile &prof) {
