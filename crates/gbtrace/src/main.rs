@@ -43,6 +43,12 @@ enum Command {
         /// Show the last N entries (no --where needed)
         #[arg(long)]
         last: Option<usize>,
+        /// Show entries in an index range (e.g. 4650..4680)
+        #[arg(long)]
+        range: Option<String>,
+        /// Only show these fields (comma-separated, e.g. pc,a,f,ly)
+        #[arg(long)]
+        fields: Option<String>,
     },
     /// Show frame boundaries detected from ly scanline counter
     Frames {
@@ -87,11 +93,15 @@ fn main() {
     let code = match cli.command {
         Command::Info { input } => cmd_info(&input),
         Command::Convert { input, output } => cmd_convert(&input, output),
-        Command::Query { input, r#where: conditions, max, context, last } => {
+        Command::Query { input, r#where: conditions, max, context, last, range, fields } => {
+            let field_filter: Option<Vec<String>> = fields
+                .map(|s| s.split(',').map(|f| f.trim().to_string()).collect());
             if let Some(n) = last {
-                cmd_query_last(&input, n)
+                cmd_query_last(&input, n, field_filter.as_deref())
+            } else if let Some(ref range_str) = range {
+                cmd_query_range(&input, range_str, field_filter.as_deref())
             } else {
-                cmd_query(&input, &conditions, max, context)
+                cmd_query(&input, &conditions, max, context, field_filter.as_deref())
             }
         }
         Command::Frames { input } => cmd_frames(&input),
@@ -388,7 +398,7 @@ fn convert_to_gbtrace(
 
 
 // ---------------------------------------------------------------------------
-fn cmd_query(input: &PathBuf, conditions: &[String], max: usize, context: usize) -> i32 {
+fn cmd_query(input: &PathBuf, conditions: &[String], max: usize, context: usize, field_filter: Option<&[String]>) -> i32 {
     if conditions.is_empty() {
         eprintln!("Error: at least one --where condition required");
         return 1;
@@ -422,14 +432,14 @@ fn cmd_query(input: &PathBuf, conditions: &[String], max: usize, context: usize)
             let ctx_start = if i >= context { i - context } else { 0 };
             for ci in ctx_start..i {
                 print!("  [{ci}]");
-                print_store_entry(&*store, ci, &fields);
+                print_store_entry(&*store, ci, &fields, field_filter);
                 println!();
             }
         }
 
         // The match
         print!("> [{i}]");
-        print_store_entry(&*store, i, &fields);
+        print_store_entry(&*store, i, &fields, field_filter);
         println!();
 
         // Context after
@@ -437,7 +447,7 @@ fn cmd_query(input: &PathBuf, conditions: &[String], max: usize, context: usize)
             let ctx_end = (i + context + 1).min(store.entry_count());
             for ci in (i + 1)..ctx_end {
                 print!("  [{ci}]");
-                print_store_entry(&*store, ci, &fields);
+                print_store_entry(&*store, ci, &fields, field_filter);
                 println!();
             }
         }
@@ -452,7 +462,45 @@ fn cmd_query(input: &PathBuf, conditions: &[String], max: usize, context: usize)
     0
 }
 
-fn cmd_query_last(input: &PathBuf, n: usize) -> i32 {
+fn cmd_query_range(input: &PathBuf, range_str: &str, field_filter: Option<&[String]>) -> i32 {
+    let store = match gbtrace::store::open_trace_store(input) {
+        Ok(s) => s,
+        Err(e) => { eprintln!("Error: {e}"); return 1; }
+    };
+
+    let fields = store.header().fields.clone();
+    let total = store.entry_count();
+
+    // Parse "start..end" range
+    let parts: Vec<&str> = range_str.split("..").collect();
+    if parts.len() != 2 {
+        eprintln!("Error: range must be in format START..END (e.g. 4650..4680)");
+        return 1;
+    }
+    let start: usize = match parts[0].parse() {
+        Ok(n) => n,
+        Err(_) => { eprintln!("Error: invalid range start '{}'", parts[0]); return 1; }
+    };
+    let end: usize = match parts[1].parse::<usize>() {
+        Ok(n) => n.min(total),
+        Err(_) => { eprintln!("Error: invalid range end '{}'", parts[1]); return 1; }
+    };
+
+    if start >= total {
+        eprintln!("Error: range start {start} exceeds trace length {total}");
+        return 1;
+    }
+
+    for i in start..end {
+        print!("  [{i}]");
+        print_store_entry(&*store, i, &fields, field_filter);
+        println!();
+    }
+
+    0
+}
+
+fn cmd_query_last(input: &PathBuf, n: usize, field_filter: Option<&[String]>) -> i32 {
     let store = match gbtrace::store::open_trace_store(input) {
         Ok(s) => s,
         Err(e) => { eprintln!("Error: {e}"); return 1; }
@@ -464,16 +512,24 @@ fn cmd_query_last(input: &PathBuf, n: usize) -> i32 {
 
     for i in start..total {
         print!(" ");
-        print_store_entry(&*store, i, &fields);
+        print_store_entry(&*store, i, &fields, field_filter);
         println!();
     }
 
     0
 }
 
-fn print_store_entry(store: &dyn gbtrace::store::TraceStore, row: usize, fields: &[String]) {
+fn print_store_entry(
+    store: &dyn gbtrace::store::TraceStore,
+    row: usize,
+    fields: &[String],
+    field_filter: Option<&[String]>,
+) {
     use gbtrace::profile::{field_type, FieldType};
     for (col, name) in fields.iter().enumerate() {
+        if let Some(filter) = field_filter {
+            if !filter.iter().any(|f| f == name) { continue; }
+        }
         if store.is_null(col, row) { continue; }
         let ft = field_type(name);
         match ft {
