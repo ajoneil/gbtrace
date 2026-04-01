@@ -180,18 +180,30 @@ impl GbtraceStore {
     }
 
     /// Ensure a chunk is loaded (at least the raw group blobs).
-    fn ensure_chunk_loaded(&self, chunk_idx: usize) {
+    fn ensure_chunk_loaded(&self, chunk_idx: usize) -> bool {
         let mut cache = self.cache.borrow_mut();
-        if cache.get(chunk_idx).is_some() { return; }
+        if cache.get(chunk_idx).is_some() { return true; }
 
-        let chunk = self.load_chunk(chunk_idx).expect("failed to load chunk");
-        cache.insert(chunk_idx, chunk);
+        match self.load_chunk(chunk_idx) {
+            Ok(chunk) => { cache.insert(chunk_idx, chunk); true }
+            Err(e) => {
+                eprintln!("Warning: failed to load chunk {chunk_idx}: {e}");
+                false
+            }
+        }
     }
 
     /// Load a chunk's raw group blobs from the file data.
     fn load_chunk(&self, chunk_idx: usize) -> Result<DecodedChunk> {
         let ci = &self.chunk_index[chunk_idx];
         let mut pos = ci.offset as usize;
+
+        if pos + 5 > self.data.len() {
+            return Err(Error::InvalidHeader(format!(
+                "chunk {chunk_idx} offset {pos} exceeds file size {}",
+                self.data.len()
+            )));
+        }
 
         let entry_count = read_u32(&self.data, &mut pos) as usize;
         let num_groups = self.data[pos] as usize;
@@ -229,9 +241,9 @@ impl GbtraceStore {
 
     /// Decode a specific group within a chunk if not already decoded.
     fn ensure_group_decoded(&self, chunk_idx: usize, group_id: u8) {
-        self.ensure_chunk_loaded(chunk_idx);
+        if !self.ensure_chunk_loaded(chunk_idx) { return; }
         let mut cache = self.cache.borrow_mut();
-        let chunk = cache.get(chunk_idx).unwrap();
+        let Some(chunk) = cache.get(chunk_idx) else { return; };
 
         if chunk.groups.contains_key(&group_id) { return; }
 
