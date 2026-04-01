@@ -81,10 +81,15 @@ pub trait TraceStore {
             Condition::FieldEquals { field, value } => {
                 if let Some(col) = self.field_col(field) {
                     let v = self.get_numeric(col, row);
-                    // Compare as hex (the display format used by queries)
-                    let hex = format!("{:x}", v);
-                    let hex2 = format!("{:02x}", v);
-                    value == &hex || value == &hex2 || value == &format!("{v}")
+                    // Parse the condition value: supports 0x prefix (hex),
+                    // bare hex, and decimal
+                    if let Some(target) = parse_query_value(value) {
+                        v == target
+                    } else {
+                        // Fall back to string comparison for non-numeric fields
+                        let s = self.get_str(col, row);
+                        s == *value
+                    }
                 } else {
                     false
                 }
@@ -103,8 +108,11 @@ pub trait TraceStore {
                     let cur = self.get_numeric(col, row);
                     let prev = self.get_numeric(col, row - 1);
                     if cur == prev { return false; }
-                    let hex = format!("{:02x}", cur);
-                    value == &hex || value == &format!("{cur}")
+                    if let Some(target) = parse_query_value(value) {
+                        cur == target
+                    } else {
+                        false
+                    }
                 } else {
                     false
                 }
@@ -115,8 +123,11 @@ pub trait TraceStore {
                     let cur = self.get_numeric(col, row);
                     let prev = self.get_numeric(col, row - 1);
                     if cur == prev { return false; }
-                    let hex = format!("{:02x}", prev);
-                    value == &hex || value == &format!("{prev}")
+                    if let Some(target) = parse_query_value(value) {
+                        prev == target
+                    } else {
+                        false
+                    }
                 } else {
                     false
                 }
@@ -170,6 +181,23 @@ pub trait TraceStore {
 
         Ok(out)
     }
+}
+
+/// Parse a query value as a number. Supports:
+/// - `0x1A` or `0X1A` (hex with prefix)
+/// - `1a` (bare hex)
+/// - `256` (decimal)
+fn parse_query_value(s: &str) -> Option<u64> {
+    // Explicit hex prefix
+    if let Some(hex) = s.strip_prefix("0x").or_else(|| s.strip_prefix("0X")) {
+        return u64::from_str_radix(hex, 16).ok();
+    }
+    // Try bare hex first (most values in traces are hex)
+    if let Ok(v) = u64::from_str_radix(s, 16) {
+        return Some(v);
+    }
+    // Fall back to decimal
+    s.parse::<u64>().ok()
 }
 
 // ---------------------------------------------------------------------------
