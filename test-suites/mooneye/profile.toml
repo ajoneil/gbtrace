@@ -4,7 +4,7 @@ description = "Full dump for mooneye acceptance tests."
 trigger = "tcycle"
 
 [fields]
-cpu = "registers"
+cpu = "all"
 ppu = "all"
 timer = true
 interrupt = true

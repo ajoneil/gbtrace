@@ -313,8 +313,9 @@ static uint8_t read_cpu_reg8(const CpuState &reg, const std::string &name) {
 }
 
 static uint16_t read_cpu_reg16(const CpuState &reg, const std::string &name) {
-    if (name == "pc") return reg.op_addr;
+    if (name == "pc") return reg.pc;
     if (name == "sp") return reg.sp;
+    if (name == "bus_addr") return reg.op_addr;
     return 0;
 }
 
@@ -438,7 +439,7 @@ static void build_emitters(const Profile &prof) {
             continue;
         } else if (field == "ime") {
             em.source = FieldEmitter::CPU_IME;
-        } else if (field == "pc" || field == "sp") {
+        } else if (field == "pc" || field == "sp" || field == "bus_addr") {
             em.source = FieldEmitter::CPU_REG16;
         } else if (field == "a" || field == "f" || field == "b" || field == "c" ||
                    field == "d" || field == "e" || field == "h" || field == "l") {
@@ -820,15 +821,6 @@ int main(int argc, char *argv[]) {
 
     bool tcycle_mode = (profile.trigger == "tcycle");
 
-
-    // After fastboot, GateBoy's CPU is 2 T-cycles before the first
-    // instruction at 0x0100 actually begins. Skip those so the trace
-    // starts aligned with the other adapters.
-    if (fastboot) {
-        for (int i = 0; i < 2 * PHASES_PER_TCYCLE; i++) {
-            gb.next_phase(cart_blob);
-        }
-    }
 
     uint16_t prev_op_addr = gb.cpu.core.reg.op_addr;
     int prev_op_state = gb.cpu.core.reg.op_state;
