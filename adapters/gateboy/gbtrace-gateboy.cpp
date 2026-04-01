@@ -315,7 +315,7 @@ static uint8_t read_cpu_reg8(const CpuState &reg, const std::string &name) {
 static uint16_t read_cpu_reg16(const CpuState &reg, const std::string &name) {
     if (name == "pc") return reg.pc;
     if (name == "sp") return reg.sp;
-    if (name == "bus_addr") return reg.op_addr;
+    if (name == "bus_addr") return reg.bus_addr;
     return 0;
 }
 
