@@ -6,7 +6,10 @@
 //!
 //! No data is copied. All reads go through the index maps to the originals.
 
-use crate::store::TraceStore;
+use arrow::array::*;
+use arrow::array::types::UInt8Type;
+
+use crate::store::{ColumnSegment, TraceStore};
 use crate::error::{Error, Result};
 use crate::profile::{field_type, FieldType};
 
@@ -134,50 +137,45 @@ impl<'a> TraceComparison<'a> {
 
     /// Compute per-field diff statistics (cached after first call).
     pub fn compute_stats(&mut self) -> &[FieldDiffStats] {
+        self.compute_stats_filtered(None)
+    }
+
+    /// Compute per-field diff statistics, optionally restricted to specific fields.
+    pub fn compute_stats_filtered(&mut self, filter: Option<&[&str]>) -> &[FieldDiffStats] {
         if self.field_stats.is_some() {
             return self.field_stats.as_ref().unwrap();
         }
 
         let fields_a = &self.store_a.header().fields;
         let fields_b = &self.store_b.header().fields;
+        let len = self.len();
 
-        // Find common fields
-        let mut stats = Vec::new();
-        for field in fields_a {
-            if fields_b.contains(field) {
-                let col_a = self.store_a.field_col(field).unwrap();
-                let col_b = self.store_b.field_col(field).unwrap();
-                let ft = field_type(field);
+        // Find common fields, applying filter
+        let common: Vec<&String> = fields_a.iter()
+            .filter(|f| fields_b.contains(f))
+            .filter(|f| match filter {
+                Some(allowed) => allowed.contains(&f.as_str()),
+                None => true,
+            })
+            .collect();
 
-                let mut match_count = 0usize;
-                let mut diff_count = 0usize;
+        // Try bulk column comparison if maps are contiguous
+        let bulk_a = is_contiguous(&self.map_a);
+        let bulk_b = is_contiguous(&self.map_b);
 
-                for i in 0..self.len() {
-                    let row_a = self.map_a[i];
-                    let row_b = self.map_b[i];
-
-                    let same = match ft {
-                        FieldType::Bool => {
-                            self.store_a.get_bool(col_a, row_a) == self.store_b.get_bool(col_b, row_b)
-                        }
-                        FieldType::Str => {
-                            self.store_a.get_str(col_a, row_a) == self.store_b.get_str(col_b, row_b)
-                        }
-                        _ => {
-                            self.store_a.get_numeric(col_a, row_a) == self.store_b.get_numeric(col_b, row_b)
-                        }
-                    };
-
-                    if same { match_count += 1; } else { diff_count += 1; }
-                }
-
-                stats.push(FieldDiffStats {
-                    name: field.clone(),
-                    match_count,
-                    diff_count,
-                });
-            }
-        }
+        let stats = if let (Some((start_a, _)), Some((start_b, _))) = (bulk_a, bulk_b) {
+            // Both maps are contiguous: use column-oriented bulk comparison
+            bulk_compare_fields(
+                self.store_a, self.store_b,
+                &common, len, start_a, start_b,
+            )
+        } else {
+            // Non-contiguous maps: per-entry comparison (still filtered)
+            scalar_compare_fields(
+                self.store_a, self.store_b,
+                &common, &self.map_a, &self.map_b,
+            )
+        };
 
         self.field_stats = Some(stats);
         self.field_stats.as_ref().unwrap()
@@ -194,7 +192,382 @@ impl<'a> TraceComparison<'a> {
     }
 }
 
-// --- Alignment helpers ---
+// ---------------------------------------------------------------------------
+// Bulk column comparison
+// ---------------------------------------------------------------------------
+
+/// Check if an index map is a contiguous range [start..start+len).
+fn is_contiguous(map: &[usize]) -> Option<(usize, usize)> {
+    if map.is_empty() { return Some((0, 0)); }
+    let start = map[0];
+    let end = start + map.len();
+    if map[map.len() - 1] != end - 1 { return None; }
+    // Spot-check middle to avoid false positives
+    if map.len() > 2 {
+        let mid = map.len() / 2;
+        if map[mid] != start + mid { return None; }
+    }
+    Some((start, end))
+}
+
+/// Compare fields using bulk column access (both maps contiguous).
+fn bulk_compare_fields(
+    store_a: &dyn TraceStore,
+    store_b: &dyn TraceStore,
+    fields: &[&String],
+    len: usize,
+    start_a: usize,
+    start_b: usize,
+) -> Vec<FieldDiffStats> {
+    fields.iter().map(|field| {
+        let end_a = start_a + len;
+        let end_b = start_b + len;
+
+        let segs_a = store_a.get_column_segments(field, start_a, end_a);
+        let segs_b = store_b.get_column_segments(field, start_b, end_b);
+
+        let diff_count = match (segs_a, segs_b) {
+            (Some(sa), Some(sb)) => compare_segments(&sa, &sb),
+            _ => {
+                // Fallback to scalar for this field
+                scalar_diff_count(store_a, store_b, field, len, start_a, start_b)
+            }
+        };
+
+        FieldDiffStats {
+            name: field.to_string(),
+            match_count: len - diff_count,
+            diff_count,
+        }
+    }).collect()
+}
+
+/// Count differences between two segment lists by walking them in lockstep.
+fn compare_segments(segs_a: &[ColumnSegment], segs_b: &[ColumnSegment]) -> usize {
+    let mut diffs = 0;
+    let mut iter_a = SegmentIter::new(segs_a);
+    let mut iter_b = SegmentIter::new(segs_b);
+
+    loop {
+        let (arr_a, off_a) = match iter_a.current() {
+            Some(v) => v,
+            None => break,
+        };
+        let (arr_b, off_b) = match iter_b.current() {
+            Some(v) => v,
+            None => break,
+        };
+
+        let avail_a = segment_remaining(&iter_a);
+        let avail_b = segment_remaining(&iter_b);
+        let batch = avail_a.min(avail_b);
+
+        diffs += count_diffs_typed(arr_a, off_a, arr_b, off_b, batch);
+
+        iter_a.advance(batch);
+        iter_b.advance(batch);
+    }
+
+    diffs
+}
+
+/// Typed comparison of Arrow arrays — avoids per-element dispatch.
+fn count_diffs_typed(
+    a: &ArrayRef, off_a: usize,
+    b: &ArrayRef, off_b: usize,
+    len: usize,
+) -> usize {
+    // Try common numeric types first (most fields are u8/u16)
+    if let (Some(aa), Some(bb)) = (
+        a.as_any().downcast_ref::<UInt8Array>(),
+        b.as_any().downcast_ref::<UInt8Array>(),
+    ) {
+        let sa = &aa.values()[off_a..off_a + len];
+        let sb = &bb.values()[off_b..off_b + len];
+        return sa.iter().zip(sb).filter(|(x, y)| x != y).count();
+    }
+
+    if let (Some(aa), Some(bb)) = (
+        a.as_any().downcast_ref::<UInt16Array>(),
+        b.as_any().downcast_ref::<UInt16Array>(),
+    ) {
+        let sa = &aa.values()[off_a..off_a + len];
+        let sb = &bb.values()[off_b..off_b + len];
+        return sa.iter().zip(sb).filter(|(x, y)| x != y).count();
+    }
+
+    if let (Some(aa), Some(bb)) = (
+        a.as_any().downcast_ref::<UInt32Array>(),
+        b.as_any().downcast_ref::<UInt32Array>(),
+    ) {
+        let sa = &aa.values()[off_a..off_a + len];
+        let sb = &bb.values()[off_b..off_b + len];
+        return sa.iter().zip(sb).filter(|(x, y)| x != y).count();
+    }
+
+    if let (Some(aa), Some(bb)) = (
+        a.as_any().downcast_ref::<BooleanArray>(),
+        b.as_any().downcast_ref::<BooleanArray>(),
+    ) {
+        return (0..len)
+            .filter(|&i| aa.value(off_a + i) != bb.value(off_b + i))
+            .count();
+    }
+
+    if let (Some(aa), Some(bb)) = (
+        a.as_any().downcast_ref::<StringArray>(),
+        b.as_any().downcast_ref::<StringArray>(),
+    ) {
+        return (0..len)
+            .filter(|&i| aa.value(off_a + i) != bb.value(off_b + i))
+            .count();
+    }
+
+    // Dictionary-encoded u8
+    if let (Some(da), Some(db)) = (
+        a.as_any().downcast_ref::<DictionaryArray<UInt8Type>>(),
+        b.as_any().downcast_ref::<DictionaryArray<UInt8Type>>(),
+    ) {
+        let va = da.values().as_any().downcast_ref::<UInt8Array>().unwrap();
+        let vb = db.values().as_any().downcast_ref::<UInt8Array>().unwrap();
+        let ka = da.keys();
+        let kb = db.keys();
+        return (0..len)
+            .filter(|&i| {
+                va.value(ka.value(off_a + i) as usize) != vb.value(kb.value(off_b + i) as usize)
+            })
+            .count();
+    }
+
+    // Unknown type: treat all as different
+    len
+}
+
+/// Iterator over segments for lockstep traversal.
+struct SegmentIter<'a> {
+    segs: &'a [ColumnSegment],
+    seg_idx: usize,
+    pos_in_seg: usize,
+}
+
+impl<'a> SegmentIter<'a> {
+    fn new(segs: &'a [ColumnSegment]) -> Self {
+        Self { segs, seg_idx: 0, pos_in_seg: 0 }
+    }
+
+    fn current(&self) -> Option<(&'a ArrayRef, usize)> {
+        let seg = self.segs.get(self.seg_idx)?;
+        Some((&seg.array, seg.offset + self.pos_in_seg))
+    }
+
+    fn advance(&mut self, n: usize) {
+        self.pos_in_seg += n;
+        if let Some(seg) = self.segs.get(self.seg_idx) {
+            if self.pos_in_seg >= seg.len {
+                self.seg_idx += 1;
+                self.pos_in_seg = 0;
+            }
+        }
+    }
+}
+
+fn segment_remaining(iter: &SegmentIter) -> usize {
+    match iter.segs.get(iter.seg_idx) {
+        Some(seg) => seg.len - iter.pos_in_seg,
+        None => 0,
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Scalar fallback (non-contiguous maps or no bulk access)
+// ---------------------------------------------------------------------------
+
+/// Per-entry comparison for non-contiguous alignment maps.
+fn scalar_compare_fields(
+    store_a: &dyn TraceStore,
+    store_b: &dyn TraceStore,
+    fields: &[&String],
+    map_a: &[usize],
+    map_b: &[usize],
+) -> Vec<FieldDiffStats> {
+    let len = map_a.len();
+    fields.iter().map(|field| {
+        let diff_count = scalar_diff_count_mapped(store_a, store_b, field, map_a, map_b);
+        FieldDiffStats {
+            name: field.to_string(),
+            match_count: len - diff_count,
+            diff_count,
+        }
+    }).collect()
+}
+
+fn scalar_diff_count_mapped(
+    store_a: &dyn TraceStore,
+    store_b: &dyn TraceStore,
+    field: &str,
+    map_a: &[usize],
+    map_b: &[usize],
+) -> usize {
+    let col_a = match store_a.field_col(field) { Some(c) => c, None => return 0 };
+    let col_b = match store_b.field_col(field) { Some(c) => c, None => return 0 };
+    let ft = field_type(field);
+
+    map_a.iter().zip(map_b).filter(|(&ra, &rb)| {
+        match ft {
+            FieldType::Bool => store_a.get_bool(col_a, ra) != store_b.get_bool(col_b, rb),
+            FieldType::Str => store_a.get_str(col_a, ra) != store_b.get_str(col_b, rb),
+            _ => store_a.get_numeric(col_a, ra) != store_b.get_numeric(col_b, rb),
+        }
+    }).count()
+}
+
+/// Scalar diff count for contiguous ranges (fallback when bulk segments unavailable).
+fn scalar_diff_count(
+    store_a: &dyn TraceStore,
+    store_b: &dyn TraceStore,
+    field: &str,
+    len: usize,
+    start_a: usize,
+    start_b: usize,
+) -> usize {
+    let col_a = match store_a.field_col(field) { Some(c) => c, None => return 0 };
+    let col_b = match store_b.field_col(field) { Some(c) => c, None => return 0 };
+    let ft = field_type(field);
+
+    (0..len).filter(|&i| {
+        let ra = start_a + i;
+        let rb = start_b + i;
+        match ft {
+            FieldType::Bool => store_a.get_bool(col_a, ra) != store_b.get_bool(col_b, rb),
+            FieldType::Str => store_a.get_str(col_a, ra) != store_b.get_str(col_b, rb),
+            _ => store_a.get_numeric(col_a, ra) != store_b.get_numeric(col_b, rb),
+        }
+    }).count()
+}
+
+// ---------------------------------------------------------------------------
+// Standalone bulk comparison (for WASM and other consumers)
+// ---------------------------------------------------------------------------
+
+/// Count differences for a single field between two stores over a contiguous range.
+/// Uses bulk column access when available, falling back to scalar.
+pub fn bulk_field_diff_count(
+    store_a: &dyn TraceStore,
+    store_b: &dyn TraceStore,
+    field: &str,
+    start: usize,
+    len: usize,
+) -> usize {
+    let end = start + len;
+    let segs_a = store_a.get_column_segments(field, start, end);
+    let segs_b = store_b.get_column_segments(field, start, end);
+
+    match (segs_a, segs_b) {
+        (Some(sa), Some(sb)) => compare_segments(&sa, &sb),
+        _ => scalar_diff_count(store_a, store_b, field, len, start, start),
+    }
+}
+
+/// Find indices where a field differs between two stores.
+/// Uses bulk column access when available.
+pub fn bulk_field_diff_indices(
+    store_a: &dyn TraceStore,
+    store_b: &dyn TraceStore,
+    field: &str,
+    start: usize,
+    len: usize,
+) -> Vec<u32> {
+    let end = start + len;
+    let segs_a = store_a.get_column_segments(field, start, end);
+    let segs_b = store_b.get_column_segments(field, start, end);
+
+    match (segs_a, segs_b) {
+        (Some(sa), Some(sb)) => diff_indices_from_segments(&sa, &sb, start),
+        _ => {
+            // Scalar fallback
+            let col_a = match store_a.field_col(field) { Some(c) => c, None => return vec![] };
+            let col_b = match store_b.field_col(field) { Some(c) => c, None => return vec![] };
+            (0..len)
+                .filter(|&i| {
+                    store_a.get_numeric(col_a, start + i) != store_b.get_numeric(col_b, start + i)
+                })
+                .map(|i| (start + i) as u32)
+                .collect()
+        }
+    }
+}
+
+fn diff_indices_from_segments(segs_a: &[ColumnSegment], segs_b: &[ColumnSegment], global_start: usize) -> Vec<u32> {
+    let mut indices = Vec::new();
+    let mut iter_a = SegmentIter::new(segs_a);
+    let mut iter_b = SegmentIter::new(segs_b);
+    let mut global_pos = global_start;
+
+    loop {
+        let (arr_a, off_a) = match iter_a.current() {
+            Some(v) => v,
+            None => break,
+        };
+        let (arr_b, off_b) = match iter_b.current() {
+            Some(v) => v,
+            None => break,
+        };
+
+        let avail_a = segment_remaining(&iter_a);
+        let avail_b = segment_remaining(&iter_b);
+        let batch = avail_a.min(avail_b);
+
+        collect_diff_indices_typed(arr_a, off_a, arr_b, off_b, batch, global_pos, &mut indices);
+
+        global_pos += batch;
+        iter_a.advance(batch);
+        iter_b.advance(batch);
+    }
+
+    indices
+}
+
+fn collect_diff_indices_typed(
+    a: &ArrayRef, off_a: usize,
+    b: &ArrayRef, off_b: usize,
+    len: usize,
+    global_start: usize,
+    out: &mut Vec<u32>,
+) {
+    if let (Some(aa), Some(bb)) = (
+        a.as_any().downcast_ref::<UInt8Array>(),
+        b.as_any().downcast_ref::<UInt8Array>(),
+    ) {
+        let sa = &aa.values()[off_a..off_a + len];
+        let sb = &bb.values()[off_b..off_b + len];
+        for (i, (x, y)) in sa.iter().zip(sb).enumerate() {
+            if x != y { out.push((global_start + i) as u32); }
+        }
+        return;
+    }
+
+    // Fallback: use UInt16 comparison (next most common type)
+    if let (Some(aa), Some(bb)) = (
+        a.as_any().downcast_ref::<UInt16Array>(),
+        b.as_any().downcast_ref::<UInt16Array>(),
+    ) {
+        let sa = &aa.values()[off_a..off_a + len];
+        let sb = &bb.values()[off_b..off_b + len];
+        for (i, (x, y)) in sa.iter().zip(sb).enumerate() {
+            if x != y { out.push((global_start + i) as u32); }
+        }
+        return;
+    }
+
+    // Last resort: per-element via generic comparison
+    for i in 0..len {
+        out.push((global_start + i) as u32);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Alignment helpers
+// ---------------------------------------------------------------------------
 
 /// Build an index map that collapses T-cycle entries to instruction boundaries.
 /// Picks one entry per PC change.

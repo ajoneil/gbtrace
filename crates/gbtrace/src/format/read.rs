@@ -339,6 +339,44 @@ impl TraceStore for GbtraceStore {
             _ => false,
         }
     }
+
+    fn get_column_segments(&self, field: &str, start: usize, end: usize) -> Option<Vec<crate::store::ColumnSegment>> {
+        let (group_id, col_in_group) = self.field_to_group.get(field)?;
+        let end = end.min(self.total_entries);
+        if start >= end { return Some(vec![]); }
+
+        let (first_chunk, first_offset) = self.locate(start);
+        let (last_chunk, _) = self.locate(end - 1);
+
+        let mut segments = Vec::with_capacity(last_chunk - first_chunk + 1);
+        let mut remaining = end - start;
+
+        for ci in first_chunk..=last_chunk {
+            let chunk_start_global = if ci == 0 { 0 } else { self.cumulative[ci - 1] };
+            let chunk_end_global = self.cumulative[ci];
+            let chunk_rows = chunk_end_global - chunk_start_global;
+
+            let local_offset = if ci == first_chunk { first_offset } else { 0 };
+            let seg_len = (chunk_rows - local_offset).min(remaining);
+
+            // Ensure group is decoded and extract the ArrayRef
+            self.ensure_group_decoded(ci, *group_id);
+            let cache = self.cache.borrow();
+            let chunk = cache.entries.iter().find(|(k, _)| *k == ci)?.1
+                .groups.get(group_id)?;
+            let array = chunk.column(*col_in_group).clone(); // Arc clone, cheap
+
+            segments.push(crate::store::ColumnSegment {
+                array,
+                offset: local_offset,
+                len: seg_len,
+            });
+
+            remaining -= seg_len;
+        }
+
+        Some(segments)
+    }
 }
 
 // --- Helpers ---

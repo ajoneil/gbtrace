@@ -333,18 +333,10 @@ impl TraceStore {
         other: &TraceStore,
         field: &str,
     ) -> Result<js_sys::Uint32Array, JsError> {
-        // For diffs, ensure both stores are eager
         let len = self.entry_count().min(other.entry_count());
-        let mut indices = Vec::new();
-
-        for i in 0..len {
-            let a = self.store.get_numeric_named(field, i);
-            let b = other.store.get_numeric_named(field, i);
-            if a != b {
-                indices.push(i as u32);
-            }
-        }
-
+        let indices = gbtrace::comparison::bulk_field_diff_indices(
+            self.store.as_ref(), other.store.as_ref(), field, 0, len,
+        );
         let arr = js_sys::Uint32Array::new_with_length(indices.len() as u32);
         arr.copy_from(&indices);
         Ok(arr)
@@ -361,31 +353,30 @@ impl TraceStore {
         let fields = self.store.header().fields.clone();
 
         let mut field_counts: Vec<(String, u64)> = Vec::new();
-        let mut any_diff_count: usize = 0;
-        let mut any_diff_flags = vec![false; len];
+        // Track per-row "any diff" via bulk diff indices
+        let mut any_diff_set = std::collections::HashSet::new();
 
         for name in &fields {
             let has_a = self.store.has_field(name);
             let has_b = other.store.has_field(name);
             if !has_a || !has_b { continue; }
 
-            let mut count = 0u64;
-            for i in 0..len {
-                let row = start + i;
-                if self.store.get_numeric_named(name, row) != other.store.get_numeric_named(name, row) {
-                    count += 1;
-                    any_diff_flags[i] = true;
+            let count = gbtrace::comparison::bulk_field_diff_count(
+                self.store.as_ref(), other.store.as_ref(), name, start, len,
+            );
+            if count > 0 {
+                field_counts.push((name.clone(), count as u64));
+                // Only compute indices for the "any diff" set if we haven't already covered all rows
+                if any_diff_set.len() < len {
+                    let indices = gbtrace::comparison::bulk_field_diff_indices(
+                        self.store.as_ref(), other.store.as_ref(), name, start, len,
+                    );
+                    any_diff_set.extend(indices);
                 }
             }
-            if count > 0 {
-                field_counts.push((name.clone(), count));
-            }
         }
 
-        for flag in &any_diff_flags {
-            if *flag { any_diff_count += 1; }
-        }
-
+        let any_diff_count = any_diff_set.len();
         let matching = len - any_diff_count;
         let pct = if len > 0 { (matching as f64 / len as f64) * 100.0 } else { 100.0 };
 
@@ -421,15 +412,18 @@ impl TraceStore {
             .map(|n| n.as_str())
             .collect();
 
-        let mut indices = Vec::new();
-        for row in 0..len {
-            for &name in &common_fields {
-                if self.store.get_numeric_named(name, row) != other.store.get_numeric_named(name, row) {
-                    indices.push(row as u32);
-                    break;
-                }
-            }
+        // Union of diff indices across all fields
+        let mut diff_set = std::collections::HashSet::new();
+        for &name in &common_fields {
+            if diff_set.len() >= len { break; } // all rows differ already
+            let field_indices = gbtrace::comparison::bulk_field_diff_indices(
+                self.store.as_ref(), other.store.as_ref(), name, 0, len,
+            );
+            diff_set.extend(field_indices);
         }
+
+        let mut indices: Vec<u32> = diff_set.into_iter().collect();
+        indices.sort_unstable();
 
         let arr = js_sys::Uint32Array::new_with_length(indices.len() as u32);
         arr.copy_from(&indices);

@@ -5,8 +5,18 @@
 //! lazy loading). `DownsampledStore` wraps a store for instruction-level
 //! views of T-cycle data.
 
+use arrow::array::ArrayRef;
 use crate::error::Result;
 use crate::header::TraceHeader;
+
+/// A contiguous slice of an Arrow column within a single chunk.
+pub struct ColumnSegment {
+    pub array: ArrayRef,
+    /// Offset within the array where this segment starts.
+    pub offset: usize,
+    /// Number of rows in this segment.
+    pub len: usize,
+}
 
 // ---------------------------------------------------------------------------
 // Trait — the single interface for reading trace data
@@ -39,6 +49,13 @@ pub trait TraceStore {
 
     fn has_field(&self, name: &str) -> bool {
         self.field_col(name).is_some()
+    }
+
+    /// Get column segments for a field over a contiguous row range.
+    /// Each segment is a slice of an Arrow array within one chunk.
+    /// Returns None if bulk access is not supported (e.g. downsampled stores).
+    fn get_column_segments(&self, _field: &str, _start: usize, _end: usize) -> Option<Vec<ColumnSegment>> {
+        None
     }
 
     /// Evaluate a condition within a range and return matching global indices.

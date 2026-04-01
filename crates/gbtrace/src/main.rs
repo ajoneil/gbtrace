@@ -560,14 +560,11 @@ fn cmd_diff(
         .map(|s| s.as_str())
         .collect();
 
-    // Compute stats via TraceComparison (clone to release borrow)
-    let stats = comp.compute_stats().to_vec();
+    // Compute stats via TraceComparison with field filter
+    let stats = comp.compute_stats_filtered(Some(&fields_to_compare)).to_vec();
     let aligned_count = comp.len();
 
-    // Filter stats to fields we're comparing
-    let relevant_stats: Vec<_> = stats.iter()
-        .filter(|s| fields_to_compare.contains(&s.name.as_str()))
-        .collect();
+    let relevant_stats: Vec<_> = stats.iter().collect();
 
     let total_diffs: usize = relevant_stats.iter().map(|s| s.diff_count).sum();
     let is_identical = total_diffs == 0;
