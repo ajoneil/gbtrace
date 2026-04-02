@@ -1,6 +1,7 @@
 import { LitElement, html, css } from 'lit';
 // prepareForDiffSync removed — downsampling is now a transparent view on the store
 import './file-loader.js';
+import { humanizeTestName } from './test-picker.js';
 import './test-picker.js';
 import './trace-selector.js';
 import './trace-header.js';
@@ -516,7 +517,7 @@ export class AppShell extends LitElement {
     const { store, suite, testRom, emulator, testInfo } = e.detail;
     this._suite = suite;
     this._testRom = testRom;
-    this._testName = testRom?.replace('.gb', '').split('/').pop() || '';
+    this._testName = humanizeTestName(testRom?.replace('.gb', '').split('/').pop() || '');
     this._testInfo = testInfo || null;
     this._setStoreA(store, emulator);
 

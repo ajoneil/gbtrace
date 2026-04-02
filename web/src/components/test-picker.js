@@ -188,6 +188,37 @@ const EMULATORS = ['gateboy', 'missingno', 'gambatte', 'sameboy', 'mgba'];
 
 const EMU_SHORT = { gateboy: 'GB', missingno: 'MN', gambatte: 'Ga', sameboy: 'SB', mgba: 'mG' };
 
+/** Known uppercase abbreviations in test names. */
+const ABBREVIATIONS = new Set([
+  'dma', 'oam', 'ppu', 'cpu', 'gpu', 'apu', 'lcd', 'div', 'ei', 'di',
+  'ie', 'if', 'ly', 'scx', 'scy', 'wx', 'wy', 'hl', 'sp', 'bc', 'de',
+  'af', 'pc', 'mbc', 'vram', 'hram', 'stat', 'lcdc', 'bgp', 'obp',
+  'rst', 'jp', 'jr', 'ret', 'ld', 'rp', 'imm',
+  'dmg', 'irq', 'intr', 'int', 'gs',
+  'hblank', 'vblank', 'oamscan', 'lcdon',
+]);
+
+/**
+ * Convert an underscore-heavy test filename into a readable display name.
+ * e.g. "hblank_int_di_timing_b" → "HBlank Int DI Timing B"
+ *      "dma_0x1000" → "DMA 0x1000"
+ *      "cpu_instrs__02-interrupts" → "CPU Instrs / 02 Interrupts"
+ */
+function humanizeTestName(name) {
+  // Double-underscore is a path separator in some suites (blargg)
+  let s = name.replace(/__/g, ' / ').replace(/_/g, ' ').replace(/-/g, ' ');
+  // Capitalize words, respecting abbreviations and hex literals
+  s = s.replace(/\b([a-zA-Z0-9]+)\b/g, (match) => {
+    if (/^0[xXbBdD]/.test(match)) return match;         // hex/binary literal
+    if (/^\d/.test(match)) return match;                 // number
+    if (ABBREVIATIONS.has(match.toLowerCase())) return match.toUpperCase();
+    return match.charAt(0).toUpperCase() + match.slice(1);
+  });
+  return s;
+}
+
+export { humanizeTestName };
+
 function traceUrl(suite, test, emulator, status = 'pass') {
   return `${suite.base}/${test.name}_${emulator}_${status}.gbtrace`;
 }
@@ -214,14 +245,18 @@ export class TestPicker extends LitElement {
     }
     h3 { margin: 0 0 10px; font-size: 0.95rem; font-weight: 600; }
 
-    .suite-tabs { display: flex; flex-wrap: wrap; gap: 0; margin-bottom: 10px; border-bottom: 1px solid var(--border); }
-    .suite-tab {
-      padding: 6px 14px; background: none; border: none;
-      border-bottom: 2px solid transparent; color: var(--text-muted);
-      cursor: pointer; font-size: 0.8rem; font-family: inherit;
+    .suite-row {
+      display: flex; align-items: center; gap: 8px; margin-bottom: 10px; flex-wrap: wrap;
     }
-    .suite-tab:hover { color: var(--text); }
-    .suite-tab.active { color: var(--accent); border-bottom-color: var(--accent); font-weight: 600; }
+    .suite-select {
+      padding: 5px 10px; background: var(--bg); border: 1px solid var(--border);
+      border-radius: 6px; color: var(--text); font-family: inherit;
+      font-size: 0.8rem; cursor: pointer; min-width: 160px;
+    }
+    .suite-select:focus { outline: none; border-color: var(--accent); }
+    .suite-count {
+      font-size: 0.72rem; color: var(--text-muted); font-family: var(--mono);
+    }
 
     .summary {
       display: flex; gap: 8px; margin-top: 12px; font-size: 0.72rem;
@@ -246,7 +281,6 @@ export class TestPicker extends LitElement {
     .summary-bar .seg-fail { background: #f44336; }
     .summary-bar .seg-missing { background: #ff9800; opacity: 0.5; }
 
-    .categories { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 8px; }
     .cat-chip {
       padding: 2px 8px; background: var(--bg); border: 1px solid var(--border);
       border-radius: 10px; color: var(--text-muted); cursor: pointer;
@@ -269,7 +303,7 @@ export class TestPicker extends LitElement {
     .test-row {
       display: flex; align-items: center; gap: 6px;
       padding: 4px 10px; border-bottom: 1px solid var(--bg);
-      cursor: pointer; font-family: var(--mono); font-size: 0.75rem;
+      cursor: pointer; font-size: 0.78rem;
     }
     .test-row:last-child { border-bottom: none; }
     .test-row:hover { background: var(--bg-hover); }
@@ -355,7 +389,10 @@ export class TestPicker extends LitElement {
     }
     if (this._search) {
       const q = this._search.toLowerCase();
-      tests = tests.filter(t => t.name.toLowerCase().includes(q));
+      tests = tests.filter(t =>
+        t.name.toLowerCase().includes(q) ||
+        humanizeTestName(t.name).toLowerCase().includes(q)
+      );
     }
     return tests;
   }
@@ -369,24 +406,23 @@ export class TestPicker extends LitElement {
       <div class="picker">
         <h3>Test Suites</h3>
 
-        <div class="suite-tabs">
-          ${TEST_SUITES.map((s, i) => html`
-            <button class="suite-tab ${i === this._selectedSuite ? 'active' : ''}"
-              @click=${() => this._selectSuite(i)}
-            >${s.name}${s.tests ? html` <span style="color:var(--text-muted);font-weight:400">(${s.tests.length})</span>` : ''}</button>
-          `)}
-        </div>
+        <div class="suite-row">
+          <select class="suite-select" @change=${e => this._selectSuite(parseInt(e.target.value, 10))}>
+            ${TEST_SUITES.map((s, i) => html`
+              <option value=${i} ?selected=${i === this._selectedSuite}
+              >${s.name}${s.tests ? ` (${s.tests.length})` : ''}</option>
+            `)}
+          </select>
 
-        ${suite.categories?.length ? html`
-          <div class="categories">
+          ${suite.categories?.length ? html`
             <span class="cat-chip ${!this._category ? 'active' : ''}"
               @click=${() => this._selectCategory('')}>all</span>
             ${suite.categories.map(c => html`
               <span class="cat-chip ${this._category === c.filter ? 'active' : ''}"
                 @click=${() => this._selectCategory(c.filter)}>${c.name}</span>
             `)}
-          </div>
-        ` : ''}
+          ` : ''}
+        </div>
 
         ${tests.length > 11 ? html`
           <input class="search" type="text" placeholder="filter tests..."
@@ -402,7 +438,7 @@ export class TestPicker extends LitElement {
             return html`
               <div class="test-row ${i === this._selectedTest ? 'selected' : ''}"
                 @click=${() => this._selectTest(suite, tests, i)}>
-                <span class="test-name">${t.name}</span>
+                <span class="test-name" title="${t.name}">${humanizeTestName(t.name)}</span>
                 <div class="emu-dots">
                   ${EMULATORS.map(emu => {
                     const s = emus[emu];
