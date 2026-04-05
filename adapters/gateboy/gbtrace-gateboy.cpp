@@ -81,8 +81,8 @@ static uint8_t read_reg(const GateBoy& gb, unsigned short addr) {
         case 0xFF04: return (uint8_t)(bit_pack(s.reg_div) >> 6);
         case 0xFF05: return (uint8_t)bit_pack(s.reg_tima);
         case 0xFF06: return (uint8_t)bit_pack(s.reg_tma);
-        case 0xFF07: return (uint8_t)bit_pack(s.reg_tac);
-        case 0xFF0F: return (uint8_t)bit_pack(s.reg_if);
+        case 0xFF07: return (uint8_t)(bit_pack(s.reg_tac) | 0xF8); // bits 3-7 read as 1
+        case 0xFF0F: return (uint8_t)(bit_pack(s.reg_if) | 0xE0); // bits 5-7 read as 1
         case 0xFFFF: return (uint8_t)bit_pack(s.reg_ie);
         // SB (0xFF01) and SC (0xFF02): serial is not simulated in GateBoy.
         case 0xFF01: return 0;
