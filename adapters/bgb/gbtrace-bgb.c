@@ -759,17 +759,22 @@ int main(int argc, char *argv[]) {
         gbtrace_writer_finish_entry(writer);
         entry_count++;
 
-        // Check stop conditions — if any boolean token is non-zero, stop.
-        bool should_stop = false;
-        for (int s = 0; s < g_num_stop_tokens; s++) {
-            int idx = g_stop_token_indices[s];
-            if (idx >= 0 && all_tokens[idx] != 0) {
-                should_stop = true;
-                fprintf(stderr, "Stop condition met at entry %ld\n", entry_count);
-                break;
+        // Check software stop conditions.  Skip the first few entries to
+        // avoid false triggers from uninitialised memory (BGB starts HRAM
+        // at 0xFF which can match --stop-when conditions immediately).
+        if (entry_count > 2 && g_num_stop_tokens > 0) {
+            bool should_stop = false;
+            for (int s = 0; s < g_num_stop_tokens; s++) {
+                int idx = g_stop_token_indices[s];
+                if (idx >= 0 && all_tokens[idx] != 0) {
+                    should_stop = true;
+                    fprintf(stderr, "Stop condition met at entry %ld\n",
+                            entry_count);
+                    break;
+                }
             }
+            if (should_stop) break;
         }
-        if (should_stop) break;
     }
 
     fclose(fifo);
