@@ -26,11 +26,11 @@ BUILD_DIR := $(PROJECT_DIR)/build
 PAGES_URL ?= https://ajoneil.github.io/gbtrace
 
 # Adapters
-ADAPTERS := gambatte sameboy mgba gateboy missingno
+ADAPTERS := gambatte sameboy mgba gateboy missingno bgb
 ADAPTER_BINS := $(foreach a,$(ADAPTERS),adapters/$(a)/gbtrace-$(a))
 
 # Emulators to run (comma-separated, override with EMUS=gambatte,mgba)
-EMUS ?= gambatte,sameboy,mgba,gateboy,missingno
+EMUS ?= gambatte,sameboy,mgba,gateboy,missingno,bgb
 
 # Trace output dirs
 GBMICROTEST_TRACE_DIR := $(BUILD_DIR)/traces/gbmicrotest
@@ -245,6 +245,10 @@ adapters/gateboy/gbtrace-gateboy:
 adapters/missingno/gbtrace-missingno:
 	@echo "Building missingno adapter..."
 	@cd adapters/missingno && cargo build --release && cp target/release/gbtrace-missingno .
+
+adapters/bgb/gbtrace-bgb:
+	@echo "Building bgb adapter..."
+	@$(MAKE) -C adapters/bgb
 
 FFI_LIB := $(PROJECT_DIR)/target/release/libgbtrace_ffi.a
 FFI_HEADER := $(PROJECT_DIR)/crates/gbtrace-ffi/gbtrace.h
