@@ -64,7 +64,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        emulator: [gambatte, sameboy, mgba, gateboy, missingno]
+        emulator: [gambatte, sameboy, mgba, gateboy, missingno, bgb]
     steps:
       - uses: actions/checkout@v6
 
@@ -161,6 +161,10 @@ jobs:
           cd adapters/missingno
           cargo build --release
           cp target/release/gbtrace-missingno .
+
+      - name: Build bgb
+        if: matrix.emulator == 'bgb'
+        run: make -C adapters/bgb
 
       - name: Upload adapter
         uses: actions/upload-artifact@v6
