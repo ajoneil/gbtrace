@@ -158,6 +158,13 @@ static void plan_emitters(const struct Profile *prof) {
     g_need_af = g_need_bc = g_need_de = g_need_hl = false;
     g_need_pc = g_need_sp = g_need_ime = false;
 
+    // Pre-seed IO slots with memory fields so they get priority in the
+    // format string (BGB has a 127-char limit and these are essential
+    // for pass/fail detection in test suites like gbmicrotest).
+    for (int m = 0; m < prof->nmemory; m++) {
+        io_slot_for(prof->memory[m].addr);
+    }
+
     for (int i = 0; i < prof->nfields; i++) {
         const char *field = prof->fields[i];
         struct FieldEmitter *em = &g_emitters[g_nemitters];
@@ -203,72 +210,124 @@ static void plan_emitters(const struct Profile *prof) {
     }
 }
 
-// Build the BGB debug message format string and assign output_index values.
-// Returns the format string in `buf` and the total number of output tokens.
-// BGB has a 127-char limit on the debug message, so we pack tightly.
-static int build_format_string(char *buf, size_t bufsz) {
-    int pos = 0;
-    int token = 0;  // output token index
+// BGB has a 127-char limit per debug message.  To capture more fields we
+// use multiple `any` breakpoints (comma-separated in -br), each prefixed
+// with a letter (A, B, C, ...).  Each instruction produces N lines of
+// output which the parser reassembles into one entry.
+//
+// The -br arg looks like:  any///A %PC% ...,any///B %($FF40)% ...
+// Token indices are global across all lines.
 
-    // Fixed register tokens first (order must match parsing)
+#define MAX_BR_LINES 8
+#define BR_MSG_LIMIT 127  // max chars per debug message (empirical)
+
+static char g_br_lines[MAX_BR_LINES][256]; // format strings per line
+static int  g_br_ntokens[MAX_BR_LINES];    // tokens per line (excluding prefix)
+static int  g_num_br_lines = 0;
+
+// Append a token expression to the current breakpoint line, starting a new
+// line if it won't fit.  Returns the global token index assigned.
+static int g_total_tokens = 0;
+
+static void br_ensure_line(void) {
+    if (g_num_br_lines == 0) {
+        g_br_lines[0][0] = '\0';
+        g_br_ntokens[0] = 0;
+        g_num_br_lines = 1;
+    }
+}
+
+static int br_append(const char *expr) {
+    br_ensure_line();
+    int line = g_num_br_lines - 1;
+    int cur_len = (int)strlen(g_br_lines[line]);
+    // +2 for prefix letter and space on empty line, +1 for space separator
+    int prefix_overhead = (cur_len == 0) ? 2 : 0;
+    int sep = (cur_len > 0 && !prefix_overhead) ? 1 : 0;
+    int needed = prefix_overhead + sep + (int)strlen(expr);
+
+    if (cur_len + needed > BR_MSG_LIMIT) {
+        // Start a new line
+        if (g_num_br_lines >= MAX_BR_LINES) return -1; // out of lines
+        line = g_num_br_lines++;
+        g_br_lines[line][0] = '\0';
+        g_br_ntokens[line] = 0;
+        cur_len = 0;
+        prefix_overhead = 2;
+        sep = 0;
+    }
+
+    char *buf = g_br_lines[line];
+    int pos = cur_len;
+    if (prefix_overhead) {
+        // Write "X " prefix (A, B, C, ...)
+        buf[pos++] = 'A' + line;
+        buf[pos++] = ' ';
+    }
+    if (sep) buf[pos++] = ' ';
+    strcpy(buf + pos, expr);
+    g_br_ntokens[line]++;
+    return g_total_tokens++;
+}
+
+// Stop condition token indices (checked during parsing to know when to stop).
+static int g_stop_token_indices[16];
+static int g_num_stop_tokens = 0;
+
+// Build the complete -br argument (comma-separated breakpoints) and assign
+// output_index to each emitter.  Returns total token count.
+// Stop conditions are appended as boolean expressions (%($ADDR)=VAL%)
+// that the parser checks to detect when to stop and kill BGB.
+struct StopCond { unsigned short addr; unsigned char value; int negate; };
+
+static int build_format_strings(const struct StopCond *stops, int nstops) {
+    g_num_br_lines = 0;
+    g_total_tokens = 0;
+    g_num_stop_tokens = 0;
+
+    // CPU register tokens
     int idx_pc = -1, idx_sp = -1, idx_af = -1, idx_bc = -1;
     int idx_de = -1, idx_hl = -1, idx_ime = -1;
 
-    if (g_need_pc) {
-        if (pos > 0) pos += snprintf(buf + pos, bufsz - pos, " ");
-        pos += snprintf(buf + pos, bufsz - pos, "%%PC%%");
-        idx_pc = token++;
-    }
-    if (g_need_sp) {
-        if (pos > 0) pos += snprintf(buf + pos, bufsz - pos, " ");
-        pos += snprintf(buf + pos, bufsz - pos, "%%SP%%");
-        idx_sp = token++;
-    }
-    if (g_need_af) {
-        if (pos > 0) pos += snprintf(buf + pos, bufsz - pos, " ");
-        pos += snprintf(buf + pos, bufsz - pos, "%%AF%%");
-        idx_af = token++;
-    }
-    if (g_need_bc) {
-        if (pos > 0) pos += snprintf(buf + pos, bufsz - pos, " ");
-        pos += snprintf(buf + pos, bufsz - pos, "%%BC%%");
-        idx_bc = token++;
-    }
-    if (g_need_de) {
-        if (pos > 0) pos += snprintf(buf + pos, bufsz - pos, " ");
-        pos += snprintf(buf + pos, bufsz - pos, "%%DE%%");
-        idx_de = token++;
-    }
-    if (g_need_hl) {
-        if (pos > 0) pos += snprintf(buf + pos, bufsz - pos, " ");
-        pos += snprintf(buf + pos, bufsz - pos, "%%HL%%");
-        idx_hl = token++;
-    }
-    if (g_need_ime) {
-        if (pos > 0) pos += snprintf(buf + pos, bufsz - pos, " ");
-        pos += snprintf(buf + pos, bufsz - pos, "%%IME%%");
-        idx_ime = token++;
-    }
+    if (g_need_pc)  idx_pc  = br_append("%PC%");
+    if (g_need_sp)  idx_sp  = br_append("%SP%");
+    if (g_need_af)  idx_af  = br_append("%AF%");
+    if (g_need_bc)  idx_bc  = br_append("%BC%");
+    if (g_need_de)  idx_de  = br_append("%DE%");
+    if (g_need_hl)  idx_hl  = br_append("%HL%");
+    if (g_need_ime) idx_ime = br_append("%IME%");
 
     // IO register tokens
     for (int i = 0; i < g_nio_slots; i++) {
         char expr[20];
         snprintf(expr, sizeof(expr), "%%($%04X)%%", g_io_slots[i].addr);
-        // Check if it fits within the 127-char limit
-        int needed = (pos > 0 ? 1 : 0) + (int)strlen(expr);
-        if (pos + needed > 127) {
-            fprintf(stderr, "Warning: BGB debug message limit (127 chars) reached, "
+        int idx = br_append(expr);
+        if (idx < 0) {
+            fprintf(stderr, "Warning: ran out of BGB breakpoint lines, "
                     "dropping IO field $%04X and beyond\n", g_io_slots[i].addr);
             break;
         }
-        if (pos > 0) pos += snprintf(buf + pos, bufsz - pos, " ");
-        pos += snprintf(buf + pos, bufsz - pos, "%s", expr);
-        g_io_slots[i].output_index = token++;
+        g_io_slots[i].output_index = idx;
     }
 
-    buf[pos] = '\0';
+    // Stop condition boolean tokens — appended as %($ADDR)=VAL% expressions.
+    // These evaluate to 0 or 1; the parser stops when any is non-zero.
+    for (int i = 0; i < nstops && i < 16; i++) {
+        char expr[32];
+        if (stops[i].negate) {
+            snprintf(expr, sizeof(expr), "%%(($%04X)=%02X)=0%%",
+                     stops[i].addr, stops[i].value);
+        } else {
+            snprintf(expr, sizeof(expr), "%%($%04X)=%02X%%",
+                     stops[i].addr, stops[i].value);
+        }
+        int idx = br_append(expr);
+        if (idx >= 0) {
+            g_stop_token_indices[g_num_stop_tokens++] = idx;
+        }
+    }
 
-    // Now assign output_index to each emitter
+    // Assign output_index to each emitter
     for (int i = 0; i < g_nemitters; i++) {
         struct FieldEmitter *em = &g_emitters[i];
         switch (em->source) {
@@ -286,17 +345,23 @@ static int build_format_string(char *buf, size_t bufsz) {
                     break;
                 }
             }
-            if (em->output_index < 0) {
-                // IO slot was dropped due to format string length limit
-                em->source = SRC_SKIP;
-            }
+            if (em->output_index < 0) em->source = SRC_SKIP;
             break;
         }
         case SRC_SKIP: break;
         }
     }
 
-    return token;
+    return g_total_tokens;
+}
+
+// Assemble the -br argument: "any///A ...,any///B ...,..."
+static void build_br_arg(char *buf, size_t bufsz) {
+    int pos = 0;
+    for (int i = 0; i < g_num_br_lines; i++) {
+        if (i > 0) pos += snprintf(buf + pos, bufsz - pos, ",");
+        pos += snprintf(buf + pos, bufsz - pos, "any///%s", g_br_lines[i]);
+    }
 }
 
 // ── SHA-256 ─────────────────────────────────────────────────────────
@@ -402,8 +467,8 @@ int main(int argc, char *argv[]) {
     int extra_frames = 0;
     const char *model = "DMG-B";
 
-    // Stop conditions — passed to BGB as watchpoints
-    struct { unsigned short addr; unsigned char value; int negate; } stop_conds[16];
+    // Stop conditions — detected in the adapter by checking boolean tokens
+    struct StopCond stop_conds[16];
     int num_stop_conds = 0;
     unsigned char stop_serial_byte = 0;
     int stop_serial_active = 0;
@@ -478,11 +543,12 @@ int main(int argc, char *argv[]) {
     struct Profile prof = load_profile(profile_path);
     plan_emitters(&prof);
 
-    char fmt_str[256];
-    int ntokens = build_format_string(fmt_str, sizeof(fmt_str));
-    fprintf(stderr, "Profile: %s (%d fields, %d BGB tokens)\n",
-            prof.name, prof.nfields, ntokens);
-    fprintf(stderr, "Format: %s\n", fmt_str);
+    int ntokens = build_format_strings(stop_conds, num_stop_conds);
+    fprintf(stderr, "Profile: %s (%d fields, %d BGB tokens across %d line%s)\n",
+            prof.name, prof.nfields, ntokens, g_num_br_lines,
+            g_num_br_lines == 1 ? "" : "s");
+    for (int i = 0; i < g_num_br_lines; i++)
+        fprintf(stderr, "  Line %c: %s\n", 'A' + i, g_br_lines[i]);
 
     // Build header JSON
     char *rom_hash = sha256_file(rom_path);
@@ -542,24 +608,8 @@ int main(int argc, char *argv[]) {
     }
 
     // Build BGB command line
-    char bgb_br[512];
-    snprintf(bgb_br, sizeof(bgb_br), "any///%s", fmt_str);
-
-    // Build watchpoint args for stop conditions
-    // BGB -wp format: ADDR/VAL/w (break on write of VAL to ADDR)
-    char wp_args[1024] = "";
-    for (int i = 0; i < num_stop_conds; i++) {
-        char wp[64];
-        if (stop_conds[i].negate) {
-            // BGB doesn't support != watchpoints directly; use a conditional breakpoint
-            // For now, skip negated conditions
-            fprintf(stderr, "Warning: negated stop conditions not supported in BGB adapter\n");
-            continue;
-        }
-        snprintf(wp, sizeof(wp), "%04X/%02X/w", stop_conds[i].addr, stop_conds[i].value);
-        if (wp_args[0]) strcat(wp_args, ",");
-        strcat(wp_args, wp);
-    }
+    char bgb_br[2048];
+    build_br_arg(bgb_br, sizeof(bgb_br));
 
     // Convert ROM path to Wine Z: drive path
     char wine_rom[4096];
@@ -598,21 +648,11 @@ int main(int argc, char *argv[]) {
         // Change to adapter directory so BGB finds its ini and writes debugmsg.txt there
         if (chdir(adapter_dir) != 0) _exit(1);
 
-        if (wp_args[0]) {
-            execlp("xvfb-run", "xvfb-run", "-a",
-                   "wine", "./bgb.exe", "-headless", "-runfast",
-                   "-br", bgb_br,
-                   "-wp", wp_args,
-                   "-rom", wine_rom,
-                   NULL);
-        } else {
-            // No watchpoints — use frame-limited run, BGB will run until timeout
-            execlp("xvfb-run", "xvfb-run", "-a",
-                   "wine", "./bgb.exe", "-headless", "-runfast",
-                   "-br", bgb_br,
-                   "-rom", wine_rom,
-                   NULL);
-        }
+        execlp("xvfb-run", "xvfb-run", "-a",
+               "wine", "./bgb.exe", "-headless", "-runfast",
+               "-br", bgb_br,
+               "-rom", wine_rom,
+               NULL);
         _exit(1);
     }
 
@@ -642,18 +682,47 @@ int main(int argc, char *argv[]) {
         }
     }
 
+    // Compute the base token offset for each breakpoint line.
+    // BGB outputs lines in reverse order (last breakpoint first), so
+    // line C (index 2) comes first, then B (1), then A (0).
+    int line_base[MAX_BR_LINES];
+    {
+        int base = 0;
+        for (int i = 0; i < g_num_br_lines; i++) {
+            line_base[i] = base;
+            base += g_br_ntokens[i];
+        }
+    }
+
     char line[4096];
-    unsigned long tokens[MAX_TOKENS];
+    unsigned long all_tokens[MAX_TOKENS]; // accumulated across all lines
     long entry_count = 0;
     uint8_t prev_ly = 0;
+    int lines_collected = 0;
 
     while (fgets(line, sizeof(line), fifo)) {
-        int nt = parse_line(line, tokens, MAX_TOKENS);
-        if (nt < ntokens) continue; // malformed line
+        // Identify which line this is by the prefix letter
+        if (line[0] < 'A' || line[0] >= 'A' + g_num_br_lines || line[1] != ' ')
+            continue; // malformed
+
+        int line_idx = line[0] - 'A';
+        unsigned long tokens[MAX_TOKENS];
+        int nt = parse_line(line + 2, tokens, MAX_TOKENS); // skip "X " prefix
+        if (nt < g_br_ntokens[line_idx]) continue; // malformed
+
+        // Copy into the global token array at the right offset
+        int base = line_base[line_idx];
+        for (int t = 0; t < g_br_ntokens[line_idx]; t++)
+            all_tokens[base + t] = tokens[t];
+        lines_collected++;
+
+        // Emit entry once we've collected all lines for this instruction
+        if (lines_collected < g_num_br_lines) continue;
+        lines_collected = 0;
 
         // Check LY for frame boundary
         if (ly_token_idx >= 0) {
-            uint8_t ly_val = (uint8_t)tokens[ly_token_idx];
+            uint8_t ly_val = (uint8_t)all_tokens[ly_token_idx];
             if (ly_val == 0 && prev_ly != 0 && entry_count > 0) {
                 gbtrace_writer_mark_frame(writer);
             }
@@ -666,7 +735,7 @@ int main(int argc, char *argv[]) {
             if (col < 0) continue;
             struct FieldEmitter *em = &g_emitters[i];
             if (em->output_index < 0) continue;
-            unsigned long val = tokens[em->output_index];
+            unsigned long val = all_tokens[em->output_index];
 
             switch (em->source) {
             case SRC_PC:
@@ -689,11 +758,24 @@ int main(int argc, char *argv[]) {
 
         gbtrace_writer_finish_entry(writer);
         entry_count++;
+
+        // Check stop conditions — if any boolean token is non-zero, stop.
+        bool should_stop = false;
+        for (int s = 0; s < g_num_stop_tokens; s++) {
+            int idx = g_stop_token_indices[s];
+            if (idx >= 0 && all_tokens[idx] != 0) {
+                should_stop = true;
+                fprintf(stderr, "Stop condition met at entry %ld\n", entry_count);
+                break;
+            }
+        }
+        if (should_stop) break;
     }
 
     fclose(fifo);
 
-    // Wait for BGB to exit
+    // Kill BGB (it may still be running if we stopped due to a condition)
+    kill(pid, SIGTERM);
     int status = 0;
     waitpid(pid, &status, 0);
     g_child_pid = 0;
