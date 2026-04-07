@@ -271,8 +271,10 @@ static int br_append(const char *expr) {
 }
 
 // Stop condition token indices (checked during parsing to know when to stop).
+// Memory conditions checked per-frame; opcode condition checked per-instruction.
 static int g_stop_token_indices[16];
 static int g_num_stop_tokens = 0;
+static int g_opcode_stop_token = -1; // index for %(PC)=XX% token, or -1
 
 // Build the complete -br argument (comma-separated breakpoints) and assign
 // output_index to each emitter.  Returns total token count.
@@ -280,10 +282,12 @@ static int g_num_stop_tokens = 0;
 // that the parser checks to detect when to stop and kill BGB.
 struct StopCond { unsigned short addr; unsigned char value; int negate; };
 
-static int build_format_strings(const struct StopCond *stops, int nstops) {
+static int build_format_strings(const struct StopCond *stops, int nstops,
+                                int stop_opcode) {
     g_num_br_lines = 0;
     g_total_tokens = 0;
     g_num_stop_tokens = 0;
+    g_opcode_stop_token = -1;
 
     // CPU register tokens
     int idx_pc = -1, idx_sp = -1, idx_af = -1, idx_bc = -1;
@@ -310,8 +314,10 @@ static int build_format_strings(const struct StopCond *stops, int nstops) {
         g_io_slots[i].output_index = idx;
     }
 
-    // Stop condition boolean tokens — appended as %($ADDR)=VAL% expressions.
-    // These evaluate to 0 or 1; the parser stops when any is non-zero.
+    // Stop condition boolean tokens — appended as expressions that evaluate
+    // to 0 or 1.  The parser stops when any is non-zero.
+
+    // Memory stop conditions: %($ADDR)=VAL%
     for (int i = 0; i < nstops && i < 16; i++) {
         char expr[32];
         if (stops[i].negate) {
@@ -325,6 +331,16 @@ static int build_format_strings(const struct StopCond *stops, int nstops) {
         if (idx >= 0) {
             g_stop_token_indices[g_num_stop_tokens++] = idx;
         }
+    }
+
+    // Opcode stop condition: %(PC)=XX% — true when opcode at PC matches.
+    // Checked per-instruction (not per-frame) since the opcode may only
+    // appear briefly in a tight loop.
+    if (stop_opcode >= 0) {
+        char expr[20];
+        snprintf(expr, sizeof(expr), "%%(PC)=%02X%%", stop_opcode);
+        int idx = br_append(expr);
+        if (idx >= 0) g_opcode_stop_token = idx;
     }
 
     // Assign output_index to each emitter
@@ -641,8 +657,8 @@ int main(int argc, char *argv[]) {
     int num_stop_conds = 0;
     unsigned char stop_serial_byte = 0;
     int stop_serial_active = 0;
-
     int stop_serial_count = 1;
+    int stop_opcode = -1;
 
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--rom") == 0 && i + 1 < argc) {
@@ -678,6 +694,8 @@ int main(int argc, char *argv[]) {
             reference_path = argv[++i];
         } else if (strcmp(argv[i], "--extra-frames") == 0 && i + 1 < argc) {
             extra_frames = atoi(argv[++i]);
+        } else if (strcmp(argv[i], "--stop-opcode") == 0 && i + 1 < argc) {
+            stop_opcode = (int)strtoul(argv[++i], NULL, 16);
         } else if (strcmp(argv[i], "--help") == 0) {
             print_usage(argv[0]); return 0;
         }
@@ -688,8 +706,8 @@ int main(int argc, char *argv[]) {
     }
 
     // Not yet implemented via BGB
-    (void)extra_frames;
     (void)stop_serial_byte; (void)stop_serial_active; (void)stop_serial_count;
+    (void)boot_rom_path; (void)model;
 
     // Determine adapter directory (where bgb.exe lives)
     char adapter_dir[4096];
@@ -751,7 +769,7 @@ int main(int argc, char *argv[]) {
     struct Profile prof = load_profile(profile_path);
     plan_emitters(&prof);
 
-    int ntokens = build_format_strings(stop_conds, num_stop_conds);
+    int ntokens = build_format_strings(stop_conds, num_stop_conds, stop_opcode);
     fprintf(stderr, "Profile: %s (%d fields, %d BGB tokens across %d line%s)\n",
             prof.name, prof.nfields, ntokens, g_num_br_lines,
             g_num_br_lines == 1 ? "" : "s");
@@ -889,6 +907,7 @@ int main(int argc, char *argv[]) {
     uint8_t prev_ly = 0;
     int lines_collected = 0;
     int frame_count = 0; // incremented at each vblank (LY 0→non-0→0 cycle)
+    int remaining_extra = -1; // -1 = not triggered, >=0 = countdown
 
     while (fgets(line, sizeof(line), fifo)) {
         // Identify which line this is by the prefix letter
@@ -952,22 +971,39 @@ int main(int argc, char *argv[]) {
         gbtrace_writer_finish_entry(writer);
         entry_count++;
 
+        // Per-instruction opcode stop check
+        if (remaining_extra < 0 && g_opcode_stop_token >= 0 &&
+            all_tokens[g_opcode_stop_token] != 0 && entry_count > 2) {
+            fprintf(stderr, "Opcode stop at entry %ld, running %d extra frame%s\n",
+                    entry_count, extra_frames, extra_frames == 1 ? "" : "s");
+            remaining_extra = extra_frames;
+            // If no extra frames, we need to reach the next frame boundary to stop
+            // (matching other adapters which stop at frame granularity)
+        }
+
         if (frame_boundary) {
+            // If in extra-frames countdown, decrement and maybe stop
+            if (remaining_extra >= 0) {
+                if (remaining_extra == 0) break;
+                remaining_extra--;
+            }
+
             // Check software stop conditions once per frame, matching the
             // per-frame cadence of other adapters.  This avoids false
             // triggers from uninitialised memory (BGB starts HRAM at 0xFF).
-            if (g_num_stop_tokens > 0) {
-                bool should_stop = false;
+            if (remaining_extra < 0 && g_num_stop_tokens > 0) {
                 for (int s = 0; s < g_num_stop_tokens; s++) {
                     int idx = g_stop_token_indices[s];
                     if (idx >= 0 && all_tokens[idx] != 0) {
-                        should_stop = true;
-                        fprintf(stderr, "Stop condition met at frame %d\n",
-                                frame_count);
+                        fprintf(stderr, "Stop condition met at frame %d, "
+                                "running %d extra frame%s\n",
+                                frame_count, extra_frames,
+                                extra_frames == 1 ? "" : "s");
+                        remaining_extra = extra_frames;
                         break;
                     }
                 }
-                if (should_stop) break;
+                if (remaining_extra == 0) break; // no extra frames
             }
 
             // Enforce frame limit
