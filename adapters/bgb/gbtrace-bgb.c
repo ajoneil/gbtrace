@@ -491,8 +491,13 @@ int main(int argc, char *argv[]) {
     }
 
     // Not yet implemented via BGB
-    (void)reference_path; (void)extra_frames;
+    (void)extra_frames;
     (void)stop_serial_byte; (void)stop_serial_active; (void)stop_serial_count;
+
+    if (reference_path) {
+        fprintf(stderr, "Error: --reference (screenshot matching) is not supported by the BGB adapter\n");
+        return 1;
+    }
 
     // Determine adapter directory (where bgb.exe lives)
     char adapter_dir[4096];
