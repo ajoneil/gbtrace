@@ -699,6 +699,7 @@ int main(int argc, char *argv[]) {
     long entry_count = 0;
     uint8_t prev_ly = 0;
     int lines_collected = 0;
+    int frame_count = 0; // incremented at each vblank (LY 0→non-0→0 cycle)
 
     while (fgets(line, sizeof(line), fifo)) {
         // Identify which line this is by the prefix letter
@@ -720,11 +721,14 @@ int main(int argc, char *argv[]) {
         if (lines_collected < g_num_br_lines) continue;
         lines_collected = 0;
 
-        // Check LY for frame boundary
+        // Check LY for frame boundary (vblank → new frame)
+        bool frame_boundary = false;
         if (ly_token_idx >= 0) {
             uint8_t ly_val = (uint8_t)all_tokens[ly_token_idx];
             if (ly_val == 0 && prev_ly != 0 && entry_count > 0) {
                 gbtrace_writer_mark_frame(writer);
+                frame_count++;
+                frame_boundary = true;
             }
             prev_ly = ly_val;
         }
@@ -759,17 +763,17 @@ int main(int argc, char *argv[]) {
         gbtrace_writer_finish_entry(writer);
         entry_count++;
 
-        // Check software stop conditions.  Skip the first few entries to
-        // avoid false triggers from uninitialised memory (BGB starts HRAM
-        // at 0xFF which can match --stop-when conditions immediately).
-        if (entry_count > 2 && g_num_stop_tokens > 0) {
+        // Check software stop conditions once per frame, matching the
+        // per-frame cadence of other adapters.  This avoids false triggers
+        // from uninitialised memory (BGB starts HRAM at 0xFF).
+        if (frame_boundary && g_num_stop_tokens > 0) {
             bool should_stop = false;
             for (int s = 0; s < g_num_stop_tokens; s++) {
                 int idx = g_stop_token_indices[s];
                 if (idx >= 0 && all_tokens[idx] != 0) {
                     should_stop = true;
-                    fprintf(stderr, "Stop condition met at entry %ld\n",
-                            entry_count);
+                    fprintf(stderr, "Stop condition met at frame %d\n",
+                            frame_count);
                     break;
                 }
             }
