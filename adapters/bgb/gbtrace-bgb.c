@@ -392,13 +392,13 @@ static void ensure_bgb(const char *adapter_dir) {
     if (stat(exe_path, &st) == 0) return; // already present
 
     fprintf(stderr, "Downloading BGB from %s ...\n", BGB_URL);
-    char cmd[4096];
+    char cmd[8192];
     snprintf(cmd, sizeof(cmd),
-        "cd \"%s\" && curl -fsSL -o bgb.zip '%s' && unzip -oq bgb.zip bgb.exe bgb.ini && rm -f bgb.zip",
+        "cd \"%s\" && curl -fsSL --retry 3 -o bgb.zip '%s' && unzip -oq bgb.zip bgb.exe bgb.ini && rm -f bgb.zip",
         adapter_dir, BGB_URL);
     int rc = system(cmd);
     if (rc != 0) {
-        fprintf(stderr, "Error: failed to download BGB\n");
+        fprintf(stderr, "Error: failed to download BGB (requires curl and unzip)\n");
         exit(1);
     }
     // Enable debug message file output in bgb.ini
@@ -519,7 +519,7 @@ int main(int argc, char *argv[]) {
     }
 
     // Not yet implemented via BGB
-    (void)reference_path; (void)max_frames; (void)extra_frames;
+    (void)reference_path; (void)extra_frames;
     (void)stop_serial_byte; (void)stop_serial_active; (void)stop_serial_count;
 
     // Determine adapter directory (where bgb.exe lives)
@@ -763,21 +763,29 @@ int main(int argc, char *argv[]) {
         gbtrace_writer_finish_entry(writer);
         entry_count++;
 
-        // Check software stop conditions once per frame, matching the
-        // per-frame cadence of other adapters.  This avoids false triggers
-        // from uninitialised memory (BGB starts HRAM at 0xFF).
-        if (frame_boundary && g_num_stop_tokens > 0) {
-            bool should_stop = false;
-            for (int s = 0; s < g_num_stop_tokens; s++) {
-                int idx = g_stop_token_indices[s];
-                if (idx >= 0 && all_tokens[idx] != 0) {
-                    should_stop = true;
-                    fprintf(stderr, "Stop condition met at frame %d\n",
-                            frame_count);
-                    break;
+        if (frame_boundary) {
+            // Check software stop conditions once per frame, matching the
+            // per-frame cadence of other adapters.  This avoids false
+            // triggers from uninitialised memory (BGB starts HRAM at 0xFF).
+            if (g_num_stop_tokens > 0) {
+                bool should_stop = false;
+                for (int s = 0; s < g_num_stop_tokens; s++) {
+                    int idx = g_stop_token_indices[s];
+                    if (idx >= 0 && all_tokens[idx] != 0) {
+                        should_stop = true;
+                        fprintf(stderr, "Stop condition met at frame %d\n",
+                                frame_count);
+                        break;
+                    }
                 }
+                if (should_stop) break;
             }
-            if (should_stop) break;
+
+            // Enforce frame limit
+            if (frame_count >= max_frames) {
+                fprintf(stderr, "Frame limit (%d) reached\n", max_frames);
+                break;
+            }
         }
     }
 

@@ -63,7 +63,7 @@ jobs:
         run: |
           sudo dpkg --add-architecture i386
           sudo apt-get update
-          sudo apt-get install -y wine xvfb
+          sudo apt-get install -y wine xvfb unzip
 
       # Download CLI from latest build
       - name: Download CLI
