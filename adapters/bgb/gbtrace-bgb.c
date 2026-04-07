@@ -380,34 +380,6 @@ static char *sha256_file(const char *path) {
     return result;
 }
 
-// ── BGB download ────────────────────────────────────────────────────
-
-static const char *BGB_URL = "https://bgb.bircd.org/bgb.zip";
-
-static void ensure_bgb(const char *adapter_dir) {
-    char exe_path[4096];
-    snprintf(exe_path, sizeof(exe_path), "%s/bgb.exe", adapter_dir);
-
-    struct stat st;
-    if (stat(exe_path, &st) == 0) return; // already present
-
-    fprintf(stderr, "Downloading BGB from %s ...\n", BGB_URL);
-    char cmd[8192];
-    snprintf(cmd, sizeof(cmd),
-        "cd \"%s\" && curl -fsSL --retry 3 -o bgb.zip '%s' && unzip -oq bgb.zip bgb.exe bgb.ini && rm -f bgb.zip",
-        adapter_dir, BGB_URL);
-    int rc = system(cmd);
-    if (rc != 0) {
-        fprintf(stderr, "Error: failed to download BGB (requires curl and unzip)\n");
-        exit(1);
-    }
-    // Enable debug message file output in bgb.ini
-    snprintf(cmd, sizeof(cmd),
-        "sed -i 's/DebugMsgFile=0/DebugMsgFile=1/' \"%s/bgb.ini\"",
-        adapter_dir);
-    system(cmd);
-}
-
 // ── Line parsing ────────────────────────────────────────────────────
 
 // Parse space-separated hex tokens from a BGB debug message line.
@@ -536,8 +508,16 @@ int main(int argc, char *argv[]) {
         }
     }
 
-    // Ensure BGB is downloaded
-    ensure_bgb(adapter_dir);
+    // Verify BGB is present (downloaded at build time by make)
+    {
+        char exe_path[4096];
+        snprintf(exe_path, sizeof(exe_path), "%s/bgb.exe", adapter_dir);
+        if (access(exe_path, F_OK) != 0) {
+            fprintf(stderr, "Error: bgb.exe not found in %s (run 'make' in the adapter directory)\n",
+                    adapter_dir);
+            return 1;
+        }
+    }
 
     // Load profile and plan emitters
     struct Profile prof = load_profile(profile_path);
