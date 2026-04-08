@@ -352,7 +352,7 @@ export class TestPicker extends LitElement {
     for (const suite of TEST_SUITES) {
       if (!suite.manifest) continue;
       try {
-        const resp = await fetch(suite.manifest);
+        const resp = await fetch(suite.manifest, { cache: 'no-cache' });
         if (resp.ok) {
           suite.tests = await resp.json();
           this.requestUpdate();
