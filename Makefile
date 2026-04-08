@@ -66,16 +66,10 @@ $(RULES_MK): scripts/gen-rules.py
 # ── Top-level targets ────────────────────────────────────────────────
 
 # Screenshot test reference files: .png (checked in) → .pix (generated)
-# Uses a shell loop to handle filenames with spaces.
+# Uses find to handle arbitrarily nested directories and filenames with spaces.
 .PHONY: pix-refs
 pix-refs: scripts/png-to-pix.py
-	@for png in test-suites/blargg/*.png test-suites/blargg/**/*.png test-suites/dmg-acid2/*.png \
-	            test-suites/gambatte/**/*.png test-suites/gambatte/**/**/*.png \
-	            test-suites/mealybug-tearoom/*.png \
-	            test-suites/age/*.png test-suites/bully/*.png test-suites/little-things/*.png \
-	            test-suites/mbc3-tester/*.png test-suites/scribbltests/*.png \
-	            test-suites/strikethrough/*.png test-suites/turtle-tests/*.png; do \
-		[ -f "$$png" ] || continue; \
+	@find test-suites -name '*.png' -print0 | while IFS= read -r -d '' png; do \
 		pix="$${png%.png}.pix"; \
 		if [ ! -f "$$pix" ] || [ "$$png" -nt "$$pix" ]; then \
 			python3 scripts/png-to-pix.py "$$png" "$$pix"; \
