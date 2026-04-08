@@ -46,6 +46,14 @@ export class AppShell extends LitElement {
       font-weight: 400;
       font-size: 0.8rem;
     }
+    .wip-badge {
+      font-size: 0.65rem;
+      color: var(--yellow);
+      border: 1px solid var(--yellow);
+      border-radius: 4px;
+      padding: 1px 6px;
+      white-space: nowrap;
+    }
     .gh-link {
       margin-left: auto;
       font-size: 0.8rem;
@@ -53,17 +61,6 @@ export class AppShell extends LitElement {
       text-decoration: none;
     }
     .gh-link:hover { color: var(--accent); }
-    .wip-banner {
-      font-size: 0.72rem;
-      color: var(--yellow);
-      border: 1px solid var(--yellow);
-      border-radius: 6px;
-      padding: 6px 12px;
-      background: rgba(210,153,34,0.06);
-      line-height: 1.5;
-      margin-bottom: 8px;
-    }
-    .wip-banner strong { color: var(--text); }
     test-picker {
       display: flex;
       justify-content: center;
@@ -237,15 +234,9 @@ export class AppShell extends LitElement {
       >
         <header>
           <h1 @click=${this._reset}>gbtrace <span>Game Boy Trace Viewer</span></h1>
+          <span class="wip-badge">Under development — trace collection and pass/fail detection may have bugs</span>
           <a href="https://github.com/ajoneil/gbtrace" class="gh-link" target="_blank">GitHub</a>
         </header>
-
-        <div class="wip-banner">
-          <strong>This tool is under active development.</strong>
-          Trace collection and pass/fail detection may have bugs.
-          If something looks wrong, it could be a gbtrace issue rather
-          than an emulator issue — please report it.
-        </div>
 
         ${this._suite
           ? this._renderWithRom()
