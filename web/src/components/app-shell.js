@@ -46,14 +46,17 @@ export class AppShell extends LitElement {
       font-weight: 400;
       font-size: 0.8rem;
     }
-    .wip-badge {
-      font-size: 0.65rem;
+    .wip-banner {
+      font-size: 0.72rem;
       color: var(--yellow);
       border: 1px solid var(--yellow);
-      border-radius: 4px;
-      padding: 1px 6px;
-      white-space: nowrap;
+      border-radius: 6px;
+      padding: 6px 12px;
+      background: rgba(210,153,34,0.06);
+      line-height: 1.5;
+      margin-bottom: 8px;
     }
+    .wip-banner strong { color: var(--text); }
     test-picker {
       display: flex;
       justify-content: center;
@@ -227,8 +230,15 @@ export class AppShell extends LitElement {
       >
         <header>
           <h1 @click=${this._reset}>gbtrace <span>Game Boy Trace Viewer</span></h1>
-          <span class="wip-badge">🚧 under construction 🏗️</span>
         </header>
+
+        <div class="wip-banner">
+          <strong>This tool is under active development.</strong>
+          Traces may contain inaccuracies due to emulator bugs, adapter limitations,
+          or incorrect pass/fail detection. Do not rely on this data as a reference
+          for emulator accuracy. When in doubt, cross-check against multiple emulators
+          or verify on real hardware.
+        </div>
 
         ${this._suite
           ? this._renderWithRom()
