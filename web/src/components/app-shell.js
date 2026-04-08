@@ -234,10 +234,9 @@ export class AppShell extends LitElement {
 
         <div class="wip-banner">
           <strong>This tool is under active development.</strong>
-          Traces may contain inaccuracies due to emulator bugs, adapter limitations,
-          or incorrect pass/fail detection. Do not rely on this data as a reference
-          for emulator accuracy. When in doubt, cross-check against multiple emulators
-          or verify on real hardware.
+          Trace collection and pass/fail detection may have bugs.
+          If something looks wrong, it could be a gbtrace issue rather
+          than an emulator issue — please report it.
         </div>
 
         ${this._suite
