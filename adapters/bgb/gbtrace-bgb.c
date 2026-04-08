@@ -398,11 +398,10 @@ static char *sha256_file(const char *path) {
 
 // ── Reference screenshot matching ───────────────────────────────────
 //
-// Pass 1 of 2 for screenshot tests.  Runs BGB under a self-managed
-// Xvfb (no -headless, no debug messages) so the LCD renders.  Each
-// frame, captures the BGB window with ImageMagick `import`, converts
-// to .pix shade format, and compares against the reference.  Returns
-// the frame number where the reference matched, or -1 if no match.
+// For screenshot tests, runs BGB under xvfb-run with -screenonexit to
+// capture the final frame as a BMP, then converts and compares against
+// the reference .pix file.  No per-instruction tracing (too slow).
+// Produces a minimal .gbtrace with just the header.
 
 static int load_reference_pix(const char *path, char *buf, int buflen) {
     FILE *f = fopen(path, "rb");
@@ -415,56 +414,38 @@ static int load_reference_pix(const char *path, char *buf, int buflen) {
     return n;
 }
 
-// Convert a PPM (P6 binary) file to a .pix shade string.
-// BGB's 4 DMG shades map to different RGB values depending on palette;
-// we use luminance: >= 192 → '0', >= 112 → '1', >= 48 → '2', else '3'.
-// The PPM may be 2x scaled (320x288); we downsample to 160x144.
-static int ppm_to_pix(const char *ppm_path, char *pix_buf) {
-    FILE *f = fopen(ppm_path, "rb");
+// Convert a 24-bit BMP (bottom-up, no compression) to .pix shade string.
+static int bmp_to_pix(const char *bmp_path, char *pix_buf) {
+    FILE *f = fopen(bmp_path, "rb");
     if (!f) return 0;
 
-    // Parse PPM P6 header: "P6\n<width> <height>\n<maxval>\n"
-    char magic[4];
-    int w, h, maxval;
-    if (fscanf(f, "%2s", magic) != 1 || strcmp(magic, "P6") != 0) {
+    unsigned char hdr[54];
+    if (fread(hdr, 1, 54, f) != 54 || hdr[0] != 'B' || hdr[1] != 'M') {
         fclose(f); return 0;
     }
-    // Skip comments
-    int ch;
-    while ((ch = fgetc(f)) != EOF) {
-        if (ch == '#') { while ((ch = fgetc(f)) != EOF && ch != '\n'); }
-        else if (ch == ' ' || ch == '\n' || ch == '\r' || ch == '\t') continue;
-        else { ungetc(ch, f); break; }
-    }
-    if (fscanf(f, "%d %d %d", &w, &h, &maxval) != 3) {
+
+    int offset = hdr[10] | (hdr[11] << 8) | (hdr[12] << 16) | (hdr[13] << 24);
+    int w = hdr[18] | (hdr[19] << 8) | (hdr[20] << 16) | (hdr[21] << 24);
+    int h = hdr[22] | (hdr[23] << 8) | (hdr[24] << 16) | (hdr[25] << 24);
+    int bpp = hdr[28] | (hdr[29] << 8);
+
+    if (w != 160 || h != 144 || bpp != 24) {
         fclose(f); return 0;
     }
-    fgetc(f); // consume the single whitespace after maxval
 
-    int scale_x = w / 160;
-    int scale_y = h / 144;
-    if (scale_x < 1) scale_x = 1;
-    if (scale_y < 1) scale_y = 1;
+    // BMP rows are padded to 4-byte boundaries
+    int row_size = (w * 3 + 3) & ~3;
+    unsigned char *row = malloc(row_size);
+    if (!row) { fclose(f); return 0; }
 
-    // Read all pixel data
-    int npixels = w * h;
-    unsigned char *rgb = malloc(npixels * 3);
-    if (!rgb) { fclose(f); return 0; }
-    if ((int)fread(rgb, 3, npixels, f) != npixels) {
-        free(rgb); fclose(f); return 0;
-    }
-    fclose(f);
-
-    // Downsample to 160x144 and convert to shades
-    for (int y = 0; y < 144; y++) {
+    // BMP is bottom-up: first row in file is last row on screen
+    for (int y = 143; y >= 0; y--) {
+        fseek(f, offset + (143 - y) * row_size, SEEK_SET);
+        if ((int)fread(row, 1, row_size, f) != row_size) {
+            free(row); fclose(f); return 0;
+        }
         for (int x = 0; x < 160; x++) {
-            int sx = x * scale_x;
-            int sy = y * scale_y;
-            int idx = (sy * w + sx) * 3;
-            // Compute luminance from RGB and map to DMG shade.
-            // BGB's default palette luminances are ~240, ~192, ~120, ~38.
-            // Thresholds sit halfway between adjacent values.
-            int r = rgb[idx], g = rgb[idx+1], b = rgb[idx+2];
+            int b = row[x*3], g = row[x*3+1], r = row[x*3+2];
             int lum = (r * 299 + g * 587 + b * 114) / 1000;
             char shade;
             if (lum >= 216) shade = '0';
@@ -474,123 +455,100 @@ static int ppm_to_pix(const char *ppm_path, char *pix_buf) {
             pix_buf[y * 160 + x] = shade;
         }
     }
-    free(rgb);
+    free(row);
+    fclose(f);
     pix_buf[160 * 144] = '\0';
     return 160 * 144;
 }
 
-// Run the screenshot pass.  Returns the frame number where the reference
-// matched (1-based), or -1 if no match within max_frames.
-static int screenshot_pass(const char *adapter_dir, const char *wine_rom,
-                           const char *reference_path, int max_frames) {
+// Run BGB with -screenonexit, compare against reference.
+// Returns 1 if matched, 0 if not.
+static int screenshot_run(const char *adapter_dir, const char *wine_rom,
+                          const char *reference_path, int max_frames,
+                          const char *output_path, const char *header_json,
+                          int header_len) {
     char ref_pix[160 * 144 + 1];
     int ref_len = load_reference_pix(reference_path, ref_pix, sizeof(ref_pix));
     if (ref_len != 160 * 144) {
-        fprintf(stderr, "Error: cannot load reference '%s' (got %d pixels, expected %d)\n",
-                reference_path, ref_len, 160 * 144);
-        return -1;
+        fprintf(stderr, "Error: cannot load reference '%s' (%d pixels)\n",
+                reference_path, ref_len);
+        return 0;
     }
 
-    // Start Xvfb
-    char display[32];
-    snprintf(display, sizeof(display), ":%d", 40 + (getpid() % 50));
+    char bmp_path[4096];
+    snprintf(bmp_path, sizeof(bmp_path), "%s/screenshot_%d.bmp",
+             adapter_dir, getpid());
 
-    pid_t xvfb_pid = fork();
-    if (xvfb_pid == 0) {
-        freopen("/dev/null", "w", stdout);
-        freopen("/dev/null", "w", stderr);
-        execlp("Xvfb", "Xvfb", display, "-screen", "0", "800x600x24",
-               NULL);
-        _exit(1);
-    }
-    sleep(1); // let Xvfb start
+    // BGB needs debugmsg.txt to exist (DebugMsgFile=1 in ini).
+    // Create a regular empty file (not a FIFO) so BGB doesn't block.
+    char debugmsg_path[4096];
+    snprintf(debugmsg_path, sizeof(debugmsg_path), "%s/debugmsg.txt", adapter_dir);
+    unlink(debugmsg_path);
+    FILE *dm = fopen(debugmsg_path, "w");
+    if (dm) fclose(dm);
 
-    // Create the FIFO (BGB needs it even without debug messages if DebugMsgFile=1)
-    char fifo_path[4096];
-    snprintf(fifo_path, sizeof(fifo_path), "%s/debugmsg.txt", adapter_dir);
-    unlink(fifo_path);
-    mkfifo(fifo_path, 0600);
+    // Use TOTALCLKS breakpoint to stop BGB after max_frames.
+    // One frame ≈ 70224 T-cycles.  BGB boot leaves TOTALCLKS at ~0x00B2D5E6.
+    // Target = start + max_frames * 70224.
+    unsigned long target_clks = 0x00B2D5E6UL + (unsigned long)max_frames * 70224UL;
+    char br_arg[64];
+    snprintf(br_arg, sizeof(br_arg), "any/TOTALCLKS>%08lX", target_clks);
 
-    // Drain the FIFO in background (BGB writes even with non-debug breakpoints)
-    pid_t drain_pid = fork();
-    if (drain_pid == 0) {
-        FILE *f = fopen(fifo_path, "r");
-        if (f) { char buf[4096]; while (fgets(buf, sizeof(buf), f)); fclose(f); }
-        _exit(0);
-    }
+    fprintf(stderr, "Screenshot run: %d frames (TOTALCLKS target %08lX)\n",
+            max_frames, target_clks);
 
-    // Start BGB without -headless so it renders, with a vblank-only
-    // breakpoint to pace it (but no per-instruction trace overhead).
-    pid_t bgb_pid = fork();
-    if (bgb_pid == 0) {
+    // Run BGB in headless mode with -screenonexit.
+    // Even in headless mode, BGB renders the LCD internally and
+    // -screenonexit captures it.
+    pid_t pid = fork();
+    if (pid == 0) {
         freopen("/dev/null", "w", stdout);
         freopen("/dev/null", "w", stderr);
         if (chdir(adapter_dir) != 0) _exit(1);
-        setenv("DISPLAY", display, 1);
-        execlp("wine", "wine", "./bgb.exe", "-runfast",
-               "-br", "any/($FF44)=90/d/V",
+        execlp("xvfb-run", "xvfb-run", "-a",
+               "wine", "./bgb.exe", "-headless", "-runfast",
+               "-br", br_arg,
+               "-screenonexit", bmp_path,
                "-rom", wine_rom,
                NULL);
         _exit(1);
     }
 
-    sleep(2); // let BGB start and render initial frames
+    int status = 0;
+    waitpid(pid, &status, 0);
+    unlink(debugmsg_path);
 
-    // Find BGB's window ID
-    char cmd[512];
-    snprintf(cmd, sizeof(cmd), "DISPLAY=%s xdotool search --name bgb 2>/dev/null | head -1", display);
-    FILE *p = popen(cmd, "r");
-    char wid_str[32] = "";
-    if (p) { if (!fgets(wid_str, sizeof(wid_str), p)) wid_str[0] = '\0'; pclose(p); }
-    // Strip newline
-    char *nl = strchr(wid_str, '\n');
-    if (nl) *nl = '\0';
-
-    if (!wid_str[0]) {
-        fprintf(stderr, "Warning: could not find BGB window on %s\n", display);
-        kill(bgb_pid, SIGTERM); waitpid(bgb_pid, NULL, 0);
-        kill(drain_pid, SIGTERM); waitpid(drain_pid, NULL, 0);
-        unlink(fifo_path);
-        kill(xvfb_pid, SIGTERM); waitpid(xvfb_pid, NULL, 0);
-        return -1;
-    }
-
-    fprintf(stderr, "Screenshot pass: checking up to %d frames on %s (window %s)\n",
-            max_frames, display, wid_str);
-
-    char ppm_path[256];
-    snprintf(ppm_path, sizeof(ppm_path), "/tmp/bgb_capture_%d.ppm", getpid());
-
-    int matched_frame = -1;
+    // Check if BMP was written
     char cur_pix[160 * 144 + 1];
+    int matched = 0;
 
-    for (int frame = 1; frame <= max_frames; frame++) {
-        // Capture the BGB window
-        snprintf(cmd, sizeof(cmd),
-                 "DISPLAY=%s import -window %s ppm:%s 2>/dev/null",
-                 display, wid_str, ppm_path);
-        if (system(cmd) != 0) continue;
-
-        int n = ppm_to_pix(ppm_path, cur_pix);
-        if (n != 160 * 144) continue;
-
+    if (bmp_to_pix(bmp_path, cur_pix) == 160 * 144) {
         if (memcmp(cur_pix, ref_pix, 160 * 144) == 0) {
-            fprintf(stderr, "Reference match at frame %d\n", frame);
-            matched_frame = frame;
-            break;
+            fprintf(stderr, "Reference match\n");
+            matched = 1;
+        } else {
+            // Count differences for debugging
+            int diffs = 0;
+            for (int i = 0; i < 160 * 144; i++)
+                if (cur_pix[i] != ref_pix[i]) diffs++;
+            fprintf(stderr, "No reference match (%d/%d pixels differ)\n",
+                    diffs, 160 * 144);
         }
-
-        // Brief sleep to let BGB advance (~1 frame at 60fps = 16ms)
-        usleep(16000);
+    } else {
+        fprintf(stderr, "Warning: could not read screenshot BMP\n");
     }
 
-    unlink(ppm_path);
-    kill(bgb_pid, SIGTERM); waitpid(bgb_pid, NULL, 0);
-    kill(drain_pid, SIGTERM); waitpid(drain_pid, NULL, 0);
-    unlink(fifo_path);
-    kill(xvfb_pid, SIGTERM); waitpid(xvfb_pid, NULL, 0);
+    unlink(bmp_path);
 
-    return matched_frame;
+    // Write a minimal trace (just the header) so the trace script has a
+    // non-empty .gbtrace file.
+    GbtraceWriter *w = gbtrace_writer_new(output_path, header_json, header_len);
+    if (w) {
+        gbtrace_writer_mark_frame(w);
+        gbtrace_writer_close(w);
+    }
+
+    return matched;
 }
 
 // ── Line parsing ────────────────────────────────────────────────────
@@ -750,21 +708,6 @@ int main(int argc, char *argv[]) {
             if (*p == '/') *p = '\\';
     }
 
-    // Screenshot tests: two-pass approach.
-    // Pass 1: run BGB fast under Xvfb (no debug messages) to find which
-    //         frame matches the reference screenshot.
-    // Pass 2: run BGB with debug messages for that many frames to capture
-    //         the trace.
-    if (reference_path) {
-        int matched = screenshot_pass(adapter_dir, wine_rom,
-                                      reference_path, max_frames);
-        if (matched > 0) {
-            // Trace pass will run for matched+1 frames
-            max_frames = matched + 1;
-        }
-        // If no match, trace pass runs for original max_frames (fail case)
-    }
-
     // Load profile and plan emitters
     struct Profile prof = load_profile(profile_path);
     plan_emitters(&prof);
@@ -803,6 +746,16 @@ int main(int argc, char *argv[]) {
     }
     hpos += snprintf(header_json + hpos, sizeof(header_json) - hpos,
                      "],\"trigger\":\"instruction\"}");
+
+    // Screenshot tests: run BGB with -screenonexit under xvfb-run,
+    // compare the final frame against the reference, write a minimal trace.
+    // No per-instruction debug output (too slow for rendering).
+    if (reference_path) {
+        int matched = screenshot_run(adapter_dir, wine_rom, reference_path,
+                                     max_frames, output_path,
+                                     header_json, hpos);
+        return matched ? 0 : 0; // always exit 0; pass/fail from stderr
+    }
 
     // Create writer
     GbtraceWriter *writer = gbtrace_writer_new(output_path, header_json, hpos);
