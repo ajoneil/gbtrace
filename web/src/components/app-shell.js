@@ -46,6 +46,13 @@ export class AppShell extends LitElement {
       font-weight: 400;
       font-size: 0.8rem;
     }
+    .gh-link {
+      margin-left: auto;
+      font-size: 0.8rem;
+      color: var(--text-muted);
+      text-decoration: none;
+    }
+    .gh-link:hover { color: var(--accent); }
     .wip-banner {
       font-size: 0.72rem;
       color: var(--yellow);
@@ -230,6 +237,7 @@ export class AppShell extends LitElement {
       >
         <header>
           <h1 @click=${this._reset}>gbtrace <span>Game Boy Trace Viewer</span></h1>
+          <a href="https://github.com/ajoneil/gbtrace" class="gh-link" target="_blank">GitHub</a>
         </header>
 
         <div class="wip-banner">
