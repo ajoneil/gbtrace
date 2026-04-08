@@ -64,7 +64,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        emulator: [gambatte, sameboy, mgba, gateboy, missingno, bgb]
+        emulator: [gambatte, sameboy, mgba, gateboy, missingno]
     steps:
       - uses: actions/checkout@v6
 
@@ -162,14 +162,6 @@ jobs:
           cargo build --release
           cp target/release/gbtrace-missingno .
 
-      - name: Install unzip (bgb)
-        if: matrix.emulator == 'bgb'
-        run: sudo apt-get install -y unzip
-
-      - name: Build bgb
-        if: matrix.emulator == 'bgb'
-        run: make -C adapters/bgb
-
       - name: Upload adapter
         uses: actions/upload-artifact@v6
         with:
@@ -178,6 +170,4 @@ jobs:
             adapters/${{ matrix.emulator }}/gbtrace-${{ matrix.emulator }}
             adapters/${{ matrix.emulator }}/SameBoy/build/lib/libsameboy.so
             adapters/${{ matrix.emulator }}/boot_roms/
-            adapters/${{ matrix.emulator }}/bgb.exe
-            adapters/${{ matrix.emulator }}/bgb.ini
           retention-days: 90

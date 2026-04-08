@@ -184,9 +184,9 @@ const TEST_SUITES = [
   },
 ];
 
-const EMULATORS = ['gateboy', 'missingno', 'gambatte', 'sameboy', 'mgba', 'bgb'];
+const EMULATORS = ['gateboy', 'missingno', 'gambatte', 'sameboy', 'mgba'];
 
-const EMU_SHORT = { gateboy: 'GB', missingno: 'MN', gambatte: 'Ga', sameboy: 'SB', mgba: 'mG', bgb: 'Bg' };
+const EMU_SHORT = { gateboy: 'GB', missingno: 'MN', gambatte: 'Ga', sameboy: 'SB', mgba: 'mG' };
 
 /** Known uppercase abbreviations in test names. */
 const ABBREVIATIONS = new Set([

@@ -465,9 +465,7 @@ static int bmp_to_pix(const char *bmp_path, char *pix_buf) {
 // Run BGB with -screenonexit, compare against reference.
 // Returns 1 if matched, 0 if not.
 static int screenshot_run(const char *adapter_dir, const char *wine_rom,
-                          const char *reference_path, int max_frames,
-                          const char *output_path, const char *header_json,
-                          int header_len) {
+                          const char *reference_path, int max_frames) {
     char ref_pix[160 * 144 + 1];
     int ref_len = load_reference_pix(reference_path, ref_pix, sizeof(ref_pix));
     if (ref_len != 160 * 144) {
@@ -544,15 +542,6 @@ static int screenshot_run(const char *adapter_dir, const char *wine_rom,
     }
 
     unlink(bmp_path);
-
-    // Write a minimal trace (just the header) so the trace script has a
-    // non-empty .gbtrace file.
-    GbtraceWriter *w = gbtrace_writer_new(output_path, header_json, header_len);
-    if (w) {
-        gbtrace_writer_mark_frame(w);
-        gbtrace_writer_close(w);
-    }
-
     return matched;
 }
 
@@ -752,14 +741,14 @@ int main(int argc, char *argv[]) {
     hpos += snprintf(header_json + hpos, sizeof(header_json) - hpos,
                      "],\"trigger\":\"instruction\"}");
 
-    // Screenshot tests: run BGB with -screenonexit under xvfb-run,
-    // compare the final frame against the reference, write a minimal trace.
-    // No per-instruction debug output (too slow for rendering).
+    // Screenshot tests: two passes.
+    // 1. Fast pass: run BGB headless with -screenonexit to compare against
+    //    the reference.  Reports "Reference match" to stderr if it matches.
+    // 2. Trace pass: run BGB headless with per-instruction debug messages
+    //    for the same frame count to capture the actual trace data.
     if (reference_path) {
-        int matched = screenshot_run(adapter_dir, wine_rom, reference_path,
-                                     max_frames, output_path,
-                                     header_json, hpos);
-        return matched ? 0 : 0; // always exit 0; pass/fail from stderr
+        screenshot_run(adapter_dir, wine_rom, reference_path, max_frames);
+        // Fall through to the normal trace pass with the same max_frames.
     }
 
     // Create writer

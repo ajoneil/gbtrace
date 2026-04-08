@@ -45,7 +45,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           SUITES=(gbmicrotest blargg mooneye gambatte-tests mealybug-tearoom dmg-acid2 age mooneye-wilbertpol samesuite scribbltests bully little-things mbc3-tester strikethrough turtle-tests)
-          EMUS=(gambatte sameboy mgba gateboy missingno bgb)
+          EMUS=(gambatte sameboy mgba gateboy missingno)
 
           mkdir -p _trace_artifacts
 

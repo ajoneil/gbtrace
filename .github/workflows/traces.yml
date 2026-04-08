@@ -13,10 +13,10 @@ on:
         type: choice
         options: [all, gbmicrotest, blargg, mooneye, gambatte-tests, mealybug-tearoom, dmg-acid2, age, mooneye-wilbertpol, samesuite, scribbltests, bully, little-things, mbc3-tester, strikethrough, turtle-tests]
       emulator:
-        description: "Emulator (all, gambatte, sameboy, mgba, gateboy, missingno, bgb)"
+        description: "Emulator (all, gambatte, sameboy, mgba, gateboy, missingno)"
         default: "all"
         type: choice
-        options: [all, gambatte, sameboy, mgba, gateboy, missingno, bgb]
+        options: [all, gambatte, sameboy, mgba, gateboy, missingno]
 
 concurrency:
   group: traces
@@ -33,7 +33,7 @@ jobs:
       - id: set
         run: |
           SUITES='["gbmicrotest","blargg","mooneye","gambatte-tests","mealybug-tearoom","dmg-acid2","age","mooneye-wilbertpol","samesuite","scribbltests","bully","little-things","mbc3-tester","strikethrough","turtle-tests"]'
-          EMUS='["gambatte","sameboy","mgba","gateboy","missingno","bgb"]'
+          EMUS='["gambatte","sameboy","mgba","gateboy","missingno"]'
 
           if [ "${{ inputs.suite }}" != "" ] && [ "${{ inputs.suite }}" != "all" ]; then
             SUITES='["${{ inputs.suite }}"]'
@@ -57,13 +57,6 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y python3 python3-pil
-
-      - name: Install Wine and Xvfb (bgb)
-        if: matrix.emulator == 'bgb'
-        run: |
-          sudo dpkg --add-architecture i386
-          sudo apt-get update
-          sudo apt-get install -y wine xvfb
 
       # Download CLI from latest build
       - name: Download CLI
