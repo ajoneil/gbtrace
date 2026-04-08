@@ -438,9 +438,10 @@ static int bmp_to_pix(const char *bmp_path, char *pix_buf) {
     unsigned char *row = malloc(row_size);
     if (!row) { fclose(f); return 0; }
 
-    // BMP is bottom-up: first row in file is last row on screen
-    for (int y = 143; y >= 0; y--) {
-        fseek(f, offset + (143 - y) * row_size, SEEK_SET);
+    // BMP is bottom-up: row 0 in file is the bottom of the screen (y=143)
+    for (int y = 0; y < 144; y++) {
+        int file_row = 143 - y;  // map screen row to file row
+        fseek(f, offset + file_row * row_size, SEEK_SET);
         if ((int)fread(row, 1, row_size, f) != row_size) {
             free(row); fclose(f); return 0;
         }
@@ -475,9 +476,13 @@ static int screenshot_run(const char *adapter_dir, const char *wine_rom,
         return 0;
     }
 
+    // BGB runs under Wine so paths must be relative to its cwd (adapter_dir)
+    // or use Wine's Z: drive.  Using a simple relative name since the child
+    // chdir's to adapter_dir.
+    char bmp_name[64];
+    snprintf(bmp_name, sizeof(bmp_name), "screenshot_%d.bmp", getpid());
     char bmp_path[4096];
-    snprintf(bmp_path, sizeof(bmp_path), "%s/screenshot_%d.bmp",
-             adapter_dir, getpid());
+    snprintf(bmp_path, sizeof(bmp_path), "%s/%s", adapter_dir, bmp_name);
 
     // BGB needs debugmsg.txt to exist (DebugMsgFile=1 in ini).
     // Create a regular empty file (not a FIFO) so BGB doesn't block.
@@ -508,7 +513,7 @@ static int screenshot_run(const char *adapter_dir, const char *wine_rom,
         execlp("xvfb-run", "xvfb-run", "-a",
                "wine", "./bgb.exe", "-headless", "-runfast",
                "-br", br_arg,
-               "-screenonexit", bmp_path,
+               "-screenonexit", bmp_name,
                "-rom", wine_rom,
                NULL);
         _exit(1);
