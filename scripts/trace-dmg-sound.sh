@@ -45,7 +45,7 @@ fi
     set +eo pipefail
     "$BIN" --rom "$ROM" --profile "$PROFILE" --output "$TRACE" \
         --frames "$MAX_FRAMES" \
-        --extra-frames 2 \
+        --extra-frames 60 \
         --stop-when A000!=80 \
         "${EXTRA_ARGS[@]}" \
         >/dev/null 2>"$stderr_file" </dev/null
