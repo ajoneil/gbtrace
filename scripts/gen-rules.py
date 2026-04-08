@@ -97,12 +97,14 @@ def main():
         'scripts/trace-mealybug-tearoom.sh',
     )
 
+    # GateBoy has no APU emulation — skip it for dmg_sound
+    dmg_sound_emus = [e for e in emus if e != 'gateboy']
     dmg_sound_stamps = gen_suite(
         'dmg-sound',
         'test-suites/blargg/dmg_sound',
         'test-suites/blargg/dmg_sound/profile.toml',
         '$(BLARGG_TRACE_DIR)',
-        emus,
+        dmg_sound_emus,
         'scripts/trace-dmg-sound.sh',
         name_base='test-suites/blargg',
     )

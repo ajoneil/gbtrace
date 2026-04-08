@@ -121,11 +121,13 @@ jobs:
               while IFS= read -r -d '' rom; do
                 run_parallel bash scripts/trace-blargg.sh "$BIN" "$rom" "$PROFILE" "$TRACE_DIR" "$ROM_DIR"
               done < <(find "$ROM_DIR" -name '*.gb' -not -path '*/dmg_sound/*' -print0 | sort -z)
-              # dmg_sound tests use their own profile
-              DMG_SOUND_PROFILE="test-suites/blargg/dmg_sound/profile.toml"
-              while IFS= read -r -d '' rom; do
-                run_parallel bash scripts/trace-dmg-sound.sh "$BIN" "$rom" "$DMG_SOUND_PROFILE" "$TRACE_DIR" "$ROM_DIR"
-              done < <(find "test-suites/blargg/dmg_sound" -name '*.gb' -print0 | sort -z)
+              # dmg_sound tests use their own profile (skip gateboy — no APU)
+              if [ "$EMU" != "gateboy" ]; then
+                DMG_SOUND_PROFILE="test-suites/blargg/dmg_sound/profile.toml"
+                while IFS= read -r -d '' rom; do
+                  run_parallel bash scripts/trace-dmg-sound.sh "$BIN" "$rom" "$DMG_SOUND_PROFILE" "$TRACE_DIR" "$ROM_DIR"
+                done < <(find "test-suites/blargg/dmg_sound" -name '*.gb' -print0 | sort -z)
+              fi
               ;;
             mooneye)
               PROFILE="test-suites/mooneye/profile.toml"
