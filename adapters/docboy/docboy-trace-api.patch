@@ -1,0 +1,85 @@
+diff --git a/src/docboy/docboy/debugger/backend.cpp b/src/docboy/docboy/debugger/backend.cpp
+index c654e00..396c4db 100644
+--- a/src/docboy/docboy/debugger/backend.cpp
++++ b/src/docboy/docboy/debugger/backend.cpp
+@@ -321,6 +321,11 @@ const std::map<std::string, DebugSymbol>& DebuggerBackend::get_symbols_by_name()
+ }
+ 
+ void DebuggerBackend::notify_tick(uint64_t tick) {
++    // Fire tick callback unconditionally (does not require a frontend).
++    if (tick_callback) {
++        tick_callback(tick);
++    }
++
+     if (!frontend) {
+         return;
+     }
+@@ -842,4 +847,32 @@ uint32_t DebuggerBackend::state_hash() const {
+     h = hash_combine(h, memory_hash);
+ 
+     return h;
+-}
+\ No newline at end of file
++}
++
++void DebuggerBackend::set_tick_callback(std::function<void(uint64_t)>&& callback) {
++    tick_callback = std::move(callback);
++}
++
++uint16_t DebuggerBackend::get_af() const {
++    return core.gb.cpu.af;
++}
++
++uint16_t DebuggerBackend::get_bc() const {
++    return core.gb.cpu.bc;
++}
++
++uint16_t DebuggerBackend::get_de() const {
++    return core.gb.cpu.de;
++}
++
++uint16_t DebuggerBackend::get_hl() const {
++    return core.gb.cpu.hl;
++}
++
++uint16_t DebuggerBackend::get_sp() const {
++    return core.gb.cpu.sp;
++}
++
++bool DebuggerBackend::get_ime() const {
++    return core.gb.cpu.ime == Cpu::ImeState::Enabled;
++}
+diff --git a/src/docboy/docboy/debugger/backend.h b/src/docboy/docboy/debugger/backend.h
+index eeec895..4e8a798 100644
+--- a/src/docboy/docboy/debugger/backend.h
++++ b/src/docboy/docboy/debugger/backend.h
+@@ -107,6 +107,19 @@ public:
+ 
+     const Core& get_core() const;
+ 
++    // Tick callback — called at every T-cycle, before debugger processing.
++    // Allows external tools (e.g. trace adapters) to capture state at T-cycle
++    // granularity without requiring a DebuggerFrontend.
++    void set_tick_callback(std::function<void(uint64_t)>&& callback);
++
++    // CPU register accessors — expose private Cpu state for external tools.
++    uint16_t get_af() const;
++    uint16_t get_bc() const;
++    uint16_t get_de() const;
++    uint16_t get_hl() const;
++    uint16_t get_sp() const;
++    bool get_ime() const;
++
+ private:
+     void clear();
+ 
+@@ -155,6 +168,7 @@ private:
+     uint32_t memory_hash {};
+ 
+     std::function<void()> on_reset_callback {};
++    std::function<void(uint64_t)> tick_callback {};
+ };
+ 
+-#endif // BACKEND_H
+\ No newline at end of file
++#endif // BACKEND_H

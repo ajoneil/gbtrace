@@ -17,3 +17,5 @@ adapters/sameboy/gbtrace-sameboy
 adapters/mgba/mgba/
 adapters/mgba/gbtrace-mgba
 adapters/mgba/gbtrace-mgba-dbg
+adapters/docboy/docboy/
+adapters/docboy/gbtrace-docboy
