@@ -64,7 +64,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        emulator: [gambatte, sameboy, mgba, gateboy, missingno]
+        emulator: [gambatte, sameboy, mgba, gateboy, missingno, docboy]
     steps:
       - uses: actions/checkout@v6
 
@@ -99,6 +99,7 @@ jobs:
             adapters/${{ matrix.emulator }}/mgba
             adapters/${{ matrix.emulator }}/metroboy
             adapters/${{ matrix.emulator }}/metrolib
+            adapters/${{ matrix.emulator }}/docboy
           key: upstream-${{ matrix.emulator }}-v1
 
       - name: Clone and build gambatte
@@ -161,6 +162,10 @@ jobs:
           cd adapters/missingno
           cargo build --release
           cp target/release/gbtrace-missingno .
+
+      - name: Clone and build docboy
+        if: matrix.emulator == 'docboy'
+        run: make -C adapters/docboy
 
       - name: Upload adapter
         uses: actions/upload-artifact@v6
