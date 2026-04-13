@@ -27,7 +27,7 @@ NAME="${ROM_REL//\//__}"
 BASENAME="$(basename "$ROM" .gb)"
 PIX_REF="$(dirname "$ROM")/${BASENAME}.pix"
 
-MAX_FRAMES=200
+MAX_FRAMES=500
 TMP="/tmp/gbtrace_mooneye_${NAME}_${ADAPTER}_$$"
 stderr_file="${TMP}.stderr"
 tmp_trace="${TMP}.gbtrace"
