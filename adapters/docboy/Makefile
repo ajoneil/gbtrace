@@ -51,7 +51,8 @@ $(DOCBOY_LIB): $(DOCBOY_DIR)/.patched
 		-DENABLE_AUDIO=ON \
 		-DENABLE_CGB=OFF \
 		-DENABLE_TWO_PLAYERS_MODE=OFF \
-		-DCMAKE_BUILD_TYPE=Release
+		-DCMAKE_BUILD_TYPE=Release \
+		-DSDL_UNIX_CONSOLE_BUILD=ON
 	cmake --build $(DOCBOY_BUILD) --target docboy extra -j$$(nproc)
 
 $(TARGET): gbtrace-docboy.cpp $(DOCBOY_LIB) $(FFI_LIB)
