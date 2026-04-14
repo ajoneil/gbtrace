@@ -184,7 +184,7 @@ const TEST_SUITES = [
   },
 ];
 
-const EMULATORS = ['gateboy', 'docboy', 'missingno', 'gambatte', 'sameboy', 'mgba'];
+const EMULATORS = ['gateboy', 'missingno', 'docboy', 'gambatte', 'sameboy', 'mgba'];
 
 const EMU_SHORT = { gateboy: 'GB', docboy: 'DB', missingno: 'MN', gambatte: 'Ga', sameboy: 'SB', mgba: 'mG' };
 

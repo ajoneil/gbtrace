@@ -17,6 +17,7 @@
 #include "docboy/gameboy/gameboy.h"
 #include "docboy/debugger/backend.h"
 #include "docboy/common/specs.h"
+#include "docboy/lcd/appearance.h"
 
 #include "gbtrace.h"
 
@@ -337,6 +338,14 @@ int main(int argc, char *argv[]) {
 
     // Init DocBoy (heap-allocated — GameBoy struct is too large for the stack)
     auto gb = std::make_unique<GameBoy>();
+
+    // Set DMG greyscale palette — DocBoy's default Appearance is zero-initialized
+    // (all black), which breaks screenshot comparison.
+    Appearance grey_palette;
+    grey_palette.default_color = 0xFFFF;
+    grey_palette.palette = {0xFFFF, 0xAD55, 0x52AA, 0x0000};
+    gb->lcd.set_appearance(grey_palette);
+
     Core core(*gb);
     core.load_rom(rom_path);
 
@@ -406,7 +415,26 @@ int main(int argc, char *argv[]) {
     uint8_t prev_ppu_mode = 0;
 
     while (frames < max_frames) {
-        core.cycle();
+        try {
+            core.cycle();
+        } catch (const std::runtime_error &) {
+            // DocBoy throws on undefined opcodes (e.g. 0xED used by wilbertpol
+            // tests as a stop signal). Treat as opcode stop if one is configured,
+            // otherwise stop immediately. Core state is invalid after this.
+            if (stop_opcode >= 0) {
+                stop_opcode_triggered = true;
+            }
+            stopped_early = true;
+            break;
+        }
+
+        // Check opcode stop per M-cycle (must catch it before PC moves on)
+        if (!stop_opcode_triggered && stop_opcode >= 0) {
+            uint8_t opval = debugger.read_memory(gb->cpu.pc);
+            if (opval == static_cast<uint8_t>(stop_opcode)) {
+                stop_opcode_triggered = true;
+            }
+        }
 
         // Detect VBlank edge (mode transitions to 1)
         uint8_t ppu_mode = gb->ppu.stat.mode;
@@ -445,7 +473,7 @@ int main(int argc, char *argv[]) {
                 continue;
             }
 
-            // Check stop conditions
+            // Check stop conditions (memory watches)
             for (const auto &cond : stop_conditions) {
                 uint8_t val = debugger.read_memory(cond.addr);
                 bool match = (val == cond.value);
@@ -461,18 +489,14 @@ int main(int argc, char *argv[]) {
                 break;
             }
 
-            // Check opcode stop
-            if (!stop_opcode_triggered && stop_opcode >= 0) {
-                uint8_t opval = debugger.read_memory(gb->cpu.pc);
-                if (opval == static_cast<uint8_t>(stop_opcode)) {
-                    stop_opcode_triggered = true;
-                    std::fprintf(stderr, "Opcode stop at frame %d, running %d extra frame%s\n",
-                                 frames, extra_frames, extra_frames == 1 ? "" : "s");
-                    remaining_extra = extra_frames;
-                    if (remaining_extra == 0) {
-                        stopped_early = true;
-                        break;
-                    }
+            // Start extra-frames countdown on opcode trigger
+            if (stop_opcode_triggered) {
+                std::fprintf(stderr, "Opcode stop at frame %d, running %d extra frame%s\n",
+                             frames, extra_frames, extra_frames == 1 ? "" : "s");
+                remaining_extra = extra_frames;
+                if (remaining_extra == 0) {
+                    stopped_early = true;
+                    break;
                 }
             }
         }
