@@ -10,7 +10,7 @@ import json
 import os
 import sys
 
-EMULATORS = ['gateboy', 'missingno', 'gambatte', 'sameboy', 'mgba']
+EMULATORS = ['gateboy', 'docboy', 'missingno', 'gambatte', 'sameboy', 'mgba']
 
 def generate_manifest(trace_dir, rom_dir):
     # Find all ROMs — use relative path with / replaced by __ as the key
