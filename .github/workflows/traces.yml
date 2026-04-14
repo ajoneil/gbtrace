@@ -13,10 +13,10 @@ on:
         type: choice
         options: [all, gbmicrotest, blargg, mooneye, gambatte-tests, mealybug-tearoom, dmg-acid2, age, mooneye-wilbertpol, samesuite, scribbltests, bully, little-things, mbc3-tester, strikethrough, turtle-tests]
       emulator:
-        description: "Emulator (all, gambatte, sameboy, mgba, gateboy, missingno, docboy)"
+        description: "Emulator (all, gambatte, sameboy, gateboy, missingno, docboy)"
         default: "all"
         type: choice
-        options: [all, gambatte, sameboy, mgba, gateboy, missingno, docboy]
+        options: [all, gambatte, sameboy, gateboy, missingno, docboy]
 
 concurrency:
   group: traces
@@ -33,7 +33,7 @@ jobs:
       - id: set
         run: |
           SUITES='["gbmicrotest","blargg","mooneye","gambatte-tests","mealybug-tearoom","dmg-acid2","age","mooneye-wilbertpol","samesuite","scribbltests","bully","little-things","mbc3-tester","strikethrough","turtle-tests"]'
-          EMUS='["gambatte","sameboy","mgba","gateboy","missingno","docboy"]'
+          EMUS='["gambatte","sameboy","gateboy","missingno","docboy"]'
 
           if [ "${{ inputs.suite }}" != "" ] && [ "${{ inputs.suite }}" != "all" ]; then
             SUITES='["${{ inputs.suite }}"]'

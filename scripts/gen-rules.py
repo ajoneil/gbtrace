@@ -48,7 +48,7 @@ def gen_suite(suite_name, rom_dir, profile, trace_dir, emus, script, exclude_dir
 
 
 def main():
-    emus = sys.argv[1].split(',') if len(sys.argv) > 1 else ['gambatte', 'sameboy', 'mgba', 'gateboy', 'missingno', 'docboy']
+    emus = sys.argv[1].split(',') if len(sys.argv) > 1 else ['gambatte', 'sameboy', 'gateboy', 'missingno', 'docboy']
     blargg_emus = emus
 
     micro_stamps = gen_suite(

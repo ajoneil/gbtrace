@@ -64,7 +64,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        emulator: [gambatte, sameboy, mgba, gateboy, missingno, docboy]
+        emulator: [gambatte, sameboy, gateboy, missingno, docboy]
     steps:
       - uses: actions/checkout@v6
 
