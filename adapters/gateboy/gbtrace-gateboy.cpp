@@ -816,10 +816,19 @@ int main(int argc, char *argv[]) {
     //   "instruction" — emit at instruction boundaries
 
     static constexpr int PHASES_PER_FRAME = 70224 * 2;  // 140448 phases (2 phases per T-cycle)
-    static constexpr int PHASES_PER_TCYCLE = 2;  // 8 phases per M-cycle, 2 phases per T-cycle
     int64_t total_phases = static_cast<int64_t>(max_frames) * PHASES_PER_FRAME;
 
     bool tcycle_mode = (profile.trigger == "tcycle");
+    // GateBoy advances in half-T-cycle phases. The master clock pin is
+    // (gb_phase_total_new & 1) — odd = HIGH (after rise), even = LOW (after
+    // fall). A rise+fall pair is one T-cycle by our convention; we sample
+    // state after the fall so each entry reflects fully-settled
+    // end-of-T-cycle state. The parity offset between fastboot and boot-ROM
+    // paths makes phase_count parity ambiguous, so we test gb_phase_total_new
+    // directly.
+    auto after_fall = [&]() -> bool {
+        return (gb.sys.gb_phase_total_new & 1) == 0;
+    };
 
 
     uint16_t prev_op_addr = gb.cpu.core.reg.op_addr;
@@ -844,8 +853,9 @@ int main(int argc, char *argv[]) {
             collect_pixel(gb);
         }
 
-        // Detect bus writes at T-cycle boundary
-        if ((g_has_vram || g_has_apu_write) && (phase_count % PHASES_PER_TCYCLE) == 0) {
+        // Detect bus writes at T-cycle boundary (after fall, same point we
+        // sample state in tcycle_mode).
+        if ((g_has_vram || g_has_apu_write) && after_fall()) {
             const auto &s = gb.gb_state;
             // APOV_CPU_WRp is high when the CPU is writing
             if (s.cpu_signals.APOV_CPU_WRp.state & BIT_DATA) {
@@ -866,7 +876,7 @@ int main(int argc, char *argv[]) {
 
         bool should_emit;
         if (tcycle_mode) {
-            should_emit = (phase_count % PHASES_PER_TCYCLE) == 0;
+            should_emit = after_fall();
         } else {
             should_emit = (reg.op_state == 0 && prev_op_state != 0)
                        || (reg.op_state == 0 && reg.op_addr != prev_op_addr);
