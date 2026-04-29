@@ -63,7 +63,11 @@ static uint8_t read_reg(const GateBoy& gb, unsigned short addr) {
                 mode = 0;  // hblank
             }
 
-            uint8_t lyc_match = s.int_ctrl.RUPO_LYC_MATCHn.state ? 0 : 1;
+            // RUPO is an active-low NorLatch; bit 0 of state holds the data
+            // bit, with BIT_DRIVEN/BIT_OLD/BIT_NEW flags set in the upper bits
+            // under CONFIG_RELEASE. Mask to bit 0 before inverting, otherwise
+            // the byte is always non-zero and bit 2 reads 0 forever.
+            uint8_t lyc_match = (s.int_ctrl.RUPO_LYC_MATCHn.state & 1) ? 0 : 1;
             uint8_t enables = bit_pack(s.reg_stat) & 0x0F;
 
             return 0x80 | (enables << 3) | (lyc_match << 2) | mode;
@@ -411,7 +415,7 @@ static const std::unordered_map<std::string, uint16_t(*)(const GateBoy &)> INTER
 static const std::unordered_map<std::string, bool(*)(const GateBoy &)> INTERNAL_BOOL_READERS = {
     // PPU
     {"rendering", [](const GateBoy &gb) -> bool { return !(gb.gb_state.XYMU_RENDERING_LATCHn.state & 1); }},
-    {"win_mode",  [](const GateBoy &gb) -> bool { return gb.gb_state.win_ctrl.PYNU_WIN_MODE_LATCHp.state != 0; }},
+    {"win_mode",  [](const GateBoy &gb) -> bool { return gb.gb_state.win_ctrl.PYNU_WIN_MODE_LATCHp.state & 1; }},
     // APU — channel active flags
     {"ch1_active", [](const GateBoy &gb) -> bool { return gb.gb_state.ch1.CYTO_CH1_ACTIVEp.state & 1; }},
     {"ch2_active", [](const GateBoy &gb) -> bool { return gb.gb_state.ch2.DANE_CH2_ACTIVEp.state & 1; }},
