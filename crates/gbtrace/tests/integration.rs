@@ -116,6 +116,7 @@ fn header_validation() {
         profile: "test".into(),
         fields: vec!["pc".into()],
         trigger: Trigger::Instruction,
+        extension_fields: std::collections::BTreeMap::new(),
         notes: String::new(),
     };
     assert!(h.validate().is_err());
@@ -131,6 +132,7 @@ fn header_validation() {
         profile: "test".into(),
         fields: vec![],
         trigger: Trigger::Instruction,
+        extension_fields: std::collections::BTreeMap::new(),
         notes: String::new(),
     };
     assert!(h.validate().is_err());

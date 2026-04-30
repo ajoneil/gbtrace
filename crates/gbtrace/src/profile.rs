@@ -1,6 +1,6 @@
 use crate::error::{Error, Result};
 use crate::header::Trigger;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::path::Path;
 
@@ -9,12 +9,17 @@ use std::path::Path;
 // ---------------------------------------------------------------------------
 
 /// Native type of a trace field.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum FieldType {
+    #[serde(rename = "u64")]
     UInt64,
+    #[serde(rename = "u16")]
     UInt16,
+    #[serde(rename = "u8")]
     UInt8,
+    #[serde(rename = "bool")]
     Bool,
+    #[serde(rename = "str")]
     Str,
 }
 
@@ -346,6 +351,23 @@ pub fn is_known_field(name: &str) -> bool {
 // ---------------------------------------------------------------------------
 // Profile
 // ---------------------------------------------------------------------------
+//
+// **Extension fields.** Adapters can surface emulator-internal debug state
+// without changing this catalogue by declaring extension fields in the
+// trace header. A profile opts into them via:
+//
+// ```toml
+// [fields.extensions]
+// missingno = ["pending_vector_resolve", "halt_bug"]
+// gateboy   = ["intf_latch", "halt_latch"]
+// ```
+//
+// Each adapter consumes its own entry at trace-creation time and ignores
+// others. The adapter is responsible for resolving each name to a
+// `header::ExtensionField` (declaring `field_type`, nullable, optional
+// description / source) and appending the name to `header.fields`.
+// Readers consult `TraceHeader::resolve_field_type` for typing — no need
+// for any consumer to recompile to handle new extensions.
 
 /// A capture profile loaded from a TOML file.
 #[derive(Debug, Clone)]
@@ -357,6 +379,13 @@ pub struct Profile {
     pub fields: Vec<String>,
     /// Memory address reads: maps field name -> address.
     pub memory: BTreeMap<String, u16>,
+    /// Adapter-defined extension fields. Maps adapter name (e.g.
+    /// "missingno", "gateboy") to a list of extension field names that
+    /// adapter should emit. The Profile carries names only; type/metadata
+    /// resolution happens in the adapter's own extension registry at
+    /// trace-creation time. Adapters silently skip entries keyed on
+    /// other adapters' names.
+    pub extensions: BTreeMap<String, Vec<String>>,
 }
 
 // ---------------------------------------------------------------------------
@@ -408,6 +437,12 @@ struct FieldGroupsToml {
     /// Arbitrary memory reads: name = "hex_address"
     #[serde(default)]
     memory: BTreeMap<String, String>,
+    /// Adapter-defined extension fields. TOML form:
+    /// `[fields.extensions]`
+    /// `missingno = ["pending_vector_resolve", "halt_bug"]`
+    /// Each adapter resolves its own list at trace-creation time.
+    #[serde(default)]
+    extensions: BTreeMap<String, Vec<String>>,
 }
 
 fn parse_hex_addr(s: &str) -> std::result::Result<u16, String> {
@@ -512,12 +547,32 @@ impl Profile {
             memory.insert(name.clone(), addr);
         }
 
+        // Extensions don't add anything to `fields` here — adapters merge
+        // their own extension list into `fields` at trace-creation time
+        // (when they know which adapter they are). Validate names don't
+        // shadow built-ins or memory entries.
+        for (adapter, ext_fields) in &raw.fields.extensions {
+            for name in ext_fields {
+                if is_known_field(name) {
+                    return Err(Error::Profile(format!(
+                        "extensions.{adapter}: '{name}' shadows a built-in field"
+                    )));
+                }
+                if memory.contains_key(name) {
+                    return Err(Error::Profile(format!(
+                        "extensions.{adapter}: '{name}' conflicts with a memory field"
+                    )));
+                }
+            }
+        }
+
         Ok(Profile {
             name: raw.profile.name,
             description: raw.profile.description,
             trigger: raw.profile.trigger,
             fields,
             memory,
+            extensions: raw.fields.extensions,
         })
     }
 }

@@ -26,6 +26,7 @@ fn test_header() -> TraceHeader {
         ],
         trigger: Trigger::Tcycle,
 
+        extension_fields: std::collections::BTreeMap::new(),
         notes: String::new(),
     }
 }
@@ -195,6 +196,7 @@ fn test_large_chunk_boundary() {
         fields: vec!["pc".into(), "a".into()],
         trigger: Trigger::Instruction,
 
+        extension_fields: std::collections::BTreeMap::new(),
         notes: String::new(),
     };
 
@@ -250,6 +252,7 @@ fn test_framebuffer() {
         fields: vec!["pc".into()],
         trigger: Trigger::Instruction,
 
+        extension_fields: std::collections::BTreeMap::new(),
         notes: String::new(),
     };
 
@@ -303,6 +306,95 @@ fn test_framebuffer() {
 }
 
 #[test]
+fn test_extension_fields_roundtrip() {
+    use gbtrace::header::ExtensionField;
+    use gbtrace::profile::FieldType;
+
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("ext.gbtrace");
+
+    // Header with one built-in field plus two adapter-defined extensions
+    // (a bool and a u8) — exercises type resolution and column setup
+    // through the writer for fields that aren't in the static catalogue.
+    let mut extension_fields = std::collections::BTreeMap::new();
+    extension_fields.insert(
+        "halt_bug".into(),
+        ExtensionField {
+            field_type: FieldType::Bool,
+            nullable: false,
+            description: Some("HALT bug flag".into()),
+            source: Some("missingno".into()),
+        },
+    );
+    extension_fields.insert(
+        "debug_counter".into(),
+        ExtensionField {
+            field_type: FieldType::UInt8,
+            nullable: false,
+            description: None,
+            source: Some("missingno".into()),
+        },
+    );
+
+    let header = TraceHeader {
+        _header: true,
+        format_version: "0.1.0".into(),
+        emulator: "test".into(),
+        emulator_version: "1.0".into(),
+        rom_sha256: "0000".into(),
+        model: "DMG".into(),
+        boot_rom: BootRom::Skip,
+        profile: "ext_test".into(),
+        fields: vec!["pc".into(), "halt_bug".into(), "debug_counter".into()],
+        trigger: Trigger::Instruction,
+        extension_fields,
+        notes: String::new(),
+    };
+
+    let groups = vec![
+        FieldGroup { name: "cpu".into(), fields: vec!["pc".into()] },
+        FieldGroup {
+            name: "ext".into(),
+            fields: vec!["halt_bug".into(), "debug_counter".into()],
+        },
+    ];
+
+    {
+        let mut w = GbtraceWriter::create(&path, &header, &groups).unwrap();
+        for i in 0..10u16 {
+            w.set_u16(0, 0x100 + i);
+            w.set_bool(1, i % 2 == 0);
+            w.set_u8(2, (i * 3) as u8);
+            w.finish_entry().unwrap();
+        }
+        w.finish().unwrap();
+    }
+
+    let data = std::fs::read(&path).unwrap();
+    let store = GbtraceStore::from_bytes(&data).unwrap();
+    assert_eq!(store.entry_count(), 10);
+
+    // Header round-tripped extension_fields metadata
+    let hdr = store.header();
+    assert_eq!(hdr.extension_fields.len(), 2);
+    let halt_bug_def = hdr.extension_fields.get("halt_bug").unwrap();
+    assert_eq!(halt_bug_def.field_type, FieldType::Bool);
+    assert_eq!(halt_bug_def.source.as_deref(), Some("missingno"));
+    let counter_def = hdr.extension_fields.get("debug_counter").unwrap();
+    assert_eq!(counter_def.field_type, FieldType::UInt8);
+
+    // Column data round-tripped with correct types
+    let pc_col = hdr.fields.iter().position(|f| f == "pc").unwrap();
+    let halt_col = hdr.fields.iter().position(|f| f == "halt_bug").unwrap();
+    let cnt_col = hdr.fields.iter().position(|f| f == "debug_counter").unwrap();
+    for i in 0..10usize {
+        assert_eq!(store.get_numeric(pc_col, i), 0x100 + i as u64);
+        assert_eq!(store.get_bool(halt_col, i), i % 2 == 0);
+        assert_eq!(store.get_numeric(cnt_col, i), (i * 3) as u64);
+    }
+}
+
+#[test]
 fn test_empty_trace() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("empty.gbtrace");
@@ -319,6 +411,7 @@ fn test_empty_trace() {
         fields: vec!["pc".into()],
         trigger: Trigger::Instruction,
 
+        extension_fields: std::collections::BTreeMap::new(),
         notes: String::new(),
     };
 

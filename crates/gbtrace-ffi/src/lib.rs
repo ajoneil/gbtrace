@@ -27,7 +27,7 @@ use std::slice;
 use gbtrace::format::write::GbtraceWriter as NativeWriter;
 use gbtrace::format::read::derive_groups_pub;
 use gbtrace::header::TraceHeader;
-use gbtrace::profile::{field_type, FieldType, Profile};
+use gbtrace::profile::{FieldType, Profile};
 
 // ---------------------------------------------------------------------------
 // Profile handle
@@ -218,7 +218,9 @@ pub unsafe extern "C" fn gbtrace_writer_new(
 
     let groups = derive_groups_pub(&header.fields);
     let field_names = header.fields.clone();
-    let field_types: Vec<FieldType> = field_names.iter().map(|n| field_type(n)).collect();
+    let field_types: Vec<FieldType> = field_names.iter()
+        .map(|n| header.resolve_field_type(n))
+        .collect();
 
     let writer = match NativeWriter::create(path_str, &header, &groups) {
         Ok(w) => w,

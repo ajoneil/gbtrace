@@ -27,7 +27,7 @@ use arrow::record_batch::RecordBatch;
 
 use crate::error::{Error, Result};
 use crate::header::TraceHeader;
-use crate::profile::{field_type, field_nullable, field_dictionary, FieldType};
+use crate::profile::{field_dictionary, FieldType};
 
 use super::*;
 
@@ -194,7 +194,9 @@ impl GbtraceWriter {
 
         let columns: Vec<ColBuf> = header.fields.iter()
             .map(|name| {
-                let ft = field_type(name);
+                let ft = header.resolve_field_type(name);
+                // Extension fields don't participate in dictionary encoding;
+                // built-in fields fall through to the static catalogue.
                 let dict = field_dictionary(name);
                 ColBuf::new(ft, dict, DEFAULT_CHUNK_SIZE)
             })
@@ -296,7 +298,8 @@ impl GbtraceWriter {
             for &ci in group_cols {
                 let name = &self.header.fields[ci];
                 let array = self.columns[ci].finish();
-                let field = Field::new(name, array.data_type().clone(), field_nullable(name));
+                let nullable = self.header.resolve_field_nullable(name);
+                let field = Field::new(name, array.data_type().clone(), nullable);
                 fields.push(field);
                 arrays.push(array);
             }
@@ -353,7 +356,7 @@ impl GbtraceWriter {
         // Reset columns for next chunk
         self.columns = self.header.fields.iter()
             .map(|name| {
-                let ft = field_type(name);
+                let ft = self.header.resolve_field_type(name);
                 let dict = field_dictionary(name);
                 ColBuf::new(ft, dict, self.chunk_size)
             })

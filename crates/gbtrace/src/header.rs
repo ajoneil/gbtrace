@@ -1,4 +1,7 @@
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
+
+use crate::profile::FieldType;
 
 /// How the boot ROM was handled for this trace.
 ///
@@ -71,6 +74,29 @@ pub enum Trigger {
     Custom,
 }
 
+/// Adapter-defined field with its type metadata, declared in the trace
+/// header. Used for non-standard fields (emulator-internal debug state)
+/// that aren't part of the built-in field catalogue. Readers consult
+/// `TraceHeader::extension_fields` to resolve types for these names.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ExtensionField {
+    /// Native type of the field's value.
+    #[serde(rename = "type")]
+    pub field_type: FieldType,
+    /// Whether the column is nullable.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub nullable: bool,
+    /// Human-readable description (what the field captures).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    /// Emulator that defined the field (e.g. "missingno"). Allows
+    /// downstream tooling to attribute extension semantics.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<String>,
+}
+
+fn is_false(b: &bool) -> bool { !b }
+
 /// The header line of a `.gbtrace` file.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TraceHeader {
@@ -104,6 +130,14 @@ pub struct TraceHeader {
     /// When entries are emitted.
     pub trigger: Trigger,
 
+    /// Adapter-defined extension fields. Maps field name → type metadata
+    /// for fields that aren't in the built-in catalogue. Adapters declare
+    /// these at trace-creation time so the writer / reader can construct
+    /// appropriate column buffers and a downstream consumer can resolve
+    /// types without having to know about adapter-internal fields.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub extension_fields: BTreeMap<String, ExtensionField>,
+
     /// Optional freeform notes.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub notes: String,
@@ -122,6 +156,40 @@ impl TraceHeader {
                 "fields must not be empty".into(),
             ));
         }
+        // Reject extension fields that shadow built-in field names —
+        // type resolution would be ambiguous (the built-in catalogue and
+        // the header would each claim a type, with no clear winner).
+        for name in self.extension_fields.keys() {
+            if crate::profile::is_known_field(name) {
+                return Err(crate::error::Error::InvalidHeader(format!(
+                    "extension field '{name}' shadows a built-in field"
+                )));
+            }
+        }
         Ok(())
+    }
+
+    /// Resolve a field's type — built-in fields use the static catalogue;
+    /// extension fields use `extension_fields`; unknown names fall back
+    /// to `UInt8`.
+    pub fn resolve_field_type(&self, name: &str) -> FieldType {
+        if let Some(def) = crate::profile::lookup_field(name) {
+            return def.field_type;
+        }
+        if let Some(ext) = self.extension_fields.get(name) {
+            return ext.field_type;
+        }
+        FieldType::UInt8
+    }
+
+    /// Resolve a field's nullability.
+    pub fn resolve_field_nullable(&self, name: &str) -> bool {
+        if let Some(def) = crate::profile::lookup_field(name) {
+            return def.nullable;
+        }
+        if let Some(ext) = self.extension_fields.get(name) {
+            return ext.nullable;
+        }
+        false
     }
 }
