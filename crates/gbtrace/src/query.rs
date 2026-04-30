@@ -60,6 +60,16 @@ pub enum Condition {
     /// CPU flag transitions to clear (was set, now clear). Requires `f` field.
     FlagBecomesClear(u8),
 
+    /// Bitwise-AND test: `(field & mask) != 0`. Generalises per-bit
+    /// queries; e.g., `if_ & 0x02` matches whenever the STAT IRQ bit is
+    /// set, irrespective of other IF bits.
+    FieldBitMask { field: String, mask: u64 },
+
+    /// Bitwise-AND equality test: `(field & mask) == value`. E.g.,
+    /// `stat & 0x03 = 1` matches the VBlank PPU mode robustly to other
+    /// STAT bits.
+    FieldBitMaskEquals { field: String, mask: u64, value: u64 },
+
     // --- Compound ---
     /// All sub-conditions must match.
     All(Vec<Condition>),
@@ -74,7 +84,9 @@ impl Condition {
         match self {
             Condition::FieldEquals { .. }
             | Condition::FlagSet(_)
-            | Condition::FlagClear(_) => false,
+            | Condition::FlagClear(_)
+            | Condition::FieldBitMask { .. }
+            | Condition::FieldBitMaskEquals { .. } => false,
             Condition::FieldChanges { .. }
             | Condition::FieldChangesTo { .. }
             | Condition::FieldChangesFrom { .. }
@@ -199,6 +211,14 @@ fn eval_condition(cond: &Condition, entry: &TraceEntry, prev: Option<&TraceEntry
 
         Condition::FlagBecomesClear(bit) => {
             bit_transitions(entry, prev, "f", *bit, true, false)
+        }
+
+        Condition::FieldBitMask { field, mask } => {
+            entry.get(field).and_then(|v| v.as_u64()).map_or(false, |n| (n & mask) != 0)
+        }
+
+        Condition::FieldBitMaskEquals { field, mask, value } => {
+            entry.get(field).and_then(|v| v.as_u64()).map_or(false, |n| (n & mask) == *value)
         }
 
         Condition::All(cs) => cs.iter().all(|c| eval_condition(c, entry, prev)),
@@ -355,6 +375,31 @@ pub fn parse_condition(s: &str) -> Result<Condition, String> {
             field: parts[0].trim().to_string(),
             value: parts[1].trim().to_string(),
         });
+    }
+
+    // Bitwise-AND forms: must be checked BEFORE plain `=` so that
+    // `field & mask = value` is parsed as FieldBitMaskEquals, not as
+    // FieldEquals on the literal `field & mask` field name.
+    if let Some(amp) = s.find('&') {
+        let field = s[..amp].trim().to_string();
+        let rest = s[amp + 1..].trim();
+        if field.is_empty() {
+            return Err(format!("invalid bitmask condition '{s}': field must be non-empty"));
+        }
+        // `field & mask = value`
+        if let Some(eq) = rest.find('=') {
+            let mask_str = rest[..eq].trim();
+            let value_str = rest[eq + 1..].trim();
+            let mask = parse_number(mask_str)
+                .ok_or_else(|| format!("invalid mask in '{s}': '{mask_str}' is not a number"))?;
+            let value = parse_number(value_str)
+                .ok_or_else(|| format!("invalid value in '{s}': '{value_str}' is not a number"))?;
+            return Ok(Condition::FieldBitMaskEquals { field, mask, value });
+        }
+        // `field & mask`
+        let mask = parse_number(rest)
+            .ok_or_else(|| format!("invalid mask in '{s}': '{rest}' is not a number"))?;
+        return Ok(Condition::FieldBitMask { field, mask });
     }
 
     // field=value

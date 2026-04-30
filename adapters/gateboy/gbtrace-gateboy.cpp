@@ -423,6 +423,28 @@ static const std::unordered_map<std::string, bool(*)(const GateBoy &)> INTERNAL_
     {"ch4_active", [](const GateBoy &gb) -> bool { return gb.gb_state.ch4.GENA_CH4_ACTIVEp.state & 1; }},
     // CPU — halted state: HALT instruction (0x76) in idle loop (op_state >= 1)
     {"halted", [](const GateBoy &gb) -> bool { return gb.cpu.core.reg.op_next == 0x76 && gb.cpu.core.reg.op_state >= 1; }},
+    // CPU interrupt-dispatch DFFs (PPU spec §13.2). MetroBoy's CPU is
+    // behavioural at this layer — IF/IE are gate-level DFFs but the
+    // dispatch state is computed via cpu.core.reg.{intf_latch,halt_latch,ime}.
+    // We surface the equivalent values; semantics match the spec roles.
+    {"irq_pending", [](const GateBoy &gb) -> bool {
+        // Combinational `(IF & IE) != 0` over the 5 active IRQ bits.
+        return ((bit_pack(gb.gb_state.reg_if) & bit_pack(gb.gb_state.reg_ie)) & 0x1F) != 0;
+    }},
+    {"dispatch_active", [](const GateBoy &gb) -> bool {
+        // Running-CPU dispatch decision (zacw.q on hardware). MetroBoy
+        // computes this combinationally at the dispatch tick; sampling
+        // after-fall reflects the captured state for that M-cycle.
+        return ((bit_pack(gb.gb_state.reg_ie) & gb.cpu.core.reg.intf_latch) & 0x1F) != 0
+            && gb.cpu.core.reg.ime;
+    }},
+    {"irq_latched", [](const GateBoy &gb) -> bool {
+        // CLK9-cadence captured `(IF & IE) != 0` (yoii.q / g42.q on hardware).
+        // MetroBoy's halt_latch is set per-phase from gate-level reg_if and
+        // cleared at M-cycle boundaries; non-zero indicates an unmasked IRQ
+        // is currently held by the HALT-release latch.
+        return (bit_pack(gb.gb_state.reg_ie) & gb.cpu.core.reg.halt_latch) != 0;
+    }},
 };
 
 static void build_emitters(const Profile &prof) {

@@ -264,6 +264,15 @@ pub static INTERRUPT: SubsystemDef = SubsystemDef {
             field!("if_", u8),
             field!("ie", u8),
         ]),
+        // CPU interrupt-dispatch DFFs from PPU spec §13.2. Names are the
+        // spec's semantic handles. `dispatch_trigger` (combinational
+        // pulse) and `ime_pending` (EI delay SR latch) are deferred —
+        // their value is sub-M-cycle and adapters' modeling differs.
+        (Layer::Internal, &[
+            field!("irq_pending", bool),
+            field!("dispatch_active", bool),
+            field!("irq_latched", bool),
+        ]),
     ],
 };
 
