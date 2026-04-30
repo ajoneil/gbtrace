@@ -392,6 +392,25 @@ fn test_extension_fields_roundtrip() {
         assert_eq!(store.get_bool(halt_col, i), i % 2 == 0);
         assert_eq!(store.get_numeric(cnt_col, i), (i * 3) as u64);
     }
+
+    // Query path must type-route Bool extension fields. Before the fix,
+    // `halt_bug=1` ran get_numeric() on a Bool column and returned 0 for
+    // every row — zero matches.
+    let matches_true = store.query_range("halt_bug=1", 0, 10).unwrap();
+    let expected_true: Vec<u32> = (0..10u32).filter(|i| i % 2 == 0).collect();
+    assert_eq!(matches_true, expected_true);
+
+    let matches_true_word = store.query_range("halt_bug=true", 0, 10).unwrap();
+    assert_eq!(matches_true_word, expected_true);
+
+    let matches_false = store.query_range("halt_bug=0", 0, 10).unwrap();
+    let expected_false: Vec<u32> = (0..10u32).filter(|i| i % 2 != 0).collect();
+    assert_eq!(matches_false, expected_false);
+
+    // Transition queries must also use Bool reads — all rows except 0 are
+    // transitions in this trace (alternating true/false).
+    let changes = store.query_range("halt_bug changes", 0, 10).unwrap();
+    assert_eq!(changes, (1..10u32).collect::<Vec<_>>());
 }
 
 #[test]

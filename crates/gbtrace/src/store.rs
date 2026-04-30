@@ -77,18 +77,30 @@ pub trait TraceStore {
     /// Default implementation handles stateless conditions via get_numeric/get_str.
     fn eval_condition_trait(&self, cond: &crate::query::Condition, row: usize) -> bool {
         use crate::query::Condition;
+        use crate::profile::FieldType;
         match cond {
             Condition::FieldEquals { field, value } => {
                 if let Some(col) = self.field_col(field) {
-                    let v = self.get_numeric(col, row);
-                    // Parse the condition value: supports 0x prefix (hex),
-                    // bare hex, and decimal
-                    if let Some(target) = parse_query_value(value) {
-                        v == target
-                    } else {
-                        // Fall back to string comparison for non-numeric fields
-                        let s = self.get_str(col, row);
-                        s == *value
+                    match self.header().resolve_field_type(field) {
+                        FieldType::Bool => {
+                            if let Some(target) = parse_query_bool(value) {
+                                self.get_bool(col, row) == target
+                            } else {
+                                false
+                            }
+                        }
+                        FieldType::Str => {
+                            self.get_str(col, row) == *value
+                        }
+                        _ => {
+                            let v = self.get_numeric(col, row);
+                            if let Some(target) = parse_query_value(value) {
+                                v == target
+                            } else {
+                                let s = self.get_str(col, row);
+                                s == *value
+                            }
+                        }
                     }
                 } else {
                     false
@@ -97,7 +109,17 @@ pub trait TraceStore {
             Condition::FieldChanges { field } => {
                 if row == 0 { return false; }
                 if let Some(col) = self.field_col(field) {
-                    self.get_numeric(col, row) != self.get_numeric(col, row - 1)
+                    match self.header().resolve_field_type(field) {
+                        FieldType::Bool => {
+                            self.get_bool(col, row) != self.get_bool(col, row - 1)
+                        }
+                        FieldType::Str => {
+                            self.get_str(col, row) != self.get_str(col, row - 1)
+                        }
+                        _ => {
+                            self.get_numeric(col, row) != self.get_numeric(col, row - 1)
+                        }
+                    }
                 } else {
                     false
                 }
@@ -105,13 +127,28 @@ pub trait TraceStore {
             Condition::FieldChangesTo { field, value } => {
                 if row == 0 { return false; }
                 if let Some(col) = self.field_col(field) {
-                    let cur = self.get_numeric(col, row);
-                    let prev = self.get_numeric(col, row - 1);
-                    if cur == prev { return false; }
-                    if let Some(target) = parse_query_value(value) {
-                        cur == target
-                    } else {
-                        false
+                    match self.header().resolve_field_type(field) {
+                        FieldType::Bool => {
+                            let target = match parse_query_bool(value) { Some(t) => t, None => return false };
+                            let cur = self.get_bool(col, row);
+                            let prev = self.get_bool(col, row - 1);
+                            cur != prev && cur == target
+                        }
+                        FieldType::Str => {
+                            let cur = self.get_str(col, row);
+                            let prev = self.get_str(col, row - 1);
+                            cur != prev && cur == *value
+                        }
+                        _ => {
+                            let cur = self.get_numeric(col, row);
+                            let prev = self.get_numeric(col, row - 1);
+                            if cur == prev { return false; }
+                            if let Some(target) = parse_query_value(value) {
+                                cur == target
+                            } else {
+                                false
+                            }
+                        }
                     }
                 } else {
                     false
@@ -120,13 +157,28 @@ pub trait TraceStore {
             Condition::FieldChangesFrom { field, value } => {
                 if row == 0 { return false; }
                 if let Some(col) = self.field_col(field) {
-                    let cur = self.get_numeric(col, row);
-                    let prev = self.get_numeric(col, row - 1);
-                    if cur == prev { return false; }
-                    if let Some(target) = parse_query_value(value) {
-                        prev == target
-                    } else {
-                        false
+                    match self.header().resolve_field_type(field) {
+                        FieldType::Bool => {
+                            let target = match parse_query_bool(value) { Some(t) => t, None => return false };
+                            let cur = self.get_bool(col, row);
+                            let prev = self.get_bool(col, row - 1);
+                            cur != prev && prev == target
+                        }
+                        FieldType::Str => {
+                            let cur = self.get_str(col, row);
+                            let prev = self.get_str(col, row - 1);
+                            cur != prev && prev == *value
+                        }
+                        _ => {
+                            let cur = self.get_numeric(col, row);
+                            let prev = self.get_numeric(col, row - 1);
+                            if cur == prev { return false; }
+                            if let Some(target) = parse_query_value(value) {
+                                prev == target
+                            } else {
+                                false
+                            }
+                        }
                     }
                 } else {
                     false
@@ -180,6 +232,16 @@ pub trait TraceStore {
         }
 
         Ok(out)
+    }
+}
+
+/// Parse a query value as a boolean. Accepts `true`/`false` (case-insensitive)
+/// and `0`/`1`.
+fn parse_query_bool(s: &str) -> Option<bool> {
+    match s.trim().to_ascii_lowercase().as_str() {
+        "true" | "1" => Some(true),
+        "false" | "0" => Some(false),
+        _ => None,
     }
 }
 

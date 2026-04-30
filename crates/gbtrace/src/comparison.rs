@@ -11,7 +11,7 @@ use arrow::array::types::UInt8Type;
 
 use crate::store::{ColumnSegment, TraceStore};
 use crate::error::{Error, Result};
-use crate::profile::{field_type, FieldType};
+use crate::profile::FieldType;
 
 /// A comparison view over two trace stores.
 pub struct TraceComparison<'a> {
@@ -118,7 +118,7 @@ impl<'a> TraceComparison<'a> {
             (Some(ca), Some(cb)) => {
                 let row_a = self.map_a[aligned_idx];
                 let row_b = self.map_b[aligned_idx];
-                let ft = field_type(field);
+                let ft = self.store_a.header().resolve_field_type(field);
                 match ft {
                     FieldType::Bool => {
                         self.store_a.get_bool(ca, row_a) != self.store_b.get_bool(cb, row_b)
@@ -410,7 +410,7 @@ fn scalar_diff_count_mapped(
 ) -> usize {
     let col_a = match store_a.field_col(field) { Some(c) => c, None => return 0 };
     let col_b = match store_b.field_col(field) { Some(c) => c, None => return 0 };
-    let ft = field_type(field);
+    let ft = store_a.header().resolve_field_type(field);
 
     map_a.iter().zip(map_b).filter(|(&ra, &rb)| {
         match ft {
@@ -432,7 +432,7 @@ fn scalar_diff_count(
 ) -> usize {
     let col_a = match store_a.field_col(field) { Some(c) => c, None => return 0 };
     let col_b = match store_b.field_col(field) { Some(c) => c, None => return 0 };
-    let ft = field_type(field);
+    let ft = store_a.header().resolve_field_type(field);
 
     (0..len).filter(|&i| {
         let ra = start_a + i;

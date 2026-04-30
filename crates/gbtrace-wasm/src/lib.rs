@@ -606,7 +606,7 @@ impl TraceStore {
                 continue;
             }
 
-            let ft = gbtrace::profile::field_type(field_name);
+            let ft = store.header().resolve_field_type(field_name);
             let val = match ft {
                 FieldType::Bool => JsField::Bool(store.get_bool(col_idx, orig_row)),
                 FieldType::Str => {

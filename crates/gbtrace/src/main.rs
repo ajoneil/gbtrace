@@ -305,7 +305,7 @@ fn convert_to_gbtrace(
     header: &TraceHeader,
 ) -> i32 {
     use gbtrace::format::write::GbtraceWriter;
-    use gbtrace::profile::{field_type, field_nullable, FieldType};
+    use gbtrace::profile::FieldType;
 
     // Derive field groups from the header
     let groups = gbtrace::format::read::derive_groups_pub(&header.fields);
@@ -326,8 +326,8 @@ fn convert_to_gbtrace(
                 // Set all field values from the entry
                 for (col, name) in header.fields.iter().enumerate() {
                     let val = entry.get(name);
-                    let ft = field_type(name);
-                    let nullable = field_nullable(name);
+                    let ft = header.resolve_field_type(name);
+                    let nullable = header.resolve_field_nullable(name);
 
                     if nullable && val.is_none() {
                         writer.set_null(col);
@@ -525,13 +525,14 @@ fn print_store_entry(
     fields: &[String],
     field_filter: Option<&[String]>,
 ) {
-    use gbtrace::profile::{field_type, FieldType};
+    use gbtrace::profile::FieldType;
+    let header = store.header();
     for (col, name) in fields.iter().enumerate() {
         if let Some(filter) = field_filter {
             if !filter.iter().any(|f| f == name) { continue; }
         }
         if store.is_null(col, row) { continue; }
-        let ft = field_type(name);
+        let ft = header.resolve_field_type(name);
         match ft {
             FieldType::Bool => {
                 let v = store.get_bool(col, row);

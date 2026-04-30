@@ -6,7 +6,7 @@
 use crate::entry::TraceEntry;
 use crate::error::Result;
 use crate::header::TraceHeader;
-use crate::profile::{field_type, field_nullable, FieldType};
+use crate::profile::FieldType;
 
 use super::read::{derive_groups_pub, GbtraceStore};
 use super::write::GbtraceWriter;
@@ -61,8 +61,8 @@ pub fn write_entry_to_gbtrace(
 ) -> Result<()> {
     for (col, name) in header.fields.iter().enumerate() {
         let val = entry.get(name);
-        let ft = field_type(name);
-        let nullable = field_nullable(name);
+        let ft = header.resolve_field_type(name);
+        let nullable = header.resolve_field_nullable(name);
 
         if nullable && val.is_none() {
             writer.set_null(col);
