@@ -15,6 +15,7 @@
 #include <string>
 #include <vector>
 #include <sys/stat.h>
+#include <unistd.h>
 
 #include "StellaLIBRETRO.hxx"
 #include "SettingsLIBRETRO.hxx"
@@ -103,12 +104,14 @@ int main(int argc, char** argv) {
   int holdReset = 0;  // hold SWCHB reset (bit0) low for the first N frames
   int stopFrame = 0;  // stop after N completed frames (0 = use verdict/budget)
   int watchPc = -1;   // report first frame the CPU PC hits this address (game mode)
+  std::string cartType;  // force cartridge bankswitch type (empty = autodetect)
   for (int i = 1; i < argc; i++) {
     std::string a = argv[i];
     auto next = [&]() { return (i + 1 < argc) ? argv[++i] : ""; };
     if (a == "-rom") rom = next();
     else if (a == "-out") out = next();
     else if (a == "-spec") spec = next();
+    else if (a == "-type") cartType = next();
     else if (a == "-frames") maxFrames = std::atoi(next());
     else if (a == "-swchb") swchb = (int)std::strtol(next(), nullptr, 0);
     else if (a == "-holdreset") holdReset = std::atoi(next());
@@ -134,16 +137,52 @@ int main(int argc, char** argv) {
   // --- headless Stella setup ---
   g_rom = data.data();
   g_romSize = (uInt32)data.size();
-  libretro_rom_path = rom;
+  // Force the bankswitch type via the filename-extension mechanism. Stella's
+  // create() (StellaLIBRETRO::create) is monolithic — it builds the OSystem and
+  // creates the console in one call — so there is no seam to inject a
+  // settings().setValue("type", ...) before console creation from the adapter.
+  // CartCreator, however, honours a valid mapper-ID file extension over
+  // autodetect (Bankswitch::typeFromExtension). Stella reads the image from the
+  // real file on disk (the in-memory g_rom is only a fallback for paths that
+  // don't stat), so we copy the ROM to a temp file whose extension is the type
+  // and point Stella at that. Deleted right after console creation.
+  std::string romPath = rom;
+  std::string tmpDir, tmpRom;
+  if (!cartType.empty()) {
+    char tmpl[] = "/tmp/morepork-stella-XXXXXX";
+    if (const char* d = mkdtemp(tmpl)) {
+      tmpDir = d;
+      tmpRom = tmpDir + "/rom." + cartType;
+      if (FILE* tf = std::fopen(tmpRom.c_str(), "wb")) {
+        std::fwrite(data.data(), 1, data.size(), tf);
+        std::fclose(tf);
+        romPath = tmpRom;
+      }
+    }
+  }
+  libretro_rom_path = romPath;
   StellaLIBRETRO stella;
-  stella.setROM(rom, data.data(), (uInt32)data.size());
+  stella.setROM(romPath.c_str(), data.data(), (uInt32)data.size());
   SettingsLIBRETRO cfg;
   cfg.console_format = spec;   // NTSC / PAL / PAL60 / SECAM / AUTO
   if (!stella.create(cfg, false)) {
     std::fprintf(stderr, "error: Stella create() failed\n");
     return 1;
   }
+  // Console has been created; the forced-type temp file has served its purpose.
+  if (!tmpRom.empty()) { ::unlink(tmpRom.c_str()); ::rmdir(tmpDir.c_str()); }
+
   Console& console = stella.osystem().console();
+
+  // Report the resolved cartridge mapping (the detection linter consumes this).
+  // Cartridge::name() is the class name ("CartridgeF8", "Cartridge2K", ...); the
+  // ID is that with the "Cartridge" prefix stripped ("F8", "2K", "F8SC", ...).
+  {
+    std::string cn = console.cartridge().name();
+    const std::string pfx = "Cartridge";
+    if (cn.rfind(pfx, 0) == 0) cn = cn.substr(pfx.size());
+    std::fprintf(stderr, "cartridge-type: %s\n", cn.c_str());
+  }
 
   // Set the console panel switches to a known state (latching colour and
   // difficulty switches) so SWCHB reads are deterministic.

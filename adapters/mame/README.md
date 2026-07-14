@@ -85,6 +85,15 @@ compute ROMs (t01), synced to the harness anchor, with matching PASS verdicts.
   dependable on MAME; input tests are rarely in ROM suites, so not chased.
 - **`read-tap` was a dead end** — reading `cpu.state[...]` inside a memory-tap
   callback core-dumps MAME; gdbstub is the working path.
+- **No cartridge-type forcing (by design).** Unlike the Stella (`-type`) and
+  Gopher2600 (`-mapping`) adapters, this adapter has no force flag. MAME's `a2600`
+  cartridge slot chooses a mapper for a loose ROM purely via
+  `identify_cart_type()` (size whitelist + signature scans in
+  `src/devices/bus/vcs/vcs_slot.cpp`); the only way to override it is a **softlist**
+  entry (`hash/a2600.xml`, `<feature name="slot">…`), which requires the ROM to be
+  a catalogued softlist item, not a loose file. Since the suite feeds loose test
+  ROMs, forcing is deliberately not implemented — MAME always autodetects, and
+  `scripts/cartcheck.py` ports `identify_cart_type()` to check what it would pick.
 
 ## Notes
 

@@ -160,19 +160,20 @@ func main() {
 	maxFrames := flag.Int("frames", 30, "cap: stop after this many frames")
 	frame := flag.Bool("frame", true, "embed a final frame pixel snapshot")
 	swchb := flag.Int("swchb", 0x48, "console switches: bit3=colour, bit6=P0 diff-A, bit7=P1 diff-A")
+	mapping := flag.String("mapping", "AUTO", "force cartridge mapping (AUTO, F8, F6, F4, 2K, 4K, CV, FA, FE, E0, E7, 3F, 3E, AR, DPC, SB, EF, WD, UA...)")
 	flag.Parse()
 
 	if *rom == "" {
 		fmt.Fprintln(os.Stderr, "error: -rom is required")
 		os.Exit(2)
 	}
-	if err := run(*rom, *out, *spec, *maxFrames, *frame, uint8(*swchb)); err != nil {
+	if err := run(*rom, *out, *spec, *maxFrames, *frame, uint8(*swchb), *mapping); err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
 	}
 }
 
-func run(romPath, outPath, spec string, maxFrames int, captureFrame bool, swchb uint8) error {
+func run(romPath, outPath, spec string, maxFrames int, captureFrame bool, swchb uint8, mapping string) error {
 	romBytes, err := os.ReadFile(romPath)
 	if err != nil {
 		return err
@@ -199,13 +200,15 @@ func run(romPath, outPath, spec string, maxFrames int, captureFrame bool, swchb 
 	if err != nil {
 		return fmt.Errorf("vcs: %w", err)
 	}
-	loader, err := cartridgeloader.NewLoaderFromData(romPath, romBytes, "AUTO", "", nil, nil)
+	loader, err := cartridgeloader.NewLoaderFromData(romPath, romBytes, mapping, "", nil, nil)
 	if err != nil {
 		return fmt.Errorf("loader: %w", err)
 	}
 	if err := vcs.AttachCartridge(loader, nil); err != nil {
 		return fmt.Errorf("attach: %w", err)
 	}
+	// Report the resolved cartridge mapping (the detection linter consumes this).
+	fmt.Fprintf(os.Stderr, "cartridge-type: %s\n", vcs.Mem.Cart.ID())
 
 	// Set the console panel switches to a known state (the latching colour and
 	// difficulty switches) so SWCHB reads are deterministic. bit3=colour,
