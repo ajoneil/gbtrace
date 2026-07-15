@@ -31,12 +31,41 @@ import (
 	"github.com/jetsetilly/gopher2600/environment"
 	"github.com/jetsetilly/gopher2600/hardware"
 	"github.com/jetsetilly/gopher2600/hardware/preferences"
+	"github.com/jetsetilly/gopher2600/notifications"
 	"github.com/jetsetilly/gopher2600/hardware/riot/ports"
 	"github.com/jetsetilly/gopher2600/hardware/television"
 	"github.com/jetsetilly/gopher2600/hardware/television/frameinfo"
 	"github.com/jetsetilly/gopher2600/hardware/television/signal"
 	"github.com/jetsetilly/gopher2600/hardware/television/specification"
 )
+
+// superchargerNotify honours the one notification a headless run must not
+// drop: a Supercharger fastload leaves the CPU interrupted mid-instruction
+// and waits for the frontend to run the bootstrap that installs the tape
+// image and jumps to its start address (the same dance the debugger frontend
+// performs). Without it an AR ROM spins in the BIOS loader forever.
+type superchargerNotify struct {
+	vcs *hardware.VCS
+}
+
+func (n *superchargerNotify) Notify(notice notifications.Notice, _ ...string) error {
+	if notice != notifications.NotifySuperchargerFastLoad || n.vcs == nil {
+		return nil
+	}
+	// the interrupted CPU never finalised its result; the bootstrap requires it
+	n.vcs.CPU.LastResult.Final = true
+	bs := n.vcs.Mem.Cart.GetSuperchargerBootstrap()
+	if bs == nil {
+		return fmt.Errorf("supercharger fastload notification from a non-supercharger cartridge")
+	}
+	return bs.Bootstrap(n.vcs.CPU, n.vcs.Mem.RAM, n.vcs.RIOT, n.vcs.TIA)
+}
+
+// PushNotify implements the notifications.Notify interface (async variant,
+// used by PlusROM network events — nothing a headless capture must act on).
+func (n *superchargerNotify) PushNotify(_ notifications.Notice, _ ...string) error {
+	return nil
+}
 
 // memoryField is a named trace field sourced from a peeked memory address.
 type memoryField struct {
@@ -196,10 +225,12 @@ func run(romPath, outPath, spec string, maxFrames int, captureFrame bool, swchb 
 		tv.AddPixelRenderer(fc)
 	}
 
-	vcs, err := hardware.NewVCS(environment.Label("morepork"), tv, nil, prefs)
+	notify := &superchargerNotify{}
+	vcs, err := hardware.NewVCS(environment.Label("morepork"), tv, notify, prefs)
 	if err != nil {
 		return fmt.Errorf("vcs: %w", err)
 	}
+	notify.vcs = vcs
 	loader, err := cartridgeloader.NewLoaderFromData(romPath, romBytes, mapping, "", nil, nil)
 	if err != nil {
 		return fmt.Errorf("loader: %w", err)
