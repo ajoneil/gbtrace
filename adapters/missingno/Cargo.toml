@@ -7,6 +7,13 @@ edition = "2021"
 name = "morepork-missingno"
 path = "src/main.rs"
 
+# The VCS adapter is a separate binary: the VCS oracle contract (single-dash
+# -rom/-out/-spec flags, canonical suite palette, verdict bytes at $80..$83)
+# is a different world from the GB profile-driven CLI above.
+[[bin]]
+name = "morepork-missingno-vcs"
+path = "src/vcs.rs"
+
 [dependencies]
 # Track the latest missingno (no rev pin) — CI resolves it fresh on each build.
 # `gbtrace` is missingno's own trace feature; it keeps that name until the
@@ -14,3 +21,8 @@ path = "src/main.rs"
 missingno-gb = { git = "https://github.com/ajoneil/missingno", features = ["gbtrace"] }
 missingno-gbc = { git = "https://github.com/ajoneil/missingno", features = ["gbtrace"] }
 clap = { version = "4", features = ["derive"] }
+# VCS: the machine comes from the sibling checkout (the suite iterates on
+# unpushed emulator work); the trace format is this repo's own crate.
+missingno-vcs = { path = "../../../missingno/crates/missingno-vcs" }
+morepork = { path = "../../crates/morepork" }
+sha2 = "0.11"

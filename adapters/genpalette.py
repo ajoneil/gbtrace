@@ -122,7 +122,20 @@ def emit_c(path):
             f.write(f"\nstatic const uint8_t {name}[768] = {{\n" + "\n".join(rows) + "\n};\n")
 
 
+def emit_rust(path):
+    names = {"canonicalNTSCPalette": "CANONICAL_NTSC",
+             "canonicalPALPalette": "CANONICAL_PAL",
+             "canonicalSECAMPalette": "CANONICAL_SECAM"}
+    with open(path, "w") as f:
+        f.write(BANNER)
+        for name, rgb in PALETTES.items():
+            trips = [f"[{rgb[i]},{rgb[i+1]},{rgb[i+2]}]" for i in range(0, len(rgb), 3)]
+            rows = ["    " + ",".join(trips[r:r + 8]) + "," for r in range(0, 256, 8)]
+            f.write(f"\npub static {names[name]}: [[u8; 3]; 256] = [\n" + "\n".join(rows) + "\n];\n")
+
+
 emit_go(os.path.join(HERE, "gopher2600", "ntsc_palette.go"))
 emit_go(os.path.join(HERE, "mame", "ntsc_palette.go"))
 emit_c(os.path.join(HERE, "stella", "ntsc_palette.h"))
-print("wrote NTSC+PAL+SECAM palettes to gopher2600/, mame/ (.go) and stella/ (.h)")
+emit_rust(os.path.join(HERE, "missingno", "src", "vcs_palette.rs"))
+print("wrote NTSC+PAL+SECAM palettes to gopher2600/, mame/ (.go), stella/ (.h) and missingno/src (.rs)")

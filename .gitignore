@@ -22,6 +22,7 @@ adapters/docboy/docboy/
 adapters/docboy/morepork-docboy
 adapters/docboy/morepork-docboy-cgb
 adapters/missingno/morepork-missingno
+adapters/missingno/morepork-missingno-vcs
 
 # Local symlink so Claude Code picks up AGENTS.md (it does not read AGENTS.md itself)
 /CLAUDE.md
