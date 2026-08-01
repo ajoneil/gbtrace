@@ -6,8 +6,8 @@ System, and NES cores through system-agnostic seams (`docs/adding-a-system.md` i
 the missingno repo, https://github.com/ajoneil/missingno). This document is the
 equivalent map for the trace side: how the format, core library, CLI, FFI, and
 web viewer stay system-agnostic, where system knowledge lives (the registry
-currently hosts the `dmg`, `cgb`, `nes`, and `vcs` systems, on the `sm83` and
-`6502` ISAs), and what adding a system involves. Trust the
+currently hosts the `dmg`, `cgb`, `nes`, `vcs`, and `sg1000` systems, on the
+`sm83`, `6502`, and `z80` ISAs), and what adding a system involves. Trust the
 seams named here, but verify signatures against the source before building on
 them.
 
@@ -16,12 +16,13 @@ them.
 The header carries two small strings that, with the existing `pix_format`,
 replace the old monolithic `family` tag:
 
-- **`isa`** (`"sm83"`, `"6502"`) — the instruction-set architecture. Names the
-  decoder (disassembly is driven by the shared `missingno_core` instruction-set
-  vocabulary, keyed on this id) and the flag vocabulary. Systems that share
-  silicon share an ISA: the Game Boy's DMG and CGB are both `sm83`; the NES's
-  2A03 and the VCS's 6507 are both `6502`.
-- **`system`** (`"dmg"`, `"cgb"`, `"nes"`, `"vcs"`) — the machine identity.
+- **`isa`** (`"sm83"`, `"6502"`, `"z80"`) — the instruction-set architecture.
+  Names the decoder (disassembly is driven by the shared `missingno_core`
+  instruction-set vocabulary, keyed on this id) and the flag vocabulary.
+  Systems that share silicon share an ISA: the Game Boy's DMG and CGB are both
+  `sm83`; the NES's 2A03 and the VCS's 6507 are both `6502`.
+- **`system`** (`"dmg"`, `"cgb"`, `"nes"`, `"vcs"`, `"sg1000"`) — the machine
+  identity.
   Selects the default field catalogue, semantic query phrases, diff-alignment
   hints, and viewer panels. Distinct from `model` (the free-form hardware
   revision, `"DMG-B"`/`"CGB-C"`).
@@ -99,11 +100,13 @@ is mutable, so both ride per-frame). GB traces keep their raw frame payloads.
 table): `mod.rs` holds the `Isa` and `System` structs plus the `ISAS`/`SYSTEMS`
 registries, and one module per machine — `gb/` (the `dmg` and `cgb` systems,
 which share the SM83 disassembler, catalogue base, and rendering), `nes.rs`,
-`vcs.rs`. Chips shared across systems live in the sibling
+`vcs.rs`, `sg1000.rs`. Chips shared across systems live in the sibling
 `crates/morepork/src/hardware/`, mirroring missingno's `crates/hardware/` vs
 `crates/systems/` split: `hardware/mos6502.rs` carries the flag vocabulary and
 CPU field catalogue shared by the NES's 2A03 and the VCS's 6507 (each system
-keeps only its CPU-address-to-ROM-offset mapping), while single-system silicon
+keeps only its CPU-address-to-ROM-offset mapping), `hardware/z80.rs` and
+`hardware/ti_vdp.rs` the same for the SG-1000 line (ColecoVision and MSX
+carry the identical Z80 + TMS9918A pair), while single-system silicon
 stays with its system (the SM83 in `system/gb`, like missingno's
 `systems/gb/src/isa.rs`). An `Isa` carries the flag vocabulary; a
 `System` names its `Isa` and provides:
@@ -215,6 +218,14 @@ per-frame-dimensions model (its emergent height is why `IndexedFrame`
 carries dimensions per frame). SMS waits for a Z80 disassembler or ships
 with hex-dump disassembly.
 
+**SG-1000** (`sg1000`, the first `z80` system) entered ahead of SMS as the
+host for TI VDP (TMS9918A) tests: Z80 + `hardware/ti_vdp` + SN76489, fixed
+256×192 `indexed8` frames, cartridge at 0x0000 with no BIOS. ColecoVision
+and MSX carry the identical Z80 + TMS9918A pair and become thin sibling
+entries when tests or oracles target them. missingno has no SG-1000 core
+yet, so its first oracles are external adapters; disassembly shares SMS's
+blocker (the `hardware/z80` crate's `InstructionSet` impl in missingno).
+
 On the missingno side each family's tracer is a `trace` module in its core
 crate behind a `morepork` feature (a `Tracer` with per-field emitters,
 `mark_frame` writing self-contained `IndexedFrame` payloads), routed from
@@ -262,11 +273,17 @@ self-describing format → system registry (GB moved behind it,
 `Indexed8`/`IndexedFrame`) → NES (catalogue, flags, 6502 disassembler,
 missingno tracer, viewer) → system-aware web viewer (indexed frames,
 semantic phrase chips, panel gating) → VCS (the emergent-height stress
-test, on the shared `mos6502` core). What remains:
+test, on the shared `mos6502` core) → SG-1000 (the `z80` ISA and shared
+`ti_vdp` catalogue in `hardware/`). What remains:
 
-1. **SMS** — blocked on a Z80 disassembler (or ships with hex-dump
-   disassembly); its missingno core also has no trace hooks yet.
-2. **Non-GB test suites** — the manifest's `systems.{dmg,cgb}` map and the
+1. **Z80 disassembly** — the `z80` ISA and flag vocabulary are registered,
+   but decode needs an `InstructionSet` impl in missingno's `hardware/z80`
+   crate (its decode table exists; only the display mapping is missing).
+   Until it lands, `z80` traces disassemble as hex. Unblocks SMS too.
+2. **SMS** — beyond the disassembler, its missingno core has no trace
+   hooks yet, and its VDP (11 registers, CRAM, counter ports) gets its
+   own `hardware/` module distinct from `ti_vdp`.
+3. **Non-GB test suites** — the manifest's `systems.{dmg,cgb}` map and the
    test picker stay GB-only until one exists; they need a system level then
    (`scripts/manifest.py`, `web/src/components/test-picker.js`).
-3. **Rename** — blocked on the name decision; deliberately last.
+4. **Rename** — blocked on the name decision; deliberately last.

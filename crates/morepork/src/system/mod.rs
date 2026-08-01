@@ -10,12 +10,13 @@
 //! the shared chip's vocabulary hosted in [`crate::hardware`]. See
 //! `docs/multi-system.md`.
 
-use crate::hardware::mos6502;
+use crate::hardware::{mos6502, z80};
 use crate::profile::SubsystemDef;
 use crate::query::Condition;
 
 pub mod gb;
 pub mod nes;
+pub mod sg1000;
 pub mod vcs;
 
 /// Field-catalogue construction shorthand shared by the family catalogues.
@@ -167,8 +168,9 @@ impl System {
     }
 }
 
-/// The Sharp SM83 (Game Boy) and the NMOS 6502 (the NES's 2A03, the VCS's
-/// 6507). The flag vocabulary lives with each ISA's home module.
+/// The Sharp SM83 (Game Boy), the NMOS 6502 (the NES's 2A03, the VCS's
+/// 6507), and the Zilog Z80 (the SG-1000). The flag vocabulary lives with
+/// each ISA's home module.
 pub static SM83: Isa = Isa {
     id: "sm83",
     flags: gb::FLAGS,
@@ -177,9 +179,13 @@ pub static MOS6502: Isa = Isa {
     id: "6502",
     flags: mos6502::FLAGS,
 };
+pub static Z80: Isa = Isa {
+    id: "z80",
+    flags: z80::FLAGS,
+};
 
 /// Every registered ISA.
-pub static ISAS: &[&Isa] = &[&SM83, &MOS6502];
+pub static ISAS: &[&Isa] = &[&SM83, &MOS6502, &Z80];
 
 /// Look up an ISA by id.
 pub fn isa(id: &str) -> Option<&'static Isa> {
@@ -188,7 +194,7 @@ pub fn isa(id: &str) -> Option<&'static Isa> {
 
 /// Every registered system. `dmg` first — it is also the fallback for
 /// traces whose headers predate the `system` field.
-pub static SYSTEMS: &[&System] = &[&gb::DMG, &gb::CGB, &nes::NES, &vcs::VCS];
+pub static SYSTEMS: &[&System] = &[&gb::DMG, &gb::CGB, &nes::NES, &vcs::VCS, &sg1000::SG1000];
 
 /// Look up a system by id.
 pub fn system(id: &str) -> Option<&'static System> {

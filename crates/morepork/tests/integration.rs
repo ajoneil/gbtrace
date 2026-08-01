@@ -247,6 +247,73 @@ ppu = "registers"
 }
 
 #[test]
+fn sg1000_profile_and_flag_queries() {
+    let toml = r#"
+[profile]
+name = "sg1000-smoke"
+description = "SG-1000 CPU + VDP registers"
+trigger = "instruction"
+system = "sg1000"
+
+[fields]
+cpu = "registers"
+vdp = "registers"
+"#;
+    let p = Profile::parse(toml).unwrap();
+    assert_eq!(p.system, "sg1000");
+    assert_eq!(
+        p.fields,
+        [
+            "pc", "op_addr", "sp", "a", "f", "b", "c", "d", "e", "h", "l",
+            "ix", "iy", "wz", "a_", "f_", "b_", "c_", "d_", "e_", "h_", "l_",
+            "i", "r",
+            "reg0", "reg1", "reg2", "reg3", "reg4", "reg5", "reg6", "reg7",
+            "status", "line", "dot",
+        ]
+        .map(String::from)
+    );
+
+    let sg = morepork::system::system("sg1000").unwrap();
+    assert_eq!(sg.isa.id, "z80");
+
+    // Flag vocabulary resolves against the Z80 F register, including the
+    // undocumented X/Y bits and the P/V aliases.
+    let cond = morepork::query::parse_condition("flag s becomes set", sg).unwrap();
+    match cond {
+        morepork::query::Condition::BitTransition { field, bit, to } => {
+            assert_eq!((field.as_str(), bit, to), ("f", 7, true));
+        }
+        other => panic!("unexpected condition: {other:?}"),
+    }
+    let cond = morepork::query::parse_condition("flag pv set", sg).unwrap();
+    match cond {
+        morepork::query::Condition::FieldBitMask { field, mask } => {
+            assert_eq!((field.as_str(), mask), ("f", 1 << 2));
+        }
+        other => panic!("unexpected condition: {other:?}"),
+    }
+
+    // "vblank starts" desugars to the line-192 transition.
+    let cond = morepork::query::parse_condition("vblank starts", sg).unwrap();
+    match cond {
+        morepork::query::Condition::FieldChangesTo { field, value } => {
+            assert_eq!((field.as_str(), value.as_str()), ("line", "0xc0"));
+        }
+        other => panic!("unexpected condition: {other:?}"),
+    }
+
+    // Shadow-register names parse as ordinary field conditions.
+    let cond = morepork::query::parse_condition("a_ changes", sg).unwrap();
+    match cond {
+        morepork::query::Condition::FieldChanges { field } => assert_eq!(field, "a_"),
+        other => panic!("unexpected condition: {other:?}"),
+    }
+
+    // GB phrases are not in the SG-1000 vocabulary.
+    assert!(morepork::query::parse_condition("lcd on", sg).is_err());
+}
+
+#[test]
 fn vcs_profile_and_flag_queries() {
     let toml = r#"
 [profile]
