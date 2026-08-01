@@ -1,0 +1,7 @@
+# vendored emulator source (cloned by the Makefile, pinned)
+gearcoleco/
+# build artifacts
+*.o
+morepork-gearcoleco
+# capture artifacts
+*.morepork
