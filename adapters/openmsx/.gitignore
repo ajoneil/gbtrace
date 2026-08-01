@@ -1,0 +1,4 @@
+# built adapter binary
+morepork-openmsx
+# capture artifacts
+*.morepork

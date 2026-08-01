@@ -1,4 +1,10 @@
 [workspace]
 resolver = "2"
-members = ["crates/morepork", "crates/morepork-wasm", "crates/morepork-ffi", "adapters/mame"]
+members = [
+    "crates/morepork",
+    "crates/morepork-wasm",
+    "crates/morepork-ffi",
+    "adapters/mame",
+    "adapters/openmsx",
+]
 exclude = ["adapters/missingno"]

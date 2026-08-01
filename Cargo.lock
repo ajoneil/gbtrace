@@ -844,6 +844,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "morepork-openmsx"
+version = "0.1.0"
+dependencies = [
+ "morepork",
+ "png",
+ "serde_json",
+ "sha2",
+ "tempfile",
+]
+
+[[package]]
 name = "morepork-wasm"
 version = "0.1.0"
 dependencies = [
