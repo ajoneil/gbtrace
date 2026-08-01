@@ -825,15 +825,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "morepork-emulicious"
-version = "0.1.0"
-dependencies = [
- "morepork",
- "serde_json",
- "sha2",
-]
-
-[[package]]
 name = "morepork-ffi"
 version = "0.1.0"
 dependencies = [
