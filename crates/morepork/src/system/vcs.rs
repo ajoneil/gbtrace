@@ -8,7 +8,8 @@
 //! position, RIOT timer and ports); adapters can carry anything else as
 //! extension fields.
 
-use super::{System, field, mos6502};
+use super::{System, field};
+use crate::hardware::mos6502;
 use crate::profile::{FieldDef, FieldType, Layer, SubsystemDef};
 
 pub static TIA: SubsystemDef = SubsystemDef {

@@ -6,14 +6,15 @@
 //! catalogue behind profiles, flag names, semantic query phrases, the
 //! instruction decoder, and diff-alignment hints. Each machine contributes
 //! one [`System`] here; systems that share silicon share an [`Isa`] (the
-//! Game Boy's DMG/CGB share `sm83`; the NES and VCS share `6502`). See
+//! Game Boy's DMG/CGB share `sm83`; the NES and VCS share `6502`), with
+//! the shared chip's vocabulary hosted in [`crate::hardware`]. See
 //! `docs/multi-system.md`.
 
+use crate::hardware::mos6502;
 use crate::profile::SubsystemDef;
 use crate::query::Condition;
 
 pub mod gb;
-pub mod mos6502;
 pub mod nes;
 pub mod vcs;
 

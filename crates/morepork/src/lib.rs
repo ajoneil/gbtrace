@@ -3,6 +3,7 @@ pub mod comparison;
 pub mod disasm;
 pub mod downsample;
 pub mod entry;
+pub mod hardware;
 pub mod system;
 pub mod format;
 pub mod error;

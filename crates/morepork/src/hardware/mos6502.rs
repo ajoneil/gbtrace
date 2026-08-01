@@ -4,7 +4,7 @@
 //! `InstructionSet` (see [`crate::disasm`]).
 
 use crate::profile::{FieldDef, FieldType, Layer, SubsystemDef};
-use super::{FlagDef, field};
+use crate::system::{FlagDef, field};
 
 /// The 6502 register file, shared by every family carrying this core.
 pub static CPU: SubsystemDef = SubsystemDef {

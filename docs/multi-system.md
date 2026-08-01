@@ -97,11 +97,15 @@ is mutable, so both ride per-frame). GB traces keep their raw frame payloads.
 
 `crates/morepork/src/system/` — a static registry (like missingno's `FAMILIES`
 table): `mod.rs` holds the `Isa` and `System` structs plus the `ISAS`/`SYSTEMS`
-registries, and one module per CPU-line — `gb/` (the `dmg` and `cgb` systems,
-which share the SM83 disassembler, catalogue base, and rendering), `nes/`,
-`vcs/` — with the shared 6502 decode table and flag vocabulary in `mos6502.rs`
-(the NES's 2A03 and the VCS's 6507 carry the same core; each system keeps only
-its CPU-address-to-ROM-offset mapping). An `Isa` carries the flag vocabulary; a
+registries, and one module per machine — `gb/` (the `dmg` and `cgb` systems,
+which share the SM83 disassembler, catalogue base, and rendering), `nes.rs`,
+`vcs.rs`. Chips shared across systems live in the sibling
+`crates/morepork/src/hardware/`, mirroring missingno's `crates/hardware/` vs
+`crates/systems/` split: `hardware/mos6502.rs` carries the flag vocabulary and
+CPU field catalogue shared by the NES's 2A03 and the VCS's 6507 (each system
+keeps only its CPU-address-to-ROM-offset mapping), while single-system silicon
+stays with its system (the SM83 in `system/gb`, like missingno's
+`systems/gb/src/isa.rs`). An `Isa` carries the flag vocabulary; a
 `System` names its `Isa` and provides:
 
 - **Default field catalogue** (`subsystems`) — validates profiles and types
@@ -202,7 +206,7 @@ the CGB catalogue is a superset, so shared fields still validate.)
 | CPU state | 6502: `a,x,y,s,p,pc` (+rdy) | same 6502 core (6507) | Z80: full main+shadow set, `ix,iy,sp,pc,wz,i,r,im,iff1/2` |
 | Stepping | `step_cycle` / `step_instruction` / `step_frame` | same + own core-side `Debugger` | `Cpu::step` returns T-states |
 | Frame | 256×240 fixed, 6-bit colour indices | `Vec<[u8; VISIBLE_CLOCKS]>`, **emergent height**, TIA indices | 256×192, CRAM-indexed + per-frame 32-byte CRAM |
-| Disassembler | ✓ shared `system/mos6502` + iNES map | ✓ shared core + 6507 cartridge map | ✗ none exists |
+| Disassembler | ✓ shared `hardware/mos6502` + iNES map | ✓ shared core + 6507 cartridge map | ✗ none exists |
 | Trace hooks in missingno | ✓ `missingno-nes/src/trace.rs` | ✓ `missingno-vcs/src/trace.rs` | none (its `bus_trace()` is test-only) |
 
 NES went second because it exercises every seam (catalogue, flags, disasm,

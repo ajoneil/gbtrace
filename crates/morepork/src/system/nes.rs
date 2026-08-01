@@ -5,7 +5,8 @@
 //! (CPU registers, PPU control/mask and beam position) and grows with its
 //! tracer; adapters can carry anything else as extension fields.
 
-use super::{ExactPhrase, System, field, mos6502};
+use super::{ExactPhrase, System, field};
+use crate::hardware::mos6502;
 use crate::profile::{FieldDef, FieldType, Layer, SubsystemDef};
 use crate::query::Condition;
 
