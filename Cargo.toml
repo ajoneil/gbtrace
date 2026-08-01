@@ -4,6 +4,7 @@ members = [
     "crates/morepork",
     "crates/morepork-wasm",
     "crates/morepork-ffi",
+    "adapters/emulicious",
     "adapters/mame",
     "adapters/openmsx",
 ]

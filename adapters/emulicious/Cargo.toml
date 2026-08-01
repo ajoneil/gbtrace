@@ -1,0 +1,14 @@
+[package]
+name = "morepork-emulicious"
+version = "0.1.0"
+edition = "2021"
+description = "morepork adapter driving Emulicious over its DAP remote-debugging server"
+
+[[bin]]
+name = "morepork-emulicious"
+path = "src/main.rs"
+
+[dependencies]
+morepork = { path = "../../crates/morepork" }
+serde_json = "1"
+sha2 = "0.10"
