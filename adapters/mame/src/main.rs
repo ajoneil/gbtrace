@@ -57,11 +57,13 @@ const fn f16(name: &'static str) -> FieldSpec {
 }
 
 struct SysDef {
-    id: &'static str,         // morepork header `system`
-    cpu_tag: &'static str,    // MAME device tag for `trace` (a2600: maincpu, sg1000: z80)
+    cli: &'static str,         // -system value selecting this row
+    id: &'static str,          // morepork header `system`
+    model: Option<&'static str>, // header `model` override; None = the -spec value
+    cpu_tag: &'static str,     // MAME device tag for `trace` (a2600/coleco: maincpu, sg1000/sc3000: z80)
     result_addr: &'static str, // RESULT block base, hex without 0x
-    trace_fmt: &'static str,  // tracelog format string ("R" + one column per field)
-    trace_syms: &'static str, // tracelog symbols, validated against installed MAME
+    trace_fmt: &'static str,   // tracelog format string ("R" + one column per field)
+    trace_syms: &'static str,  // tracelog symbols, validated against installed MAME
     cpu_fields: &'static [FieldSpec],
     machine: fn(&str) -> Result<&'static str>,
 }
@@ -76,19 +78,41 @@ fn vcs_machine(spec: &str) -> Result<&'static str> {
     Ok(if spec == "PAL" { "a2600p" } else { "a2600" })
 }
 
-fn sg1000_machine(spec: &str) -> Result<&'static str> {
-    // The sg1000 driver carries the NTSC TMS9918A. TMS9929A (PAL) capture
-    // would need a different machine; the suite treats PAL as provisional
-    // anyway.
+/// The TI VDP machines are NTSC TMS9918A drivers; TMS9929A (PAL) capture
+/// would need different machines, and the suite treats PAL as provisional
+/// anyway.
+fn ntsc_only(machine: &'static str, spec: &str) -> Result<&'static str> {
     if !spec.eq_ignore_ascii_case("NTSC") {
-        return Err(format!("MAME sg1000 capture is NTSC-only (TMS9918A); -spec {spec} is not supported").into());
+        return Err(format!("MAME {machine} capture is NTSC-only (TMS9918A); -spec {spec} is not supported").into());
     }
-    Ok("sg1000")
+    Ok(machine)
 }
+
+fn sg1000_machine(spec: &str) -> Result<&'static str> {
+    ntsc_only("sg1000", spec)
+}
+
+fn sc3000_machine(spec: &str) -> Result<&'static str> {
+    ntsc_only("sc3000", spec)
+}
+
+fn coleco_machine(spec: &str) -> Result<&'static str> {
+    ntsc_only("coleco", spec)
+}
+
+/// The Z80 register columns shared by every TI VDP machine row.
+static Z80_FIELDS: &[FieldSpec] = &[
+    f16("pc"), f16("sp"), f8("a"), f8("f"), f8("b"), f8("c"),
+    f8("d"), f8("e"), f8("h"), f8("l"), f16("ix"), f16("iy"),
+];
+const Z80_TRACE_FMT: &str = "R%04X %04X %02X %02X %02X %02X %02X %02X %02X %02X %04X %04X";
+const Z80_TRACE_SYMS: &str = "pc,sp,a,f,b,c,d,e,h,l,ix,iy";
 
 static SYSTEMS: &[SysDef] = &[
     SysDef {
+        cli: "vcs",
         id: "vcs",
+        model: None,
         cpu_tag: "maincpu",
         result_addr: "80",
         trace_fmt: "R%04X %02X %02X %02X %02X %02X",
@@ -97,16 +121,43 @@ static SYSTEMS: &[SysDef] = &[
         machine: vcs_machine,
     },
     SysDef {
+        cli: "sg1000",
         id: "sg1000",
+        model: None,
         cpu_tag: "z80",
         result_addr: "c000",
-        trace_fmt: "R%04X %04X %02X %02X %02X %02X %02X %02X %02X %02X %04X %04X",
-        trace_syms: "pc,sp,a,f,b,c,d,e,h,l,ix,iy",
-        cpu_fields: &[
-            f16("pc"), f16("sp"), f8("a"), f8("f"), f8("b"), f8("c"),
-            f8("d"), f8("e"), f8("h"), f8("l"), f16("ix"), f16("iy"),
-        ],
+        trace_fmt: Z80_TRACE_FMT,
+        trace_syms: Z80_TRACE_SYMS,
+        cpu_fields: Z80_FIELDS,
         machine: sg1000_machine,
+    },
+    // The SC-3000 is the SG-1000's keyboard-computer sibling: identical
+    // Z80 + TI VDP envelope, so it captures as the `sg1000` system with
+    // the machine carried in `model`.
+    SysDef {
+        cli: "sc3000",
+        id: "sg1000",
+        model: Some("SC-3000"),
+        cpu_tag: "z80",
+        result_addr: "c000",
+        trace_fmt: Z80_TRACE_FMT,
+        trace_syms: Z80_TRACE_SYMS,
+        cpu_fields: Z80_FIELDS,
+        machine: sc3000_machine,
+    },
+    // MAME's coleco driver needs the ColecoVision BIOS romset (coleco.zip)
+    // on the -rompath; the suite's `.col` builds sit at 0x8000 with the
+    // RESULT block at 0x7000.
+    SysDef {
+        cli: "coleco",
+        id: "coleco",
+        model: None,
+        cpu_tag: "maincpu",
+        result_addr: "7000",
+        trace_fmt: Z80_TRACE_FMT,
+        trace_syms: Z80_TRACE_SYMS,
+        cpu_fields: Z80_FIELDS,
+        machine: coleco_machine,
     },
 ];
 
@@ -230,19 +281,21 @@ struct Args {
     port: u16,
     swchb: i64,
     frame: bool,
+    rompath: String,
 }
 
 fn usage() -> ! {
     eprintln!(
         "usage: morepork-mame [flags]\n\
-         \x20 -system vcs|sg1000   target system (default vcs)\n\
-         \x20 -rom <path>          ROM (.bin/.a26 for vcs, .sg for sg1000)\n\
+         \x20 -system vcs|sg1000|sc3000|coleco   target system (default vcs)\n\
+         \x20 -rom <path>          ROM (.bin/.a26 for vcs; .sg/.col for the TI VDP machines)\n\
          \x20 -out <path>          output .morepork path (default trace.morepork)\n\
-         \x20 -spec NTSC|PAL       TV spec (vcs: a2600 vs a2600p; sg1000: NTSC only)\n\
+         \x20 -spec NTSC|PAL       TV spec (vcs: a2600 vs a2600p; TI VDP machines: NTSC only)\n\
          \x20 -frames <n>          cap: seconds_to_run = max(2, frames/60) (default 30)\n\
          \x20 -port <n>            gdbstub port (0 = auto-pick, default)\n\
          \x20 -swchb <n>           vcs console switches (default 0x48)\n\
-         \x20 -frame[=bool]        capture a final frame snapshot (default true)"
+         \x20 -frame[=bool]        capture a final frame snapshot (default true)\n\
+         \x20 -rompath <dir>       MAME rompath for machines needing BIOS romsets (coleco)"
     );
     std::process::exit(2);
 }
@@ -265,6 +318,7 @@ fn parse_args() -> Args {
         port: 0,
         swchb: 0x48,
         frame: true,
+        rompath: String::new(),
     };
     let mut it = std::env::args().skip(1);
     while let Some(arg) = it.next() {
@@ -294,6 +348,7 @@ fn parse_args() -> Args {
             "rom" => args.rom = value,
             "out" => args.out = value,
             "spec" => args.spec = value,
+            "rompath" => args.rompath = value,
             "frames" => args.frames = parse_int(&value).unwrap_or_else(|| usage()),
             "port" => args.port = parse_int(&value).unwrap_or_else(|| usage()) as u16,
             "swchb" => args.swchb = parse_int(&value).unwrap_or_else(|| usage()),
@@ -312,8 +367,8 @@ fn main() {
         eprintln!("error: -rom is required");
         std::process::exit(2);
     }
-    let Some(sys) = SYSTEMS.iter().find(|s| s.id == args.system) else {
-        eprintln!("error: unknown -system {:?} (vcs, sg1000)", args.system);
+    let Some(sys) = SYSTEMS.iter().find(|s| s.cli == args.system) else {
+        eprintln!("error: unknown -system {:?} (vcs, sg1000, sc3000, coleco)", args.system);
         std::process::exit(2);
     };
     if let Err(e) = run(sys, &args) {
@@ -364,6 +419,9 @@ fn run(sys: &SysDef, args: &Args) -> Result<()> {
     ])
     .stdout(Stdio::null())
     .stderr(Stdio::null());
+    if !args.rompath.is_empty() {
+        cmd.args(["-rompath", &args.rompath]);
+    }
     let mut mame = MameProcess::spawn(cmd)?;
 
     let mut g = Gdb::connect(port)?;
@@ -393,7 +451,7 @@ fn run(sys: &SysDef, args: &Args) -> Result<()> {
     // A second, gdbstub-free headless pass captures the final frame via Lua
     // (gdbstub exposes no pixels). Best-effort: a frame is nice-to-have.
     let frame = if args.frame {
-        match capture_frame(sys, machine, &args.rom, &args.spec, args.frames) {
+        match capture_frame(sys, machine, args) {
             Ok(f) => Some(f),
             Err(e) => {
                 eprintln!("warning: frame capture failed: {e}");
@@ -404,7 +462,8 @@ fn run(sys: &SysDef, args: &Args) -> Result<()> {
         None
     };
 
-    write_trace(&args.out, sys, &args.spec, &rom_sha, trace_log.path(), (res, code, obs, exp), frame.as_ref())
+    let model = sys.model.unwrap_or(&args.spec);
+    write_trace(&args.out, sys, model, &rom_sha, trace_log.path(), (res, code, obs, exp), frame.as_ref())
 }
 
 fn hex_encode(bytes: &[u8]) -> String {
@@ -479,7 +538,8 @@ end)
 /// Launches a second headless MAME, dumps the last frame's pixels, and
 /// reverse-maps each RGB to a canonical palette index (TIA colour code /
 /// TI VDP colour) so the frame is oracle-independent like the other adapters'.
-fn capture_frame(sys: &SysDef, machine: &str, rom: &str, spec: &str, max_frames: i64) -> Result<FrameData> {
+fn capture_frame(sys: &SysDef, machine: &str, args: &Args) -> Result<FrameData> {
+    let (rom, spec, max_frames) = (args.rom.as_str(), args.spec.as_str(), args.frames);
     let dump = tempfile::Builder::new().prefix("morepork-mame-px-").suffix(".bin").tempfile()?;
     let lua = tempfile::Builder::new().prefix("morepork-mame-frame-").suffix(".lua").tempfile()?;
     // Redirect MAME's cfg/snapshot/nvram output to a temp dir so it never
@@ -504,6 +564,9 @@ fn capture_frame(sys: &SysDef, machine: &str, rom: &str, spec: &str, max_frames:
     ])
     .stdout(Stdio::null())
     .stderr(Stdio::piped());
+    if !args.rompath.is_empty() {
+        cmd.args(["-rompath", &args.rompath]);
+    }
     let mut mame = MameProcess::spawn(cmd)?;
 
     // Drain stderr on a thread (the pipe must not fill), wait max 30s.
@@ -543,8 +606,8 @@ fn capture_frame(sys: &SysDef, machine: &str, rom: &str, spec: &str, max_frames:
     }
 
     match sys.id {
-        "sg1000" => map_ti_vdp_frame(w, h, &argb),
-        _ => map_vcs_frame(w, h, &argb, spec),
+        "vcs" => map_vcs_frame(w, h, &argb, spec),
+        _ => map_ti_vdp_frame(w, h, &argb),
     }
 }
 
@@ -691,7 +754,7 @@ fn distance(e: [u8; 3], r: u8, g: u8, b: u8) -> i32 {
 fn write_trace(
     out: &str,
     sys: &SysDef,
-    spec: &str,
+    model: &str,
     rom_sha: &str,
     log: &Path,
     verdict: (u8, u8, u8, u8),
@@ -723,7 +786,7 @@ fn write_trace(
     let mut header_json = serde_json::json!({
         "_header": true, "format_version": "0.1.0",
         "emulator": "mame", "emulator_version": "adapter", "rom_sha256": rom_sha,
-        "system": sys.id, "model": spec, "profile": "tier1",
+        "system": sys.id, "model": model, "profile": "tier1",
         "fields": fields, "trigger": "instruction",
     });
     if frame.is_some() {

@@ -6,8 +6,9 @@ System, and NES cores through system-agnostic seams (`docs/adding-a-system.md` i
 the missingno repo, https://github.com/ajoneil/missingno). This document is the
 equivalent map for the trace side: how the format, core library, CLI, FFI, and
 web viewer stay system-agnostic, where system knowledge lives (the registry
-currently hosts the `dmg`, `cgb`, `nes`, `vcs`, and `sg1000` systems, on the
-`sm83`, `6502`, and `z80` ISAs), and what adding a system involves. Trust the
+currently hosts the `dmg`, `cgb`, `nes`, `vcs`, `sg1000`, `coleco`, and
+`msx1` systems, on the `sm83`, `6502`, and `z80` ISAs), and what adding a
+system involves. Trust the
 seams named here, but verify signatures against the source before building on
 them.
 
@@ -220,11 +221,15 @@ with hex-dump disassembly.
 
 **SG-1000** (`sg1000`, the first `z80` system) entered ahead of SMS as the
 host for TI VDP (TMS9918A) tests: Z80 + `hardware/ti_vdp` + SN76489, fixed
-256×192 `indexed8` frames, cartridge at 0x0000 with no BIOS. ColecoVision
-and MSX carry the identical Z80 + TMS9918A pair and become thin sibling
-entries when tests or oracles target them. missingno has no SG-1000 core
-yet, so its first oracles are external adapters; disassembly shares SMS's
-blocker (the `hardware/z80` crate's `InstructionSet` impl in missingno).
+256×192 `indexed8` frames, cartridge at 0x0000 with no BIOS. The SC-3000
+(same envelope plus a keyboard) captures as `sg1000` with the machine in
+`model`. **ColecoVision** (`coleco`) and **MSX1** (`msx1`) carry the
+identical Z80 + TMS9918A pair as thin sibling entries — different machine
+wrappers (BIOS ownership, cart windows, test-RAM/port addresses) that live
+in the adapters, not the registry. missingno has no cores for any of these
+yet, so the oracles are external adapters (MAME, openMSX); disassembly
+shares SMS's blocker (the `hardware/z80` crate's `InstructionSet` impl in
+missingno).
 
 On the missingno side each family's tracer is a `trace` module in its core
 crate behind a `morepork` feature (a `Tracer` with per-field emitters,

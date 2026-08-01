@@ -14,7 +14,9 @@ use crate::hardware::{mos6502, z80};
 use crate::profile::SubsystemDef;
 use crate::query::Condition;
 
+pub mod coleco;
 pub mod gb;
+pub mod msx1;
 pub mod nes;
 pub mod sg1000;
 pub mod vcs;
@@ -194,7 +196,15 @@ pub fn isa(id: &str) -> Option<&'static Isa> {
 
 /// Every registered system. `dmg` first — it is also the fallback for
 /// traces whose headers predate the `system` field.
-pub static SYSTEMS: &[&System] = &[&gb::DMG, &gb::CGB, &nes::NES, &vcs::VCS, &sg1000::SG1000];
+pub static SYSTEMS: &[&System] = &[
+    &gb::DMG,
+    &gb::CGB,
+    &nes::NES,
+    &vcs::VCS,
+    &sg1000::SG1000,
+    &coleco::COLECO,
+    &msx1::MSX1,
+];
 
 /// Look up a system by id.
 pub fn system(id: &str) -> Option<&'static System> {

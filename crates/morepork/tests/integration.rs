@@ -314,6 +314,19 @@ vdp = "registers"
 }
 
 #[test]
+fn coleco_and_msx1_share_the_ti_vdp_line() {
+    for id in ["coleco", "msx1"] {
+        let sys = morepork::system::system(id).unwrap();
+        assert_eq!(sys.isa.id, "z80", "{id}");
+        // Same shared z80 + ti-vdp catalogue as sg1000.
+        assert!(sys.lookup_field("wz").is_some(), "{id}");
+        assert!(sys.lookup_field("reg7").is_some(), "{id}");
+        let cond = morepork::query::parse_condition("vblank starts", sys).unwrap();
+        assert!(matches!(cond, morepork::query::Condition::FieldChangesTo { .. }), "{id}");
+    }
+}
+
+#[test]
 fn vcs_profile_and_flag_queries() {
     let toml = r#"
 [profile]
