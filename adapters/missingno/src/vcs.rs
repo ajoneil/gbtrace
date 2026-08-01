@@ -204,7 +204,7 @@ fn run(args: &Args) -> Result<(), String> {
     let rom = std::fs::read(&args.rom).map_err(|e| format!("{}: {e}", args.rom))?;
     let standard = spec_to_standard(&args.spec)?;
 
-    let mut vcs = Vcs::new(&rom, standard, args.cart_type)
+    let mut vcs = Vcs::new(&rom, standard, args.cart_type, missingno_vcs::DumpFit::Exact)
         .map_err(|e| format!("cartridge: {e:?}"))?;
     // Console switches from the SWCHB byte (bit3 colour, bit6/7 difficulty).
     vcs.set_color_mode(args.swchb & 0x08 != 0);
