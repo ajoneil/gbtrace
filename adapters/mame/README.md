@@ -1,10 +1,16 @@
 # morepork-mame
 
-A morepork adapter for [MAME](https://www.mamedev.org/)'s Atari 2600 driver
-(`a2600`), used as a third, **independent-lineage** behavioural oracle for the
-VCS test suite alongside Stella and Gopher2600. (Stella and Gopher2600 both
-descend from shared TIA-core work; MAME's driver is its own, so it's a genuine
-third vote — not just a third copy.)
+A morepork adapter driving [MAME](https://www.mamedev.org/) as an
+**independent-lineage** behavioural oracle. Two systems share the one
+mechanism (a `-system` flag selects; the per-system knowledge lives in the
+`systems` table in `main.go`):
+
+- **`vcs`** (default) — the `a2600` driver, a third oracle for the VCS test
+  suite alongside Stella and Gopher2600. (Those two descend from shared
+  TIA-core work; MAME's driver is its own, so it's a genuine third vote —
+  not just a third copy.)
+- **`sg1000`** — the `sg1000` driver, an oracle for the TI VDP (TMS9918A)
+  test suite (`missingno-ti-vdp-tests`). See the SG-1000 section below.
 
 ## Approach (differs from the Stella/Gopher2600 adapters)
 
@@ -78,8 +84,10 @@ compute ROMs (t01), synced to the harness anchor, with matching PASS verdicts.
   reads (e.g. mame=b3 vs stella=b5), at different points than Gopher's F1 — an
   independent-lineage timer-edge disagreement worth adjudicating (logged as F4 in
   `receipts/notes/cross-oracle-findings.md`). t01 (no timer) is 100%.
-- **No frame snapshot** — gdbstub exposes registers + memory only. A frame would
-  need a parallel Lua screen capture (for GOLD tests later); not implemented.
+- **Frame snapshots ride a second MAME pass** — gdbstub exposes registers +
+  memory only, so the final frame comes from a separate gdbstub-free launch
+  whose autoboot Lua dumps the screen's pixels (`captureFrame`), reverse-mapped
+  to canonical palette indices. Best-effort: a capture failure only warns.
 - **No `line`/`clock`** — the TIA beam isn't exposed over gdbstub/tracelog.
 - **Console switches are best-effort** (autoboot Lua sets `:SWB`), so t06 isn't
   dependable on MAME; input tests are rarely in ROM suites, so not chased.
@@ -101,3 +109,39 @@ compute ROMs (t01), synced to the harness anchor, with matching PASS verdicts.
 - TV standard via the `a2600`/`a2600p` machine or a slot option (NTSC vs PAL).
 - The morepork system is `vcs`; emit a JSONL header with `"system":"vcs"` and the
   same field set, then diff against Stella/Gopher2600 via `scripts/compare.sh`.
+
+## SG-1000 / TI VDP suite
+
+`-system sg1000` drives MAME's `sg1000` machine through the same
+trace-command + RESULT-watchpoint mechanism. Everything below was verified
+against MAME 0.288:
+
+- **CPU device tag is `z80`, not `maincpu`** — `trace <log>,maincpu,...`
+  fails with "Unable to find device" on this driver.
+- **Tracelog symbols**: `pc,sp,a,f,b,c,d,e,h,l,ix,iy` are all valid z80
+  debugger symbols (including `f`). Fields written:
+  `pc sp a f b c d e h l ix iy result code observed expected`.
+- **RESULT convention** (from `missingno-ti-vdp-tests/include/result.inc`):
+  the verdict block sits at the base of SG-1000 RAM — `$C000` RESULT
+  (`$A5` PASS / `$5A` FAIL), then CODE/OBSERVED/EXPECTED. Same watchpoint
+  values as the VCS suite, different address.
+- **Frame snapshot**: the Lua second pass dumps MAME's 280×216 screen; the
+  TMS9918A active area is the centred 256×192 at offset (12,12)
+  (empirically located with a border-probe ROM). Pixels reverse-map to TMS
+  colour indices 1-15 — MAME's rendered RGBs match the canonical
+  datasheet palette exactly — and the `indexed8` frame stamps that
+  16-entry palette with the 8:7 NTSC pixel aspect. Index 0 (transparent)
+  renders as backdrop and never appears in a capture.
+- **NTSC only**: the `sg1000` machine carries a TMS9918A. TMS9929A (PAL)
+  capture would need a different driver (`sc3000` etc.); the suite treats
+  PAL behaviour as provisional anyway.
+
+The suite's ColecoVision (`.col`, RESULT at `$7000`) and MSX1 (`.mx1`,
+RESULT at `$E000`, VDP ports `$98/$99`) builds map onto future `systems`
+table rows — same mechanism, different machine + RESULT address.
+
+Example:
+
+```
+morepork-mame -system sg1000 -rom sanity.sg -out sanity_mame.morepork
+```
