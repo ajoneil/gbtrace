@@ -833,6 +833,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "morepork-mame"
+version = "0.1.0"
+dependencies = [
+ "libc",
+ "morepork",
+ "serde_json",
+ "sha2",
+ "tempfile",
+]
+
+[[package]]
 name = "morepork-wasm"
 version = "0.1.0"
 dependencies = [

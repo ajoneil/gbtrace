@@ -1,0 +1,16 @@
+[package]
+name = "morepork-mame"
+version = "0.1.0"
+edition = "2021"
+description = "morepork adapter driving MAME headlessly over its gdbstub debugger"
+
+[[bin]]
+name = "morepork-mame"
+path = "src/main.rs"
+
+[dependencies]
+morepork = { path = "../../crates/morepork" }
+serde_json = "1"
+sha2 = "0.10"
+tempfile = "3"
+libc = "0.2"

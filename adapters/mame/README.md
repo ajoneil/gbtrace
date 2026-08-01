@@ -15,9 +15,11 @@ mechanism (a `-system` flag selects; the per-system knowledge lives in the
 ## Approach (differs from the Stella/Gopher2600 adapters)
 
 MAME is far too large to link the way the Stella and Gopher2600 adapters embed
-their emulators. But the output must still be a **native `.morepork` file written
-through the morepork FFI** — no JSONL. MAME is driven for per-instruction state
-via its scripting/debugger, and that state is fed to the FFI to write native.
+their emulators. But the output must still be a **native `.morepork` file** —
+no JSONL. MAME is driven for per-instruction state via its scripting/debugger,
+and that state is written native through the morepork core crate (the adapter
+is Rust in the workspace; it needs no emulator embedding, so unlike the C/C++
+adapters it skips the FFI entirely).
 
 Two candidate mechanisms (finalise against installed MAME):
 
@@ -39,7 +41,8 @@ Either way the output is native morepork. Fields match the other adapters:
 
 ## How it works (implemented — full-speed)
 
-`morepork-mame` (Go + cgo/FFI) launches `mame a2600 -debug -debugger gdbstub`
+`morepork-mame` (Rust, morepork core crate; originally Go + cgo/FFI — ported
+byte-for-byte) launches `mame a2600 -debug -debugger gdbstub`
 headless and drives it over the **GDB remote protocol**, but does **not**
 single-step over the wire (that was ~19s/ROM). Instead, after the handshake
 (`qSupported` + fetch `target.xml` — MAME's gdbstub only answers `monitor`/`g`
@@ -52,8 +55,8 @@ debugger commands and then runs the machine at **full emulation speed**:
    RESULT byte, to stop at the verdict.
 3. `c` (continue) — runs full-speed to the verdict (or `-seconds_to_run` cap).
 4. `m80,4` at the stop reads the RESULT bytes; `monitor trace off` flushes the log.
-5. The `R…` lines are parsed into a native `.morepork` via the FFI; the RESULT
-   bytes land on the final (verdict) entry.
+5. The `R…` lines are parsed into a native `.morepork` via the core crate's
+   writer; the RESULT bytes land on the final (verdict) entry.
 
 **~1s/ROM including MAME launch** (~260ms of actual emulation), vs 19s for the
 old per-instruction stepping — ~70× faster on the emulation, and MAME is now a

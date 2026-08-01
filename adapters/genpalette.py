@@ -135,7 +135,7 @@ def emit_rust(path):
 
 
 emit_go(os.path.join(HERE, "gopher2600", "ntsc_palette.go"))
-emit_go(os.path.join(HERE, "mame", "ntsc_palette.go"))
 emit_c(os.path.join(HERE, "stella", "ntsc_palette.h"))
 emit_rust(os.path.join(HERE, "missingno", "src", "vcs_palette.rs"))
-print("wrote NTSC+PAL+SECAM palettes to gopher2600/, mame/ (.go), stella/ (.h) and missingno/src (.rs)")
+emit_rust(os.path.join(HERE, "mame", "src", "vcs_palette.rs"))
+print("wrote NTSC+PAL+SECAM palettes to gopher2600/ (.go), stella/ (.h), missingno/src and mame/src (.rs)")
