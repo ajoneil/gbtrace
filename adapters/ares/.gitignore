@@ -1,0 +1,7 @@
+# vendored emulator source (cloned by the Makefile, pinned)
+ares/
+# build artifacts
+build/
+morepork-ares
+# capture artifacts
+*.morepork
