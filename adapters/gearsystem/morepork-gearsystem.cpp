@@ -1,23 +1,23 @@
-// morepork-gearcoleco: a morepork adapter for the Gearcoleco emulator
-// (ColecoVision), a second, independent-lineage trace oracle for the TI VDP
-// test suite's `.col` builds alongside MAME's coleco driver.
+// morepork-gearsystem: a morepork adapter for the Gearsystem emulator in
+// SG-1000 mode, a second trace oracle for the TI VDP test suite's `.sg`
+// builds alongside MAME's sg1000 driver.
 //
-// Gearcoleco embeds cleanly (the core is a plain C++ library) and exposes
-// everything the ti-vdp catalogue names without patches: the full Z80
-// register file including the shadow set, WZ, I/R, IFF1/2, IM and HALT;
-// the eight VDP write registers, side-effect-free status
-// (Video::GetStatusReg, not the CPU-visible GetStatusFlags), the internal
-// address/latch/read-ahead machinery, and the beam position. The adapter
-// drives Processor::RunInstruction directly, mirroring the core's own
-// RunToVBlank tick loop, and logs one entry per instruction with the
-// RESULT block sampled live. The core's internal framebuffer already holds
-// raw TMS colour indices at 256x192, so the frame snapshot needs no
-// reverse mapping at all.
+// Same embedding shape as the gearcoleco adapter (the cores share an
+// author and API family — so this is a semi-independent lineage: a
+// different VDP implementation, but related craftsmanship; MAME remains
+// the fully-independent vote). Gearsystem's Video keeps the TMS-era
+// debug state private, so a small checked-in patch
+// (gearsystem-trace-api.patch) ports Gearcoleco's own upstream accessors
+// across: GetStatusReg (side-effect-free), GetBufferReg, GetAddressReg,
+// GetLatch, GetRenderLine, GetCycleCounter.
 //
-// The ColecoVision BIOS is required (Gearcoleco refuses to run without it)
-// and is deliberately not bundled: pass it with -bios.
+// The adapter drives Processor::RunInstruction directly (mirroring
+// RunToVBlank's tick loop — Gearsystem ticks video+audio only), logs one
+// entry per instruction with the RESULT block sampled live, and copies
+// the frame straight from the framebuffer, which holds raw TMS colour
+// indices in TMS9918 modes. No BIOS: SG-1000 carts boot at $0000.
 //
-//   morepork-gearcoleco -rom test.col -bios colecovision.rom -out trace.morepork
+//   morepork-gearsystem -rom test.sg -out trace.morepork
 
 #include <cstdint>
 #include <cstdio>
@@ -26,23 +26,24 @@
 #include <string>
 #include <vector>
 
-#include "GearcolecoCore.h"
+#include "GearsystemCore.h"
 #include "Processor.h"
 #include "Video.h"
 #include "Memory.h"
 #include "Audio.h"
+#include "Cartridge.h"
 
 #include "morepork.h"
 
-// The core's logger routes through this frontend-owned flag (part of
-// Gearcoleco's MCP debug plumbing); we are the frontend here.
+// The core's logger routes through this frontend-owned flag (part of the
+// Gear-family MCP debug plumbing); we are the frontend.
 bool g_mcp_stdio_mode = false;
 
-// RESULT convention (missingno-ti-vdp-tests include/result.inc, coleco shim).
-static const uint16_t kResultAddr = 0x7000;
+// RESULT convention (missingno-ti-vdp-tests include/result.inc, sg1000 shim).
+static const uint16_t kResultAddr = 0xC000;
 
-// Canonical TI VDP palette stamped into frame snapshots (matches the mame
-// and openmsx adapters): comparisons happen in colour-index space.
+// Canonical TI VDP palette stamped into frame snapshots (matches the other
+// TI VDP adapters): comparisons happen in colour-index space.
 static const uint8_t kTiVdpPalette[16 * 3] = {
     0, 0, 0,       0, 0, 0,       33, 200, 66,   94, 220, 120,
     84, 85, 237,   125, 118, 252, 212, 82, 77,   66, 235, 245,
@@ -65,10 +66,10 @@ static std::string jsonHeader(const std::string& spec, const std::string& romSha
   std::string h = "{";
   h += "\"_header\":true,";
   h += "\"format_version\":\"0.1.0\",";
-  h += "\"emulator\":\"gearcoleco\",";
-  h += "\"emulator_version\":\"" GEARCOLECO_PIN "\",";
+  h += "\"emulator\":\"gearsystem\",";
+  h += "\"emulator_version\":\"" GEARSYSTEM_PIN "\",";
   h += "\"rom_sha256\":\"" + romSha + "\",";
-  h += "\"system\":\"coleco\",";
+  h += "\"system\":\"sg1000\",";
   h += "\"model\":\"" + spec + "\",";
   h += "\"profile\":\"tier1\",";
   h += "\"fields\":[";
@@ -95,7 +96,6 @@ static std::string romId(const std::vector<uint8_t>& rom) {
 
 int main(int argc, char** argv) {
   const char* rom = nullptr;
-  const char* bios = nullptr;
   const char* out = "trace.morepork";
   std::string spec = "NTSC";
   int maxFrames = 30;
@@ -104,7 +104,6 @@ int main(int argc, char** argv) {
     std::string a = argv[i];
     auto next = [&]() { return (i + 1 < argc) ? argv[++i] : ""; };
     if (a == "-rom") rom = next();
-    else if (a == "-bios") bios = next();
     else if (a == "-out") out = next();
     else if (a == "-spec") spec = next();
     else if (a == "-frames") maxFrames = std::atoi(next());
@@ -113,13 +112,13 @@ int main(int argc, char** argv) {
     else if (a == "-frame=true" || a == "-frame=1") wantFrame = true;
     else {
       std::fprintf(stderr,
-                   "usage: morepork-gearcoleco -rom test.col -bios colecovision.rom"
+                   "usage: morepork-gearsystem -rom test.sg"
                    " [-out trace.morepork] [-spec NTSC] [-frames N] [-frame=false]\n");
       return 2;
     }
   }
-  if (!rom || !bios) {
-    std::fprintf(stderr, "error: -rom and -bios are required\n");
+  if (!rom) {
+    std::fprintf(stderr, "error: -rom is required\n");
     return 2;
   }
   if (spec != "NTSC") {
@@ -143,18 +142,17 @@ int main(int argc, char** argv) {
     std::fclose(f);
   }
 
-  GearcolecoCore core;
-  core.Init(GC_PIXEL_RGBA8888);
-  Memory* mem = core.GetMemory();
-  mem->LoadBios(bios);
-  if (!mem->IsBiosLoaded()) {
-    std::fprintf(stderr, "error: failed to load BIOS from %s\n", bios);
-    return 1;
-  }
+  GearsystemCore core;
+  core.Init(GS_PIXEL_RGBA8888);
   if (!core.LoadROM(rom)) {
     std::fprintf(stderr, "error: failed to load ROM %s\n", rom);
     return 1;
   }
+  if (!core.GetCartridge()->IsSG1000()) {
+    std::fprintf(stderr, "error: %s did not detect as an SG-1000 cartridge\n", rom);
+    return 1;
+  }
+  Memory* mem = core.GetMemory();
   Processor* proc = core.GetProcessor();
   Video* video = core.GetVideo();
   Audio* audio = core.GetAudio();
@@ -170,12 +168,11 @@ int main(int argc, char** argv) {
   auto u16f = [&](uint16_t v) { morepork_writer_set_u16(w, col[c++], v); };
   auto boolf = [&](bool v) { morepork_writer_set_bool(w, col[c++], v); };
 
-  // Drive the core's own tick loop (RunToVBlank's body) one instruction at
-  // a time, logging state at each instruction boundary. Audio is drained
-  // per frame like the core does, or its blip buffers overflow.
+  // Drive the core's own tick loop (RunToVBlank's body — video and audio
+  // only in Gearsystem) one instruction at a time.
   const int capFrames = std::max(2, maxFrames / 60) * 60;
   const long capInstructions = 200000000L;
-  std::vector<int16_t> sampleBuffer(GC_AUDIO_BUFFER_SIZE);
+  std::vector<int16_t> sampleBuffer(GS_AUDIO_BUFFER_SIZE);
   int sampleCount = 0;
   int framesDone = 0;
   bool verdict = false;
@@ -230,14 +227,12 @@ int main(int argc, char** argv) {
       audio->EndFrame(sampleBuffer.data(), &sampleCount);
     }
     audio->Tick(clocks);
-    mem->Tick(clocks);
   }
   if (!verdict)
     std::fprintf(stderr, "warning: no verdict within %d frames; trace ends at the budget\n", capFrames);
 
   if (wantFrame) {
-    // Let the readout render (it draws after the verdict latch), then
-    // grab the core's colour-index framebuffer directly.
+    // Let the readout render, then grab the colour-index framebuffer.
     for (int extra = 0; extra < 30;) {
       unsigned int clocks = proc->RunInstruction();
       if (video->Tick(clocks)) {
@@ -245,14 +240,17 @@ int main(int argc, char** argv) {
         audio->EndFrame(sampleBuffer.data(), &sampleCount);
       }
       audio->Tick(clocks);
-      mem->Tick(clocks);
     }
-    uint16_t* fb = video->GetFrameBuffer();
-    std::vector<uint8_t> pixels(GC_RESOLUTION_WIDTH * GC_RESOLUTION_HEIGHT);
-    for (size_t i = 0; i < pixels.size(); i++) pixels[i] = (uint8_t)(fb[i] & 0x0F);
-    morepork_writer_mark_frame_indexed(
-        w, GC_RESOLUTION_WIDTH, GC_RESOLUTION_HEIGHT, 8.0f / 7.0f,
-        kTiVdpPalette, 16, pixels.data(), pixels.size());
+    if (!video->IsSG1000Mode()) {
+      std::fprintf(stderr, "warning: VDP left TMS9918 mode; skipping frame snapshot\n");
+    } else {
+      uint16_t* fb = video->GetFrameBuffer();
+      std::vector<uint8_t> pixels(GS_RESOLUTION_SMS_WIDTH * GS_RESOLUTION_SMS_HEIGHT);
+      for (size_t i = 0; i < pixels.size(); i++) pixels[i] = (uint8_t)(fb[i] & 0x0F);
+      morepork_writer_mark_frame_indexed(
+          w, GS_RESOLUTION_SMS_WIDTH, GS_RESOLUTION_SMS_HEIGHT, 8.0f / 7.0f,
+          kTiVdpPalette, 16, pixels.data(), pixels.size());
+    }
   }
 
   if (morepork_writer_close(w) != 0) {

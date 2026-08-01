@@ -1,0 +1,7 @@
+# vendored emulator source (cloned by the Makefile, pinned + patched)
+gearsystem/
+# build artifacts
+*.o
+morepork-gearsystem
+# capture artifacts
+*.morepork

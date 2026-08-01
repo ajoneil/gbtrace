@@ -1,0 +1,58 @@
+diff --git a/src/Video.cpp b/src/Video.cpp
+index 18f0c16..372c947 100644
+--- a/src/Video.cpp
++++ b/src/Video.cpp
+@@ -563,6 +563,36 @@ bool Video::IsExtendedMode224()
+     return m_bExtendedMode224;
+ }
+ 
++u8 Video::GetStatusReg()
++{
++    return m_VdpStatus;
++}
++
++u8 Video::GetBufferReg()
++{
++    return m_VdpBuffer;
++}
++
++u16 Video::GetAddressReg()
++{
++    return m_VdpAddress;
++}
++
++bool Video::GetLatch()
++{
++    return m_bFirstByteInSequence;
++}
++
++int Video::GetRenderLine()
++{
++    return m_iRenderLine;
++}
++
++int Video::GetCycleCounter()
++{
++    return m_iCycleCounter;
++}
++
+ bool Video::IsSG1000Mode()
+ {
+     return m_bTMS9918;
+diff --git a/src/Video.h b/src/Video.h
+index 79880c1..f149bd5 100644
+--- a/src/Video.h
++++ b/src/Video.h
+@@ -85,6 +85,12 @@ public:
+     u8* GetCRAM();
+     u8* GetRegisters();
+     int GetTMS9918Mode();
++    u8 GetStatusReg();
++    u8 GetBufferReg();
++    u16 GetAddressReg();
++    bool GetLatch();
++    int GetRenderLine();
++    int GetCycleCounter();
+     u16 ColorFromPalette(int palette_color);
+     u16* GetFrameBuffer();
+     void Render32bit(u16* srcFrameBuffer, u8* dstFrameBuffer, GS_Color_Format pixelFormat, int size, bool overscan = false);
