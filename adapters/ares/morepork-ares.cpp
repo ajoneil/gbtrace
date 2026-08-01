@@ -1,24 +1,28 @@
 // morepork-ares: a morepork adapter embedding ares as an independent-lineage
-// trace oracle for the TI VDP test suite — the ColecoVision core today, with
-// the SG-1000 and MSX cores staged to follow (all three link into this
-// binary's build).
+// trace oracle for the TI VDP test suite, covering all of the suite's host
+// machines from one binary: ColecoVision (.col), SG-1000 and SC-3000 (.sg),
+// and MSX1 (.mx1, BIOS or C-BIOS via -bios).
 //
-// ares embeds as a static library (cmake target `ares` + `mia` for pak
+// ares embeds as a static library (cmake targets `ares` + `mia` for pak
 // construction) with a thin ares::Platform frontend. No source patches:
 // the CPU's per-instruction debugger hook routes tracer notifications to
 // Platform::log, and enabling the instruction tracer (`setTerminal(true)`)
 // gives us a synchronous callback at every instruction boundary, on the
 // CPU's own cothread — where we ignore the disassembly text and read the
-// core's public state directly (`ares::ColecoVision::cpu` is a Z80 with
-// public registers; `vdp` is a TMS9918 with public io/vram). The eight
-// write registers and status are reconstructed from ares' decomposed io
-// fields exactly as `TMS9918::register`/status read decode them.
+// core's state directly. Every system's CPU derives ares::Z80 and every
+// VDP derives ares::TMS9918, so one capture routine serves all rows via
+// base-class pointers; the eight write registers and status are
+// reconstructed from ares' decomposed io fields exactly as
+// `TMS9918::register`/the status read decode them.
 //
 // The frame comes from Platform::video, reverse-mapped against a palette
-// built at runtime by calling the core's own colour pipeline (vdp.color),
-// so no calibration table can drift.
+// built at runtime by calling the core's own colour pipeline, so no
+// calibration table can drift.
 //
 //   morepork-ares -system coleco -rom test.col -bios colecovision.rom -out trace.morepork
+//   morepork-ares -system sg1000 -rom test.sg  -out trace.morepork
+//   morepork-ares -system sc3000 -rom test.sg  -out trace.morepork
+//   morepork-ares -system msx1   -rom test.mx1 -bios cbios_msx1.rom -out trace.morepork
 
 // The TMS9918's io/dac/sprite/background state is protected in ares; the
 // adapter only reads it for tracing. The access-specifier override is
@@ -27,6 +31,8 @@
 #define protected public
 #include <ares/ares.hpp>
 #include <cv/cv.hpp>
+#include <sg/sg.hpp>
+#include <msx/msx.hpp>
 #undef protected
 #include <mia/mia.hpp>
 
@@ -38,9 +44,6 @@
 #include <unordered_map>
 
 #include "morepork.h"
-
-// RESULT convention (missingno-ti-vdp-tests include/result.inc, coleco shim).
-static const uint16_t kResultAddr = 0x7000;
 
 // Canonical TI VDP palette stamped into frame snapshots (matches the other
 // TI VDP adapters): comparisons happen in colour-index space.
@@ -61,16 +64,73 @@ static const char* kFields[] = {
 };
 static const size_t kNumFields = sizeof(kFields) / sizeof(kFields[0]);
 
-static std::string jsonHeader(const std::string& spec, const std::string& romSha,
-                              bool withFrame) {
+// --- system rows ---
+//
+// Every core exposes the same shapes (CPU : ares::Z80, VDP : ares::TMS9918),
+// so a row is names + base-class pointers + the RESULT convention address
+// (missingno-ti-vdp-tests include/result.inc and its machine shims).
+
+struct SysDef {
+  const char* cli;         // -system value
+  const char* id;          // morepork header `system`
+  const char* model;       // header `model` (nullptr: msx1 uses the bios name)
+  const char* mediumName;  // mia medium
+  const char* systemName;  // mia system
+  const char* loadName;    // ares system-tree name
+  const char* sysPakName;  // Platform::pak node name for the system
+  const char* cartPakName; // Platform::pak node name for the cartridge
+  bool needsBios;
+  uint16_t resultAddr;
+  ares::Z80* cpu;
+  ares::TMS9918* vdp;
+  bool (*load)(ares::Node::System&, nall::string);
+  uint8_t (*ramRead)(uint16_t address);
+  uint64_t (*color)(uint32_t index);
+};
+
+static uint8_t cvRam(uint16_t a) { return ares::ColecoVision::cpu.ram[a & 0x3FF]; }
+static uint8_t sgRam(uint16_t a) { return ares::SG1000::cpu.ram[a & (ares::SG1000::cpu.ram.size() - 1)]; }
+static uint8_t msxRam(uint16_t a) { return ares::MSX::cpu.ram[a]; }
+static uint64_t cvColor(uint32_t i) { return ares::ColecoVision::vdp.color(i); }
+static uint64_t sgColor(uint32_t i) { return ares::SG1000::vdp.color(i); }
+static uint64_t msxColor(uint32_t i) { return ares::MSX::vdp.colorMSX(i); }
+
+static const SysDef kSystems[] = {
+    {"coleco", "coleco", "NTSC", "ColecoVision", "ColecoVision",
+     "[Coleco] ColecoVision (NTSC)", "ColecoVision", "ColecoVision Cartridge",
+     true, 0x7000,
+     &ares::ColecoVision::cpu, &ares::ColecoVision::vdp,
+     ares::ColecoVision::load, cvRam, cvColor},
+    {"sg1000", "sg1000", "NTSC", "SG-1000", "SG-1000",
+     "[Sega] SG-1000 (NTSC)", "SG-1000", "SG-1000 Cartridge",
+     false, 0xC000,
+     &ares::SG1000::cpu, &ares::SG1000::vdp,
+     ares::SG1000::load, sgRam, sgColor},
+    // Same envelope as the SG-1000 (plus a keyboard and 2KB RAM); captures
+    // as the sg1000 system with the machine carried in `model`, matching
+    // the mame adapter.
+    {"sc3000", "sg1000", "SC-3000", "SC-3000", "SC-3000",
+     "[Sega] SC-3000 (NTSC)", "SC-3000", "SC-3000 Cartridge",
+     false, 0xC000,
+     &ares::SG1000::cpu, &ares::SG1000::vdp,
+     ares::SG1000::load, sgRam, sgColor},
+    {"msx1", "msx1", nullptr, "MSX", "MSX",
+     "[Microsoft] MSX (NTSC)", "MSX", "MSX Cartridge",
+     true, 0xE000,
+     &ares::MSX::cpu, &ares::MSX::vdp,
+     ares::MSX::load, msxRam, msxColor},
+};
+
+static std::string jsonHeader(const SysDef& sys, const std::string& model,
+                              const std::string& romSha, bool withFrame) {
   std::string h = "{";
   h += "\"_header\":true,";
   h += "\"format_version\":\"0.1.0\",";
   h += "\"emulator\":\"ares\",";
   h += "\"emulator_version\":\"" ARES_PIN "\",";
   h += "\"rom_sha256\":\"" + romSha + "\",";
-  h += "\"system\":\"coleco\",";
-  h += "\"model\":\"" + spec + "\",";
+  h += "\"system\":\"" + std::string(sys.id) + "\",";
+  h += "\"model\":\"" + model + "\",";
   h += "\"profile\":\"tier1\",";
   h += "\"fields\":[";
   for (size_t i = 0; i < kNumFields; i++) {
@@ -97,6 +157,7 @@ static std::string romId(const std::vector<uint8_t>& rom) {
 // --- capture state shared with the platform callbacks ---
 
 struct Capture {
+  const SysDef* sys = nullptr;
   MoreporkWriter* writer = nullptr;
   int col[64];
   long instructions = 0;
@@ -108,17 +169,10 @@ struct Capture {
   uint32_t frameWidth = 0, frameHeight = 0;
 } cap;
 
-using namespace ares::ColecoVision;
-
-static uint8_t resultByte(int offset) {
-  // CV RAM is 1KB at $6000-$7FFF, mirrored; $7000 maps to offset 0.
-  return cpu.ram[(kResultAddr + offset) & 0x3FF];
-}
-
 // Reconstruct the eight TMS9918 write registers from ares' decomposed io
 // fields (the exact inverse of TMS9918::register in io.cpp) and the status
 // byte from the flag state.
-static void vdpRegisters(uint8_t out[8]) {
+static void vdpRegisters(ares::TMS9918& vdp, uint8_t out[8]) {
   out[0] = (uint8_t)vdp.dac.io.externalSync | ((uint8_t)vdp.io.videoMode.bit(2) << 1);
   out[1] = (uint8_t)vdp.sprite.io.zoom
          | ((uint8_t)vdp.sprite.io.size << 1)
@@ -135,7 +189,7 @@ static void vdpRegisters(uint8_t out[8]) {
   out[7] = ((uint8_t)vdp.dac.io.colorForeground << 4) | (uint8_t)vdp.dac.io.colorBackground;
 }
 
-static uint8_t vdpStatus() {
+static uint8_t vdpStatus(ares::TMS9918& vdp) {
   return ((uint8_t)vdp.irqFrame.pending << 7)
        | ((uint8_t)vdp.sprite.io.overflow << 6)
        | ((uint8_t)vdp.sprite.io.collision << 5)
@@ -145,6 +199,9 @@ static uint8_t vdpStatus() {
 static void logInstruction() {
   if (!cap.tracing || cap.verdict) return;
   if (cap.instructions++ > cap.capInstructions) { cap.tracing = false; return; }
+  const SysDef& sys = *cap.sys;
+  ares::Z80& cpu = *sys.cpu;
+  ares::TMS9918& vdp = *sys.vdp;
   MoreporkWriter* w = cap.writer;
   size_t c = 0;
   auto u8f = [&](uint8_t v) { morepork_writer_set_u8(w, cap.col[c++], v); };
@@ -171,9 +228,9 @@ static void logInstruction() {
   boolf((bool)cpu.IFF2);
   boolf((bool)cpu.HALT);
   uint8_t regs[8];
-  vdpRegisters(regs);
+  vdpRegisters(vdp, regs);
   for (int i = 0; i < 8; i++) u8f(regs[i]);
-  u8f(vdpStatus());
+  u8f(vdpStatus(vdp));
   // controlValue is the live address pointer; controlLatch is the
   // write-phase flag (set after the first control byte).
   u16f((uint16_t)(vdp.io.controlValue & 0x3FFF));
@@ -181,11 +238,11 @@ static void logInstruction() {
   u8f((uint8_t)vdp.io.vramLatch);
   u16f((uint16_t)vdp.io.vcounter);
   u16f((uint16_t)vdp.io.hcounter);
-  uint8_t result = resultByte(0);
+  uint8_t result = sys.ramRead(sys.resultAddr);
   u8f(result);
-  u8f(resultByte(1));
-  u8f(resultByte(2));
-  u8f(resultByte(3));
+  u8f(sys.ramRead(sys.resultAddr + 1));
+  u8f(sys.ramRead(sys.resultAddr + 2));
+  u8f(sys.ramRead(sys.resultAddr + 3));
   morepork_writer_finish_entry(w);
 
   if (result == 0xA5 || result == 0x5A) cap.verdict = true;
@@ -194,12 +251,13 @@ static void logInstruction() {
 // --- ares platform ---
 
 struct MoreporkPlatform : ares::Platform {
+  const SysDef* sys = nullptr;
   std::shared_ptr<mia::Pak> gamePak;
   std::shared_ptr<mia::Pak> systemPak;
 
   auto pak(ares::Node::Object node) -> std::shared_ptr<vfs::directory> override {
-    if (node->name() == "ColecoVision") return systemPak->pak;
-    if (node->name() == "ColecoVision Cartridge") return gamePak->pak;
+    if (node->name() == sys->sysPakName) return systemPak->pak;
+    if (node->name() == sys->cartPakName) return gamePak->pak;
     return {};
   }
 
@@ -239,18 +297,32 @@ int main(int argc, char** argv) {
     else if (a == "-frame=true" || a == "-frame=1") wantFrame = true;
     else {
       std::fprintf(stderr,
-                   "usage: morepork-ares -system coleco -rom test.col -bios colecovision.rom"
-                   " [-out trace.morepork] [-spec NTSC] [-frames N] [-frame=false]\n");
+                   "usage: morepork-ares -system coleco|sg1000|sc3000|msx1 -rom <rom>"
+                   " [-bios <rom>] [-out trace.morepork] [-spec NTSC] [-frames N] [-frame=false]\n");
       return 2;
     }
   }
-  if (!rom || !bios) {
-    std::fprintf(stderr, "error: -rom and -bios are required\n");
+  if (!rom) {
+    std::fprintf(stderr, "error: -rom is required\n");
     return 2;
   }
-  if (system != "coleco") {
-    std::fprintf(stderr, "error: -system %s not yet wired (coleco only; sg1000/msx1 staged)\n", system.c_str());
+  const SysDef* sys = nullptr;
+  for (const auto& s : kSystems)
+    if (system == s.cli) sys = &s;
+  if (!sys) {
+    std::fprintf(stderr, "error: unknown -system %s (coleco, sg1000, sc3000, msx1)\n", system.c_str());
     return 2;
+  }
+  if (sys->needsBios && !bios) {
+    std::fprintf(stderr, "error: -system %s needs -bios\n", sys->cli);
+    return 2;
+  }
+  if (system == "msx1") {
+    // Known limitation at the pinned commit: the BIOS boots and programs
+    // the VDP but never dispatches the cartridge (ares' MSX leaves PPI
+    // port $AA unimplemented, the lead suspect for the slot scan). Tracked
+    // in the README; use morepork-openmsx for msx1 traces meanwhile.
+    std::fprintf(stderr, "warning: -system msx1 is experimental: the cartridge does not boot at the pinned ares commit\n");
   }
   if (spec != "NTSC") {
     std::fprintf(stderr, "error: -spec %s is not supported (NTSC only)\n", spec.c_str());
@@ -274,26 +346,55 @@ int main(int argc, char** argv) {
   }
 
   static MoreporkPlatform platform;
+  platform.sys = sys;
+  cap.sys = sys;
   ares::platform = &platform;
 
-  platform.gamePak = mia::Medium::create("ColecoVision");
-  if (platform.gamePak->load(nall::string{rom}) != successful) {
+  // mia recognizes media by extension; the suite's .mx1 isn't in its MSX
+  // list, so route those through a temp copy with a .rom suffix.
+  std::string romPath = rom;
+  std::string tempRom;
+  if (system == "msx1") {
+    const char* tmpdir = std::getenv("TMPDIR");
+    tempRom = std::string(tmpdir ? tmpdir : "/tmp") + "/morepork-ares-XXXXXX.rom";
+    int fd = mkstemps(tempRom.data(), 4);
+    if (fd < 0) { std::fprintf(stderr, "error: mkstemps failed\n"); return 1; }
+    FILE* tf = fdopen(fd, "wb");
+    std::fwrite(romBytes.data(), 1, romBytes.size(), tf);
+    std::fclose(tf);
+    romPath = tempRom;
+  }
+
+  platform.gamePak = mia::Medium::create(sys->mediumName);
+  bool gameLoaded = platform.gamePak->load(nall::string{romPath.c_str()}) == successful;
+  if (!tempRom.empty()) std::remove(tempRom.c_str());
+  if (!gameLoaded) {
     std::fprintf(stderr, "error: mia failed to load ROM %s\n", rom);
     return 1;
   }
-  platform.systemPak = mia::System::create("ColecoVision");
-  if (platform.systemPak->load(nall::string{bios}) != successful) {
-    std::fprintf(stderr, "error: mia failed to load BIOS %s\n", bios);
+  platform.systemPak = mia::System::create(sys->systemName);
+  auto systemLoad = sys->needsBios ? platform.systemPak->load(nall::string{bios})
+                                   : platform.systemPak->load();
+  if (systemLoad != successful) {
+    std::fprintf(stderr, "error: mia failed to load the %s system%s%s\n",
+                 sys->systemName, bios ? " with BIOS " : "", bios ? bios : "");
     return 1;
   }
 
   ares::Node::System root;
-  if (!ares::ColecoVision::load(root, "[Coleco] ColecoVision (NTSC)")) {
-    std::fprintf(stderr, "error: ares failed to load the ColecoVision system\n");
+  if (!sys->load(root, nall::string{sys->loadName})) {
+    std::fprintf(stderr, "error: ares failed to load %s\n", sys->loadName);
     return 1;
   }
   if (auto port = root->find<ares::Node::Port>("Cartridge Slot")) {
     port->allocate();
+    port->connect();
+  }
+  // The MSX BIOS scans the keyboard matrix at boot; without the peripheral
+  // the PPI port reads are unimplemented and the BIOS never dispatches the
+  // cartridge.
+  if (auto port = root->find<ares::Node::Port>("Keyboard")) {
+    port->allocate("Japanese");
     port->connect();
   }
 
@@ -311,7 +412,13 @@ int main(int argc, char** argv) {
     return 1;
   }
 
-  std::string header = jsonHeader(spec, romId(romBytes), wantFrame);
+  std::string model = sys->model ? sys->model : [&] {
+    // msx1: record which BIOS hosted the run.
+    std::string b = bios;
+    auto slash = b.find_last_of('/');
+    return slash == std::string::npos ? b : b.substr(slash + 1);
+  }();
+  std::string header = jsonHeader(*sys, model, romId(romBytes), wantFrame);
   cap.writer = morepork_writer_new(out, header.c_str(), header.size());
   if (!cap.writer) { std::fprintf(stderr, "error: writer_new failed\n"); return 1; }
   for (size_t i = 0; i < kNumFields; i++)
@@ -330,10 +437,10 @@ int main(int argc, char** argv) {
     for (int extra = 0; extra < 30; extra++) root->run();
     if (cap.frameWidth > 0) {
       // Build the exact reverse map from the core's own colour pipeline:
-      // Screen palette entries are vdp.color() n64 RGB48 collapsed to RGB24.
+      // Screen palette entries are the core's n64 RGB48 collapsed to RGB24.
       std::unordered_map<uint32_t, uint8_t> exact;
       for (uint32_t i = 0; i < 16; i++) {
-        n64 c = vdp.color(i);
+        uint64_t c = sys->color(i);
         uint32_t key = (uint32_t)(c >> 40 & 0xFF) << 16
                      | (uint32_t)(c >> 24 & 0xFF) << 8
                      | (uint32_t)(c >> 8 & 0xFF);
@@ -343,8 +450,7 @@ int main(int argc, char** argv) {
       const uint32_t x0 = w > 256 ? (w - 256) / 2 : 0;
       const uint32_t y0 = h > 192 ? (h - 192) / 2 : 0;
       std::vector<uint8_t> pixels(256 * 192, 0);
-      bool ok = w >= 256 && h >= 192;
-      if (ok) {
+      if (w >= 256 && h >= 192) {
         for (uint32_t y = 0; y < 192; y++) {
           for (uint32_t x = 0; x < 256; x++) {
             uint32_t rgb = cap.frame[(size_t)(y0 + y) * w + x0 + x] & 0xFFFFFF;
@@ -356,7 +462,7 @@ int main(int argc, char** argv) {
               // nearest, colours 1-15
               int best = INT32_MAX;
               for (uint32_t i = 1; i < 16; i++) {
-                n64 cc = vdp.color(i);
+                uint64_t cc = sys->color(i);
                 int dr = (int)(rgb >> 16 & 0xFF) - (int)(cc >> 40 & 0xFF);
                 int dg = (int)(rgb >> 8 & 0xFF) - (int)(cc >> 24 & 0xFF);
                 int db = (int)(rgb & 0xFF) - (int)(cc >> 8 & 0xFF);

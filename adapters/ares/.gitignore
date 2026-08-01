@@ -3,5 +3,7 @@ ares/
 # build artifacts
 build/
 morepork-ares
+# mia game databases staged beside the binary by make
+Database/
 # capture artifacts
 *.morepork

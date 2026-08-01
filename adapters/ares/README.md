@@ -1,9 +1,11 @@
 # morepork-ares
 
 A morepork adapter embedding [ares](https://ares-emu.net/) as an
-**independent-lineage trace oracle** for the TI VDP test suite — the
-ColecoVision core today; the SG-1000 and MSX cores build into the same
-binary and are staged to be wired next (`-system` reports them as such).
+**independent-lineage trace oracle** for the TI VDP test suite, covering
+the suite's hosts from one binary: `-system coleco` (`.col`), `sg1000`
+and `sc3000` (`.sg` — the SC-3000 captures as the `sg1000` system with
+the machine in `model`, matching the mame adapter), and `msx1` (`.mx1`,
+**experimental** — see limitations).
 
 ## How it works
 
@@ -53,9 +55,29 @@ The suite's harness initializes everything it reads, so verdicts agree;
 a future test probing uninitialized state has three votes to compare
 (and hardware endorsement to arbitrate).
 
+The sg1000 and sc3000 rows verify the same way: sanity.sg PASSes on both
+at 99.6% agreement with the matching MAME captures (again only the
+pre-init power-on entries differ).
+
 ```
 morepork-ares -system coleco -rom test.col -bios colecovision.rom -out trace.morepork
+morepork-ares -system sg1000 -rom test.sg -out trace.morepork
+morepork-ares -system sc3000 -rom test.sg -out trace.morepork
 ```
 
-Flags: `-system coleco` `-rom` `-bios` (required) `-out` `-spec NTSC`
-`-frames` (budget cap) `-frame=false`.
+Flags: `-system coleco|sg1000|sc3000|msx1` `-rom` `-bios` (coleco/msx1)
+`-out` `-spec NTSC` `-frames` (budget cap) `-frame=false`.
+
+## Known limitations
+
+- **msx1 does not boot the cartridge** at the pinned ares commit: with a
+  real Japanese MSX BIOS (or C-BIOS) the machine boots, sizes RAM, and
+  programs the VDP, but never dispatches the cart's INIT vector. ares'
+  MSX leaves PPI port `$AA` reads unimplemented (`CPU::in`), the lead
+  suspect for the BIOS slot scan; the row is wired end-to-end (mia
+  routes the suite's `.mx1` through a `.rom`-suffixed temp copy since
+  mia doesn't know the extension, and the keyboard peripheral must be
+  connected or the BIOS hangs earlier). Revisit on an ares bump; use
+  morepork-openmsx for msx1 traces meanwhile.
+- mia resolves game databases beside the running binary; `make` stages
+  `Database/` there (gitignored).

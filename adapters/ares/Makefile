@@ -51,6 +51,8 @@ $(TARGET): morepork-ares.cpp extract-flags.py $(BUILD)/ares/libares.a | $(FFI_LI
 	  $$(find $(BUILD)/thirdparty -name '*.a' 2>/dev/null) \
 	  -Wl,--end-group \
 	  $(abspath $(FFI_LIB)) -lm -ldl -lpthread -o $(TARGET)
+	# mia resolves game databases beside the running binary (Path::program()).
+	rm -rf Database && cp -r $(ARES_DIR)/mia/Database Database
 
 clean:
-	rm -rf build $(TARGET)
+	rm -rf build Database $(TARGET)
