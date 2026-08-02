@@ -1,28 +1,4 @@
 use morepork::*;
-use std::path::PathBuf;
-
-#[test]
-fn parse_profiles() {
-    let suites_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .unwrap()
-        .parent()
-        .unwrap()
-        .join("test-suites");
-
-    let gbmicrotest = Profile::load(suites_dir.join("gbmicrotest/profile.toml")).unwrap();
-    assert_eq!(gbmicrotest.name, "gbmicrotest");
-    assert!(gbmicrotest.fields.contains(&"pc".to_string()));
-    assert!(gbmicrotest.fields.contains(&"lcdc".to_string()));
-    assert!(gbmicrotest.fields.contains(&"vram_addr".to_string()));
-    assert!(gbmicrotest.memory.contains_key("test_result"));
-
-    let blargg = Profile::load(suites_dir.join("blargg/profile.toml")).unwrap();
-    assert!(blargg.fields.contains(&"pix".to_string()));
-    assert!(blargg.fields.contains(&"div".to_string()));
-    // blargg has ppu registers + output but not internal/writes
-    assert!(!blargg.fields.contains(&"vram_addr".to_string()));
-}
 
 #[test]
 fn profile_rejects_unknown_layer() {
@@ -190,25 +166,6 @@ vdp = "registers"
 "#;
     let err = Profile::parse(toml).unwrap_err().to_string();
     assert!(err.contains("unknown subsystem 'vdp'"), "{err}");
-}
-
-#[test]
-fn parse_every_suite_profile() {
-    let suites_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .parent().unwrap()
-        .parent().unwrap()
-        .join("test-suites");
-    let mut parsed = 0;
-    for entry in std::fs::read_dir(&suites_dir).unwrap() {
-        let profile_path = entry.unwrap().path().join("profile.toml");
-        if profile_path.exists() {
-            let p = Profile::load(&profile_path)
-                .unwrap_or_else(|e| panic!("{}: {e}", profile_path.display()));
-            assert_eq!(p.system, "dmg", "{}", profile_path.display());
-            parsed += 1;
-        }
-    }
-    assert!(parsed >= 10, "expected all suite profiles, parsed {parsed}");
 }
 
 #[test]

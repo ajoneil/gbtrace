@@ -1,6 +1,5 @@
 receipts/
 target/
-web/pkg/
 build/
 *.morepork
 *.morepork.jsonl

@@ -1,35 +1,31 @@
 ## Project overview
 
-morepork captures detailed execution traces from Game Boy emulators and provides tooling
-(CLI, WASM-powered web viewer) to inspect and compare them. The repository hosts:
+morepork captures detailed execution traces from emulators and provides tooling to
+inspect and compare them. The repository hosts:
 
 - A Rust core library (`crates/morepork`) that defines the trace format, profile schema,
   query engine, disassembler, snapshots, and downsampling.
-- WASM (`crates/morepork-wasm`) and C FFI (`crates/morepork-ffi`) bindings on top of that core.
+- C FFI bindings (`crates/morepork-ffi`) on top of that core.
 - Per-emulator **adapters** (`adapters/<emu>/`) that drive each emulator and emit traces by
-  linking against the Rust core via the C FFI (or, for `missingno`, native Rust).
-- Pre-captured **test-suite traces** rendered into a static web app (`web/`).
+  linking against the Rust core via the C FFI (or, for the Rust adapters, the core crate
+  directly).
+
+morepork began as **gbtrace**, a Game Boy trace tool. The Game Boy systems and adapters
+are still fully supported, but the in-repo test-ROM suites (`test-suites/`), the
+trace-generation pipeline (`scripts/`, Makefile trace targets, `traces.yml`), and the
+WASM web viewer (`web/`, `crates/morepork-wasm`, `deploy.yml`) were removed once they
+stopped being maintained — they live on in git history (see the README's Origins
+section). morepork no longer runs full-suite trace generation itself; how outside
+projects drive the adapters is up to them.
 
 ## Common commands
 
-All build orchestration is in the top-level `Makefile`. From the repo root:
-
 ```bash
-make cli                        # build target/release/morepork
-make wasm                       # build WASM module into web/pkg/
-make ffi                        # build target/release/libmorepork_ffi.a + header
-make adapters                   # build every adapter binary in adapters/<emu>/morepork-<emu>
-make traces                     # generate every trace (run with -j$(nproc))
-make traces-gbmicrotest         # one suite (similar targets exist per suite)
-make traces EMUS=gambatte,mgba  # restrict which emulators run
-make site                       # assemble deployable site in build/site/
-make serve                      # local dev server (uses scripts/devserver.py)
-make clean                      # rm -rf build/
+make cli        # build target/release/morepork
+make ffi        # build target/release/libmorepork_ffi.a + header
+make adapters   # build the adapter binaries in adapters/<emu>/morepork-<emu>
+make clean      # rm -rf build/
 ```
-
-The Makefile dynamically generates per-(suite × ROM × emulator) rules via
-`scripts/gen-rules.py`, written to `build/rules.mk` and `-include`d. To regenerate after
-changing the script or ROM lists, `make clean` (or just delete `build/rules.mk`).
 
 ### Rust workspace
 
@@ -37,14 +33,15 @@ changing the script or ROM lists, `make clean` (or just delete `build/rules.mk`)
 - `cargo test -p morepork` — run library tests (integration + roundtrip in
   `crates/morepork/tests/`).
 - `cargo check` — type check across the workspace.
-- The workspace is defined in the root `Cargo.toml`. `adapters/missingno` is **excluded**
-  from the workspace and builds independently with its own `cargo build --release`
-  inside its `Makefile` (because it is a vendored emulator with its own dep tree).
+- The workspace is defined in the root `Cargo.toml` (core, FFI, and the `mame`/`openmsx`
+  adapters). `adapters/missingno` is **excluded** from the workspace and builds
+  independently (its `missingno-vcs` dependency is a path dep on a sibling
+  `~/Projects/missingno` checkout).
 
 ### Running the CLI
 
-`morepork` (the binary) provides `info`, `convert`, `query`, `frames`, `render`, `diff`.
-Examples:
+`morepork` (the binary) provides `info`, `convert`, `query`, `frames`, `render`,
+`downsample`, `diff`. Examples:
 
 ```bash
 target/release/morepork info trace.morepork
@@ -55,42 +52,54 @@ target/release/morepork convert trace.morepork.jsonl -o trace.morepork
 
 ## Architecture
 
-**Multi-system effort (active):** morepork is being generalized beyond the Game Boy
-(working name "emutrace"). The architecture, constraints, and order of work live
-in `docs/multi-system.md` — read it before touching `profile.rs`, `header.rs`,
-`query.rs`, the `family/` modules, or the web viewer. Long-running efforts keep
-their live status in `receipts/<effort>/ROADMAP.md` (receipts/ is gitignored —
-never reference specific receipt paths from committed files).
+**Multi-system design:** the architecture, constraints, and order of work live in
+`docs/multi-system.md` — read it before touching `profile.rs`, `header.rs`, `query.rs`,
+or the `system/` and `hardware/` modules. Long-running efforts keep their live status
+in `receipts/<effort>/ROADMAP.md` (receipts/ is gitignored — never reference specific
+receipt paths from committed files).
 
 ### Trace format (`crates/morepork/src/format/`)
 
-- Native binary format (`.morepork`): magic `MPRK`, current `VERSION = 2`. Layout is
+- Native binary format (`.morepork`): magic `MPRK`. Layout is
   `[header zstd-JSON] [snapshots/chunks interleaved] [footer]`. Each chunk holds up to
   `DEFAULT_CHUNK_SIZE` (65536) entries with field groups compressed independently using
   Arrow IPC + zstd. See the doc comment at the top of `format/mod.rs` for the layout.
-- Snapshot records (tag `SNAP`) carry typed bulk state at specific entry indices —
-  used for frame boundaries (with optional 160×144 screen pixels) and initial state
-  (memory, APU).
+- Snapshot records (tag `SNAP`) carry bulk state at specific entry indices — `frame`
+  (raw GB pixel bytes, or `snapshot::IndexedFrame` for `indexed8` systems) and `memory`
+  (`snapshot::MemoryRegion`).
 - JSONL format (`.morepork.jsonl`): first line is a header with `_header: true`, every
   subsequent line is one `TraceEntry` keyed by field name. Convenient for emulators that
   cannot link against the Rust core; can be converted via `morepork convert`.
+- Trace-file backward compatibility is **not** required — regenerate traces freely
+  after format changes.
+
+### Systems (`crates/morepork/src/system/`, `src/hardware/`)
+
+A static registry hosts one `System` per machine (`dmg`, `cgb`, `nes`, `vcs`, `sg1000`,
+`coleco`, `msx1`) on shared `Isa`s (`sm83`, `6502`, `z80`). Chips shared across systems
+(the 6502, the Z80, the TMS9918A "TI VDP") live in `hardware/`; single-system silicon
+stays with its system (the SM83 in `system/gb`). Each system entry carries its field
+catalogue, semantic query phrases, and diff-alignment hints; GB frame reconstruction
+(`system/gb/framebuffer.rs`, `vram.rs`) is a system capability keyed on `pix_format`.
 
 ### Profiles (`crates/morepork/src/profile.rs`)
 
-A trace profile (TOML) declares the trigger granularity (`instruction` / `mcycle` /
-`tcycle`) and which subsystem-layer fields are captured:
+A trace profile (TOML) declares the target `system` (absent ⇒ `dmg`), the trigger
+granularity (`instruction` / `cycle` / `mcycle` / `tcycle`), and which subsystem-layer
+fields are captured:
 
 ```toml
 [profile]
-name = "gbmicrotest"
-trigger = "tcycle"
+name = "smoke"
+system = "sg1000"
+trigger = "instruction"
 
 [fields]
-cpu = ["pc", "sp", "a", "f", "b", "c", "d", "e", "h", "l"]
-ppu = ["lcdc", "stat", "ly", "lyc", "scy", "scx"]
+cpu = "registers"
+vdp = ["registers", "internal"]
 
 [fields.memory]
-test_pass = "FF82"        # arbitrary memory watch fields
+test_result = "C000"      # arbitrary memory watch fields
 ```
 
 Field metadata (type, dictionary-encoded, nullable) is fixed in code per subsystem layer
@@ -99,98 +108,48 @@ Field metadata (type, dictionary-encoded, nullable) is fixed in code per subsyst
 ### Query engine (`query.rs`, `comparison.rs`)
 
 The `--where` flag in `morepork query` accepts conditions like `pc=0x0150`, `a changes`,
-`flag z becomes set`, `pc&0xFF00=0xC000`. `morepork diff` uses a sync condition (default
-`pc`) to align two traces before reporting per-field divergence and match percentages.
+`flag z becomes set`, `pc&0xFF00=0xC000`, plus per-system semantic phrases (`lcd on`,
+`vblank starts`). `morepork diff` uses a sync condition (default `auto`) to align two
+traces before reporting per-field divergence and match percentages.
 
 ### Adapters
 
 Each adapter is a stand-alone CLI named `morepork-<emu>` placed at
-`adapters/<emu>/morepork-<emu>` (this exact path is hard-coded in `gen-rules.py` and the
-trace shell scripts). All adapters expose the same surface:
+`adapters/<emu>/morepork-<emu>`. All adapters expose the same frozen surface
+(downstream tooling relies on it):
 
 ```
 --rom <path> --profile <profile.toml> --output <trace.morepork>
-[--frames N] [--stop-when ADDR=VAL] [--stop-opcode HEX] [--reference <ref.pix>]
+[--frames N] [--stop-when ADDR=VAL] [--stop-opcode HEX] [--reference <ref>] [--model M]
 ```
 
-C/C++ adapters (`gambatte`, `sameboy`, `mgba`, `gateboy`, `docboy`, `bgb`) link against
-`libmorepork_ffi.a` (header at `crates/morepork-ffi/morepork.h`). The Rust adapter
-(`missingno`) uses the core crate directly. Per-adapter build details live in
-`adapters/<emu>/Makefile` and may invoke nested cmake/scons builds against vendored
-emulator sources (which are gitignored — see `.gitignore`).
+Current adapters and their systems:
 
-Adapters honour the profile's `trigger`: `instruction` emits one entry per opcode;
-`tcycle` emits one entry per T-cycle (`docboy`, `missingno`, and `sameboy` support
-this). The **sameboy** adapter reaches T-cycle granularity via a small checked-in
-patch, `adapters/sameboy/sameboy-tcycle.patch` (adds `GB_set_tcycle_callback`,
-firing once per T-cycle inside `GB_advance_cycles`); `make lib` in that dir applies
-it before building `libsameboy`. With no callback the patch is a no-op, so
-instruction-mode behaviour is unchanged. (Before this, sameboy hardcoded
-`trigger:"instruction"` regardless of the profile — all suite profiles are `tcycle`.)
+- **gambatte** (C++, FFI) — GB/CGB
+- **sameboy** (C++, FFI) — GB/CGB (T-cycle via checked-in `sameboy-tcycle.patch`)
+- **docboy** (C++, FFI) — GB + CGB (two binaries, compile-time split)
+- **mgba** (C, FFI) — GB
+- **gateboy** (C++, FFI) — GB (gate-level)
+- **bgb** (C, FFI) — GB/CGB (experimental, Wine)
+- **missingno** (Rust, workspace-excluded) — GB/CGB (`morepork-missingno`) + VCS
+  (`morepork-missingno-vcs`; needs the sibling missingno checkout)
+- **stella** (C++, FFI) — VCS
+- **gopher2600** (Go/cgo, FFI) — VCS
+- **mame** (Rust, core crate, workspace member) — VCS + SG-1000/SC-3000/ColecoVision
+- **openmsx** (Rust, core crate, workspace member) — MSX1
+- **ares** (C++, FFI) — ColecoVision/SG-1000/SC-3000/MSX1
+- **gearsystem** (C++, FFI) — SG-1000
+- **gearcoleco** (C++, FFI) — ColecoVision
 
-The **bgb** adapter is experimental and excluded from CI/site (see
-`adapters/bgb/README.md`). The **mgba** adapter has been removed from the trace pipeline
-but the directory still builds.
+C/C++/Go adapters link `libmorepork_ffi.a` (header at `crates/morepork-ffi/morepork.h`).
+Per-adapter build details live in `adapters/<emu>/Makefile` and may invoke nested
+cmake/scons builds against vendored emulator sources (which are gitignored). Some
+adapters carry checked-in patches against their upstream (`sameboy-tcycle.patch`,
+`stella-trace-api.patch`, `gearsystem-trace-api.patch`). `adapters/genpalette.py`
+generates the canonical VCS NTSC/PAL/SECAM palette tables shared by the VCS adapters.
 
-### Test suites (`test-suites/`)
+### CI (`.github/workflows/`)
 
-Each suite directory contains the ROMs (`*.gb`/`*.gbc`) plus a `profile.toml`. Trace
-generation goes through one of the per-suite shell scripts (`scripts/trace-<suite>.sh`)
-which invoke the adapter, then use the CLI to determine pass/fail (typically by querying a
-"magic" memory address) and rename the output to `<rom>_<emu>_<system>_<status>.morepork`.
-
-**System dimension (DMG / CGB).** DMG and CGB are modelled as *separate but related
-systems* (not two configs of one system) — the intended direction as morepork grows toward
-more systems. Which systems a ROM runs under is decided in `scripts/gen-rules.py` by a
-per-suite policy: `root_models` (`dmg`/`cgb`/both), an optional `cgb/` subdir holding a
-curated CGB-only ROM set (from `missingno-gbc`), `gambatte` mode (system from filename tags
-`_dmg08`/`_cgb04c`/`_blank`), and `ref_driven` (screenshot suites run a system only when a
-matching reference exists). A build can be sharded to one system with `SYSTEMS=dmg|cgb`
-(gen-rules' 2nd arg / the Makefile var); CI runs one job per `(suite × emulator × system)`.
-The system is passed to the trace scripts via the `MODEL` env var (→ the adapter `--model`,
-which selects the hardware revision: dmg→DMG-B, cgb→CGB-C). docboy selects DMG/CGB at
-compile time, so `(docboy, cgb)` resolves to the separate `morepork-docboy-cgb` binary.
-
-**Screenshot references** are raw **RGB555** (`.rgb555`, 160×144×3 bytes, 5-bit/channel),
-generated from a checked-in `.png` by `make pix-refs` (`scripts/png-to-pix.py`). Comparing
-at the CGB's native 5-bit precision is expansion-neutral. `scripts/ref-lib.sh`'s
-`find_ref` picks the model-appropriate reference (CGB-specific `_cgb04c`/`_cgb_c`/`-cgb`,
-falling back to the DMG/base ref). Gambatte `_out<hex>`/`_blank`/`_outaudio` tests need no
-reference image — the expected value is decoded from the filename (`check-gambatte-hex.py`,
-adapter `--report-audio`).
-
-`scripts/manifest.py` writes a `manifest.json` per suite trace dir, keyed per test with a
-`systems: { dmg: {emu: status}, cgb: {emu: status} }` map. The emulator list is hard-coded
-near the top — keep it in sync with the `EMUS`/`ADAPTERS` Makefile vars. The per-suite
-system map in `traces.yml`'s matrix-setup also mirrors the gen-rules policy.
-
-### Web viewer (`web/`)
-
-Lit-based static site (no bundler). `web/index.html` imports `lit` from a CDN via an
-import map. Components in `web/src/components/` use the WASM bridge to read traces from the
-same `morepork` core that powers the CLI. The test picker has a **DMG/CGB toggle** and reads
-trace blobs from a configurable base URL (`window.MOREPORK_TRACE_BASE`); manifests + ROMs
-are same-origin. `make site` assembles `build/site/` for local serving.
-
-**Trace hosting.** The full trace set (~20 GB) far exceeds the 1 GB GitHub Pages limit, so
-**Pages hosts only the app + manifests + ROMs + profiles**, and the `.morepork` blobs live
-on **DigitalOcean Spaces** (S3-compatible). `traces.yml` `aws s3 sync`s the blobs up;
-`deploy.yml` injects the Spaces CDN URL as `window.MOREPORK_TRACE_BASE`. Required repo
-secrets/vars: `SPACES_KEY`/`SPACES_SECRET` (secrets), `SPACES_BUCKET`/`SPACES_REGION`/
-`TRACE_BASE` (vars).
-
-### CI workflows (`.github/workflows/`)
-
-- `build.yml` — builds CLI/FFI/WASM + adapters, uploads artifacts (docboy ships two
-  binaries: `morepork-docboy` + `morepork-docboy-cgb`).
-- `traces.yml` — generates traces per `(suite × emulator)` via `make traces-<suite>`
-  (which encodes the model policy), uploads blobs to Spaces + tiny filename-list artifacts.
-- `deploy.yml` — rebuilds manifests from the filename lists, assembles + deploys the Pages
-  site (no blobs).
-
-`gateboy` and `mgba` are no longer in automated collection (their adapter dirs still
-build). When adding/removing an emulator or test suite, update **all of**: the Makefile
-(`ADAPTERS`, `EMUS`, suite vars + trace dirs + `traces-<suite>` target), `scripts/gen-rules.py`
-(default emus, `SUITES` table), the relevant `scripts/trace-<suite>.sh`,
-`scripts/manifest.py` (`EMULATORS`), `web/src/components/test-picker.js` (`EMULATORS`,
-`TEST_SUITES`), and the workflow YAMLs.
+- `build.yml` — builds the CLI + FFI library, runs `cargo test -p morepork`, then builds
+  the GB adapter matrix (gambatte, sameboy, missingno, docboy) against freshly cloned
+  upstreams, and uploads artifacts. The other adapters are not built in CI.

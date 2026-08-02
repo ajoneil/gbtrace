@@ -2,9 +2,10 @@
 resolver = "2"
 members = [
     "crates/morepork",
-    "crates/morepork-wasm",
     "crates/morepork-ffi",
     "adapters/mame",
     "adapters/openmsx",
 ]
+# missingno stays out of the workspace: its missingno-vcs dependency is a
+# path dep on a sibling checkout outside this repo.
 exclude = ["adapters/missingno"]

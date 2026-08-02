@@ -1,101 +1,74 @@
 # morepork
 
-**Capture and explore detailed execution traces from emulators — across the Game Boy, Game Boy Color, and Atari VCS.**
+**Capture and compare detailed execution traces from emulators.**
 
-morepork records what happens inside an emulated system — every instruction, register value, CPU flag, and IO/video state change — and provides tools to explore, query, and compare that data. Use it to understand how the hardware works, debug emulator behaviour, investigate how software uses specific features, or verify accuracy against a reference implementation.
+morepork records what happens inside an emulated system — every instruction, register value, CPU flag, and IO/video state change — and provides tools to explore, query, and compare that data. Use it to understand how the hardware works, debug emulator behaviour, investigate how software uses specific features, or verify accuracy against independent reference implementations.
 
-Originally built for the Game Boy, morepork now spans multiple systems that share one binary trace format and one toolchain.
+The core is one binary trace format and one toolchain shared across systems, plus per-emulator **adapters** that drive each emulator and emit traces. Running the same test ROM through adapters for emulators with independent lineages turns disagreement between traces into a precise, entry-level diff.
 
-**[Try the web viewer](https://ajoneil.github.io/morepork/)** — browse pre-captured traces from hundreds of test ROMs across multiple emulators, or upload your own.
+## Origins
+
+morepork began life as **gbtrace**, a Game Boy trace tool, and grew into the multi-system tool it is now. Two large pieces from that era were retired once they stopped being maintained and are **available in git history**: the WASM-powered **web viewer** (`web/` + `crates/morepork-wasm`, hosted on GitHub Pages), and the **pre-captured trace library** — the in-repo test-ROM suites (~600 ROMs across 17 suites in `test-suites/`), the `scripts/` trace-generation pipeline, and the CI that built and hosted the trace corpus. The Game Boy *systems and adapters* remain fully supported. morepork no longer runs full-suite trace generation itself; how outside projects drive the adapters is up to them.
 
 ## Supported systems
 
-Each trace is tagged with a **`system`** (which machine — `dmg`, `cgb`, `vcs`) and an **`isa`** (which CPU — `sm83`, `6502`). The `isa` selects the disassembler and flag vocabulary; the `system` selects the field catalogue, query phrases, and viewer panels. Everything else is self-described by the trace header, so the format, CLI, and web viewer stay system-agnostic.
+Each trace is tagged with a **`system`** (which machine) and an **`isa`** (which CPU). The `isa` selects the disassembler and flag vocabulary; the `system` selects the field catalogue and query phrases. Everything else is self-described by the trace header, so the format and CLI stay system-agnostic.
 
 | System | CPU | Captured state |
 | --- | --- | --- |
-| **Game Boy** (DMG) | Sharp SM83 | CPU registers & flags, PPU (LCDC/STAT/LY…), timer, interrupts, memory watches |
-| **Game Boy Color** (CGB) | Sharp SM83 | as Game Boy, plus colour PPU state and double-speed timing |
-| **Atari VCS / 2600** | MOS 6507 | 6507 registers & flags, TIA beam position (line/clock), RIOT timer and ports |
+| **Game Boy** (`dmg`) | Sharp SM83 (`sm83`) | CPU registers & flags, PPU (LCDC/STAT/LY…), timer, interrupts, memory watches |
+| **Game Boy Color** (`cgb`) | Sharp SM83 (`sm83`) | as Game Boy, plus colour PPU state and double-speed timing |
+| **Atari VCS / 2600** (`vcs`) | MOS 6507 (`6502`) | 6507 registers & flags, TIA beam position (line/clock), RIOT timer and ports |
+| **Sega SG-1000 / SC-3000** (`sg1000`) | Zilog Z80 (`z80`) | full Z80 register file incl. shadow set, TMS9918A VDP registers/status/beam |
+| **ColecoVision** (`coleco`) | Zilog Z80 (`z80`) | same Z80 + TMS9918A catalogue |
+| **MSX1** (`msx1`) | Zilog Z80 (`z80`) | same Z80 + TMS9918A catalogue |
+| **NES** (`nes`) | Ricoh 2A03 (`6502`) | 6502 registers & flags, PPU control/mask/beam |
 
-The Game Boy and Game Boy Color are **distinct systems that share the `sm83` ISA** — the same disassembler and frame rendering — so the CGB is related to the DMG but not the same machine: it adds colour palettes, double-speed, VRAM/WRAM banks, and HDMA. The Atari VCS runs a `6502` (the 6507), with NTSC, PAL, and SECAM as `model`s within the `vcs` system.
+Systems that share silicon share an ISA: the Game Boy's DMG and CGB are both `sm83`; the NES's 2A03 and the VCS's 6507 are both `6502`; the SG-1000 line shares the `z80` ISA and the TMS9918A ("TI VDP") catalogue.
 
-## Features
+## Adapters
 
-- **Detailed execution traces** — capture every register value, CPU flag, and IO/video state change, per-instruction or per-T-cycle
-- **Per-CPU disassembly** in the web viewer — SM83 for the Game Boy, MOS 6502/6507 for the Atari VCS — shown inline with register state
-- **Field value charts** with drag-to-zoom to visualise how registers and IO change over time
-- **Side-by-side trace comparison** with per-field and per-flag diff highlighting, even across different emulators of the same system
-- **Pre-captured reference traces** from multiple independent emulators across 600+ test ROMs
-- **CLI query engine** — search traces by condition (e.g. `pc=0150`, `flag z becomes set`, `a changes`)
-- **Open, system-agnostic trace format** — any emulator, on any supported system, can produce compatible traces
+Each adapter is a stand-alone CLI at `adapters/<emu>/morepork-<emu>` driving an emulator of independent lineage:
+
+- **[gambatte](https://github.com/pokemon-speedrunning/gambatte-speedrun)** — Game Boy / Game Boy Color
+- **[SameBoy](https://github.com/LIJI32/SameBoy)** — Game Boy / Game Boy Color (T-cycle capture via a checked-in patch)
+- **[docboy](https://github.com/Docheinstein/docboy)** — Game Boy / Game Boy Color
+- **[mGBA](https://mgba.io/)** — Game Boy
+- **[gateboy](https://github.com/aappleby/metroboy)** — Game Boy (gate-level)
+- **BGB** — Game Boy / Game Boy Color (experimental, via Wine)
+- **[missingno](https://github.com/ajoneil/missingno)** — Game Boy / Game Boy Color + VCS (the author's emulator)
+- **[Stella](https://github.com/stella-emu/stella)** — VCS
+- **[Gopher2600](https://github.com/JetSetIlly/Gopher2600)** — VCS
+- **[MAME](https://www.mamedev.org/)** — VCS (`a2600`), SG-1000, SC-3000, ColecoVision
+- **[openMSX](https://openmsx.org/)** — MSX1 (C-BIOS)
+- **[ares](https://ares-emu.net/)** — ColecoVision, SG-1000, SC-3000, MSX1
+- **[Gearsystem](https://github.com/drhelius/Gearsystem)** — SG-1000
+- **[Gearcoleco](https://github.com/drhelius/Gearcoleco)** — ColecoVision
+
+C/C++/Go adapters link against the C FFI (`crates/morepork-ffi`); Rust adapters use the core crate directly.
 
 ## Trace format
 
-morepork uses a compact binary format for efficient storage and querying. There are two ways to produce traces:
+morepork uses a compact binary format (`.morepork`) for efficient storage and querying. There are two ways to produce traces:
 
 **Native format** — use the `morepork` Rust library (or its C FFI bindings) to write `.morepork` files directly.
 
-**JSONL format** — for quick integration, emit `.morepork.jsonl` files (one JSON object per line). Both the CLI and web viewer can work with JSONL files directly, but you can convert them for smaller file sizes and faster loading:
+**JSONL format** — for quick integration, emit `.morepork.jsonl` files (one JSON object per line) and convert them:
 
 ```bash
 morepork convert trace.morepork.jsonl -o trace.morepork
 ```
 
-### JSONL format
-
-The first line is a header describing the trace. It declares the `system` (which machine), the `isa` (which CPU; the writer can derive it from `system`), and the `fields` captured:
+The first JSONL line is a header declaring the `system`, the fields captured, and the trigger granularity; every subsequent line is one trace entry:
 
 ```json
-{"_header":true,"format_version":"0.1.0","system":"dmg","isa":"sm83","emulator":"my-emulator","emulator_version":"1.0","rom_sha256":"...","model":"DMG-B","boot_rom":"skip","profile":"gbmicrotest","fields":["pc","sp","a","f","b","c","d","e","h","l","lcdc","stat","ly"],"trigger":"instruction"}
-```
-
-Each subsequent line is a trace entry with the fields listed in the header:
-
-```json
+{"_header":true,"format_version":"0.1.0","system":"dmg","isa":"sm83","emulator":"my-emulator","emulator_version":"1.0","rom_sha256":"...","model":"DMG-B","boot_rom":"skip","profile":"smoke","fields":["pc","sp","a","f","b","c","d","e","h","l","lcdc","stat","ly"],"trigger":"instruction"}
 {"pc":256,"sp":65534,"a":1,"f":176,"b":0,"c":19,"d":0,"e":216,"h":1,"l":77,"lcdc":145,"stat":128,"ly":153}
 ```
 
-The `fields` array defines what's captured, and the valid field names depend on the `system`. Common Game Boy configurations:
+Values are numeric (not hex strings). The valid field names depend on the `system`; include whatever level of detail your emulator can supply.
 
-**CPU only:**
-```json
-"fields": ["pc", "sp", "a", "f", "b", "c", "d", "e", "h", "l"]
-```
-
-**CPU + PPU + interrupts + timer:**
-```json
-"fields": ["pc", "sp", "a", "f", "b", "c", "d", "e", "h", "l", "lcdc", "stat", "ly", "lyc", "scy", "scx", "if_", "ie", "ime", "div", "tima", "tma", "tac"]
-```
-
-Other systems declare their own `system` and field set — an Atari VCS trace (`"system":"vcs"`) exposes the 6507 registers, the TIA beam position (`line`, `clock`), and the RIOT timer and ports.
-
-Values should be numeric (not hex strings). 8-bit fields use 0-255, 16-bit fields (pc, sp) use 0-65535, booleans (ime) use `true`/`false`.
-
-The `trigger` field indicates granularity: `"instruction"` for one entry per instruction, `"mcycle"` for one entry per M-cycle, or `"tcycle"` for one entry per T-cycle. Traces at different granularities can be compared — the viewer automatically downsamples higher-granularity traces to match.
-
-Capture profiles define which fields to record, but you don't need to provide all of them — include whatever level of detail your emulator can supply.
-
-## Web viewer
-
-The [web viewer](https://ajoneil.github.io/morepork/) provides:
-
-- **Test ROM browser** — pre-captured traces from hundreds of test ROMs across multiple emulators, with pass/fail indicators and a DMG/CGB system toggle
-- **Trace viewer** — virtual-scrolling table with inline disassembly, field value charts, and search/filter
-- **Comparison mode** — side-by-side diff with synced scrolling, per-field and per-flag highlighting, and match percentage statistics
-- **Drag-to-zoom charts** — visualise any field over the trace timeline, with dual-trace overlay in comparison mode
-- **Upload your own traces** — drop a `.morepork` or `.morepork.jsonl` (or gzipped `.morepork.jsonl.gz`) file to view or compare
-
-The hosted browser currently carries the Game Boy / Game Boy Color test suites; Atari VCS traces can be captured with the VCS adapters and viewed by upload.
-
-### Included traces
-
-The pre-captured Game Boy / Game Boy Color traces come from several emulators:
-
-- **[Missingno](https://github.com/ajoneil/missingno)** — the author's emulator, with full support for all morepork trace features (per-T-cycle capture, all subsystem fields).
-- Traces from several well-regarded community emulators — [SameBoy](https://github.com/LIJI32/SameBoy), [gambatte](https://github.com/pokemon-speedrunning/gambatte-speedrun), and [docboy](https://github.com/Docheinstein/docboy) — are also included.
-
-For the Atari VCS, morepork ships adapters for three independent-lineage emulators — [Gopher2600](https://github.com/JetSetIlly/Gopher2600), [MAME](https://www.mamedev.org/)'s `a2600` driver, and [Stella](https://github.com/stella-emu/stella) — so the same trace can be cross-checked against emulators that don't share a codebase.
+Capture **profiles** (TOML) declare the target `system`, the trigger granularity (`instruction` / `cycle` / `mcycle` / `tcycle`), and which subsystem-layer fields to capture; the profile is validated against the system's field catalogue. Traces at different granularities can still be compared — higher-granularity traces are downsampled to match.
 
 ## CLI
 
@@ -108,9 +81,13 @@ morepork info trace.morepork
 # Find entries matching a condition
 morepork query trace.morepork -w "pc=0x0150"
 morepork query trace.morepork -w "a changes"
+morepork query trace.morepork -w "flag c becomes set"
 
 # Compare two traces (e.g. two emulators of the same system)
 morepork diff missingno.morepork gambatte.morepork --fields pc,a,f
+
+# Render frames to PNGs
+morepork render trace.morepork -o frames/
 
 # Convert JSONL to native format
 morepork convert trace.morepork.jsonl -o trace.morepork
@@ -120,12 +97,10 @@ Run `morepork --help` for a full list of commands.
 
 ## Building
 
-morepork is a Rust workspace. The crates are not yet published to crates.io — install from git:
-
 ```bash
-# CLI
-cargo install --git https://github.com/ajoneil/morepork --features cli morepork
-
-# Local web viewer (requires wasm-pack)
-make serve
+make cli        # build target/release/morepork
+make ffi        # build target/release/libmorepork_ffi.a + header
+make adapters   # build the adapters (vendored emulator sources are fetched/cloned per adapter)
 ```
+
+morepork is a Rust workspace; `cargo build --release --features cli` is equivalent to `make cli`, and `cargo test -p morepork` runs the library tests. See `docs/multi-system.md` for the architecture and what adding a system involves.

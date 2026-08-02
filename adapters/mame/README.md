@@ -80,7 +80,7 @@ compute ROMs (t01), synced to the harness anchor, with matching PASS verdicts.
   `tracelog` format breaks it, so `$80–$83` are captured only once, at the
   verdict (via `m80,4`), and placed on the final entry. MAME's role is
   independent confirmation of the **instruction stream + final verdict**;
-  `scripts/compare.sh` excludes `result/code/observed/expected` from the MAME
+  the suite repo's `scripts/compare.sh` excludes `result/code/observed/expected` from the MAME
   per-instruction diff and checks the verdict separately.
 - **Timer-readback micro-diffs are genuine findings, not capture bugs.** On the
   timer ROMs a handful of `a`-register values differ from Stella at INTIM/TIMINT
@@ -104,14 +104,15 @@ compute ROMs (t01), synced to the harness anchor, with matching PASS verdicts.
   entry (`hash/a2600.xml`, `<feature name="slot">…`), which requires the ROM to be
   a catalogued softlist item, not a loose file. Since the suite feeds loose test
   ROMs, forcing is deliberately not implemented — MAME always autodetects, and
-  `scripts/cartcheck.py` ports `identify_cart_type()` to check what it would pick.
+  the suite repo's `scripts/cartcheck.py` ports `identify_cart_type()` to check what it would pick.
 
 ## Notes
 
 - MAME's `a2600` cartridge slot autodetects the bankswitch type from the `.bin`.
 - TV standard via the `a2600`/`a2600p` machine or a slot option (NTSC vs PAL).
 - The morepork system is `vcs`; emit a JSONL header with `"system":"vcs"` and the
-  same field set, then diff against Stella/Gopher2600 via `scripts/compare.sh`.
+  same field set, then diff against Stella/Gopher2600 via the suite repo's
+  `scripts/compare.sh`.
 
 ## SG-1000 / TI VDP suite
 
