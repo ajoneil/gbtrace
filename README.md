@@ -28,24 +28,7 @@ Systems that share silicon share an ISA: the Game Boy's DMG and CGB are both `sm
 
 ## Adapters
 
-Each adapter is a stand-alone CLI at `adapters/<emu>/morepork-<emu>` driving an emulator of independent lineage:
-
-- **[gambatte](https://github.com/pokemon-speedrunning/gambatte-speedrun)** — Game Boy / Game Boy Color
-- **[SameBoy](https://github.com/LIJI32/SameBoy)** — Game Boy / Game Boy Color (T-cycle capture via a checked-in patch)
-- **[docboy](https://github.com/Docheinstein/docboy)** — Game Boy / Game Boy Color
-- **[mGBA](https://mgba.io/)** — Game Boy
-- **[gateboy](https://github.com/aappleby/metroboy)** — Game Boy (gate-level)
-- **BGB** — Game Boy / Game Boy Color (experimental, via Wine)
-- **[missingno](https://github.com/ajoneil/missingno)** — Game Boy / Game Boy Color + VCS (the author's emulator)
-- **[Stella](https://github.com/stella-emu/stella)** — VCS
-- **[Gopher2600](https://github.com/JetSetIlly/Gopher2600)** — VCS
-- **[MAME](https://www.mamedev.org/)** — VCS (`a2600`), SG-1000, SC-3000, ColecoVision
-- **[openMSX](https://openmsx.org/)** — MSX1 (C-BIOS)
-- **[ares](https://ares-emu.net/)** — ColecoVision, SG-1000, SC-3000, MSX1
-- **[Gearsystem](https://github.com/drhelius/Gearsystem)** — SG-1000
-- **[Gearcoleco](https://github.com/drhelius/Gearcoleco)** — ColecoVision
-
-C/C++/Go adapters link against the C FFI (`crates/morepork-ffi`); Rust adapters use the core crate directly.
+Each adapter is a stand-alone CLI at `adapters/<emu>/morepork-<emu>` driving an emulator of independent lineage — see the `adapters/` directory for the current set and each adapter's README for its systems and build details. C/C++/Go adapters link against the C FFI (`crates/morepork-ffi`); Rust adapters use the core crate directly.
 
 ## Trace format
 
