@@ -16,13 +16,16 @@ path = "src/vcs.rs"
 
 [dependencies]
 # Track the latest missingno (no rev pin) — CI resolves it fresh on each build.
-# `gbtrace` is missingno's own trace feature; it keeps that name until the
-# sister project renames it to `morepork` too — update both lines then.
-missingno-gb = { git = "https://github.com/ajoneil/missingno", features = ["gbtrace"] }
-missingno-gbc = { git = "https://github.com/ajoneil/missingno", features = ["gbtrace"] }
+# `morepork` is missingno's own trace feature (renamed from `gbtrace` when
+# the sister project renamed).
+missingno-gb = { git = "https://github.com/ajoneil/missingno", features = ["morepork"] }
+missingno-gbc = { git = "https://github.com/ajoneil/missingno", features = ["morepork"] }
+# Declared like missingno-gb's own dep (same git source, no branch key) so it
+# unifies with the instance behind `ConsoleUi::raw_frame`'s `RawFrame`.
+missingno-core = { git = "https://github.com/ajoneil/missingno" }
 clap = { version = "4", features = ["derive"] }
 # VCS: the machine comes from the sibling checkout (the suite iterates on
 # unpushed emulator work); the trace format is this repo's own crate.
-missingno-vcs = { path = "../../../missingno/crates/missingno-vcs" }
+missingno-vcs = { path = "../../../missingno/crates/systems/vcs" }
 morepork = { path = "../../crates/morepork" }
 sha2 = "0.11"

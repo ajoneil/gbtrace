@@ -1,13 +1,13 @@
 use std::fs;
-use std::ops::ControlFlow;
 use std::path::PathBuf;
 use std::process;
 
 use clap::Parser;
+use missingno_core::video::RawFrame;
 use missingno_gb::cartridge::Cartridge;
-use missingno_gb::execute::{PhaseResult, StepResult};
-use missingno_gb::trace::{BootRom, Profile, Traceable, Tracer, Trigger};
-use missingno_gb::GameBoy;
+use missingno_gb::system::ConsoleUi;
+use missingno_gb::trace::{self, BootRom, Profile, TraceScope, Tracer, Trigger};
+use missingno_gb::{Console, GameBoy};
 use missingno_gbc::GameBoyColor;
 
 #[derive(Parser)]
@@ -103,132 +103,25 @@ fn rgb555_match(a: &[u8], b: &[u8]) -> bool {
     a.len() == b.len() && a.iter().zip(b).all(|(x, y)| (*x as i16 - *y as i16).abs() <= 1)
 }
 
-/// The run loop needs a few operations beyond [`Traceable`]; this trait
-/// abstracts over `GameBoy` (DMG) and `GameBoyColor` (CGB) so a single
-/// generic loop traces both.
-//
-// NOTE: the local trait methods below are deliberately named *differently* from
-// missingno's inherent `Console<M>` methods they delegate to (e.g. `observe_tcycle`
-// → `execute_tcycle_observed`, `step_instr` → `step`). A same-named method (as the
-// former `step_phase` was) resolves to this trait rather than the inherent method
-// the moment upstream renames/removes the inherent one — an infinite self-recursion
-// that release-mode tail-call-optimises into a silent hang. Keeping the names
-// distinct makes that trap impossible.
-trait Console: Traceable {
-    /// Advance one CPU T-cycle, invoking `after` after each master edge (rise
-    /// then fall) with that edge's [`PhaseResult`] — the morepork capture hook.
-    /// Returns whether a new frame was produced. A `Break` from the rise's
-    /// observer defers the fall to the next call (double-speed mid-pair retire).
-    fn observe_tcycle(
-        &mut self,
-        after: impl FnMut(&mut Self, &PhaseResult) -> ControlFlow<()>,
-    ) -> bool;
-    /// CPU T-cycles per PPU dot: 1 at normal speed, 2 under CGB double speed.
-    fn steps_per_dot(&self) -> u8;
-    fn step_instr(&mut self) -> StepResult;
-    fn take_instruction_boundary(&mut self);
-    /// Settle a STOP the CPU has landed on (arm the CGB speed-switch blackout)
-    /// and engage/release a VRAM-DMA CPU hold — `step()` does both at each
-    /// instruction boundary; a tcycle driver must call them there too or a
-    /// KEY1 switch never re-engages (blank screen) and GDMA/HDMA never runs.
-    fn resolve_stop(&mut self, tcycles: u32);
-    fn manage_dma_hold(&mut self);
-    /// True while a CGB double-speed switch holds the CPU in the settling
-    /// blackout. `execute_tcycle_observed` can't advance the blackout — only
-    /// `step()`/`step_blackout_chunk` drains it — so the run loop falls back to
-    /// `step_instr` while this holds.
-    fn speed_switch_in_progress(&self) -> bool;
-    /// RGB555 (each channel 0-31) at a screen coordinate, for screenshot
-    /// reference matching at the CGB's native colour precision.
-    fn rgb555_at(&self, x: usize, y: usize) -> [u8; 3];
-    /// 2-bit shade (0=lightest..3=darkest) at a screen coordinate, for snapshotting
-    /// the full framebuffer into the pix field at a fixed cycle budget.
-    fn shade_at(&self, x: usize, y: usize) -> u8;
-    fn drain_audio(&mut self) -> Vec<(f32, f32)>;
-}
-
-impl Console for GameBoy {
-    fn observe_tcycle(
-        &mut self,
-        after: impl FnMut(&mut Self, &PhaseResult) -> ControlFlow<()>,
-    ) -> bool {
-        GameBoy::execute_tcycle_observed(self, after)
-    }
-    fn steps_per_dot(&self) -> u8 {
-        GameBoy::cpu_steps_per_dot(self)
-    }
-    fn step_instr(&mut self) -> StepResult {
-        GameBoy::step(self)
-    }
-    fn take_instruction_boundary(&mut self) {
-        self.cpu_mut().take_instruction_boundary();
-    }
-    fn resolve_stop(&mut self, tcycles: u32) {
-        GameBoy::resolve_stop(self, tcycles);
-    }
-    fn manage_dma_hold(&mut self) {
-        GameBoy::manage_dma_hold(self);
-    }
-    fn speed_switch_in_progress(&self) -> bool {
-        GameBoy::speed_switch_in_progress(self)
-    }
-    fn rgb555_at(&self, x: usize, y: usize) -> [u8; 3] {
-        // DMG screen stores a 2-bit shade index → greyscale RGB555.
-        let v = GREY555[self.screen().front().pixels[y][x].0 as usize];
-        [v, v, v]
-    }
-    fn shade_at(&self, x: usize, y: usize) -> u8 {
-        self.screen().front().pixels[y][x].0
-    }
-    fn drain_audio(&mut self) -> Vec<(f32, f32)> {
-        GameBoy::drain_audio_samples(self)
-    }
-}
-
-impl Console for GameBoyColor {
-    fn observe_tcycle(
-        &mut self,
-        after: impl FnMut(&mut Self, &PhaseResult) -> ControlFlow<()>,
-    ) -> bool {
-        GameBoyColor::execute_tcycle_observed(self, after)
-    }
-    fn steps_per_dot(&self) -> u8 {
-        GameBoyColor::cpu_steps_per_dot(self)
-    }
-    fn step_instr(&mut self) -> StepResult {
-        GameBoyColor::step(self)
-    }
-    fn take_instruction_boundary(&mut self) {
-        self.cpu_mut().take_instruction_boundary();
-    }
-    fn resolve_stop(&mut self, tcycles: u32) {
-        GameBoyColor::resolve_stop(self, tcycles);
-    }
-    fn manage_dma_hold(&mut self) {
-        GameBoyColor::manage_dma_hold(self);
-    }
-    fn speed_switch_in_progress(&self) -> bool {
-        GameBoyColor::speed_switch_in_progress(self)
-    }
-    fn rgb555_at(&self, x: usize, y: usize) -> [u8; 3] {
-        // CGB screen stores a packed RGB555 value → unpack to one byte per 5-bit channel.
-        let p = self.screen().pixel(x as u8, y as u8).0;
-        [(p & 0x1F) as u8, ((p >> 5) & 0x1F) as u8, ((p >> 10) & 0x1F) as u8]
-    }
-    fn shade_at(&self, x: usize, y: usize) -> u8 {
-        // CGB has no native 2-bit shade; map displayed luminance to the nearest
-        // greyscale shade (GREY555 sums 93/63/30/0) so dark-on-light text snapshots
-        // faithfully for the gambatte hex check.
-        let [r, g, b] = self.rgb555_at(x, y);
-        match r as u16 + g as u16 + b as u16 {
-            0..=15 => 3,
-            16..=46 => 2,
-            47..=77 => 1,
-            _ => 0,
-        }
-    }
-    fn drain_audio(&mut self) -> Vec<(f32, f32)> {
-        GameBoyColor::drain_audio_samples(self)
+/// Flatten the console's pre-resolution screen ([`ConsoleUi::raw_frame`]:
+/// DMG shade indices, CGB RGB555 words) into the reference format — one byte
+/// per 5-bit channel, row-major.
+fn raw_frame_rgb555(frame: &RawFrame) -> Vec<u8> {
+    match frame {
+        RawFrame::Shade2 { pixels, .. } => pixels
+            .iter()
+            .flat_map(|&shade| {
+                let v = GREY555[shade as usize];
+                [v, v, v]
+            })
+            .collect(),
+        RawFrame::Rgb555 { pixels, .. } => pixels
+            .iter()
+            .flat_map(|&p| {
+                [(p & 0x1F) as u8, ((p >> 5) & 0x1F) as u8, ((p >> 10) & 0x1F) as u8]
+            })
+            .collect(),
+        _ => unreachable!("GB consoles emit Shade2 or Rgb555 frames"),
     }
 }
 
@@ -238,16 +131,6 @@ impl Console for GameBoyColor {
 /// is the canonical offender. missingno's own test harness notes the same
 /// trap and bounds by step count for the same reason.
 const CYCLES_PER_FRAME: u64 = 70224;
-
-fn framebuffer_to_rgb555<C: Console>(gb: &C) -> Vec<u8> {
-    let mut buf = Vec::with_capacity(160 * 144 * 3);
-    for y in 0..144 {
-        for x in 0..160 {
-            buf.extend_from_slice(&gb.rgb555_at(x, y));
-        }
-    }
-    buf
-}
 
 /// Last-frame audio-activity check, matching gambatte's testrunner
 /// convention (the final frame's samples either all match its first
@@ -278,19 +161,30 @@ fn main() {
     if is_cgb {
         // missingno-gbc targets CPU-CGB-C (gambatte's cgb04c) — same model
         // gambatte's adapter reports, so cross-emulator CGB diffs line up.
-        run(GameBoyColor::new(cartridge, None), &args, "CGB-C");
+        run(GameBoyColor::new(cartridge, None), &args);
     } else {
-        run(GameBoy::new(cartridge, None), &args, "DMG-B");
+        run(GameBoy::new(cartridge, None), &args);
     }
 }
 
-fn run<C: Console>(mut gb: C, args: &Args, model: &str) {
+fn run<M: ConsoleUi>(mut gb: Console<M>, args: &Args) {
     let profile = Profile::load(&args.profile).unwrap_or_else(|e| {
         eprintln!("Error: failed to load profile {}: {e}", args.profile.display());
         process::exit(1);
     });
 
-    let mut tracer = Tracer::create(&args.output, &profile, &gb, BootRom::Skip, model).unwrap_or_else(|e| {
+    // The column set is authored from the console model's state schema —
+    // the profile contributes the capture cadence. Full tier depth, matching
+    // missingno's own CLI trace command: this is a reference capture.
+    let mut tracer = Tracer::create(
+        &args.output,
+        &gb,
+        profile.trigger.clone(),
+        TraceScope::Full,
+        BootRom::Skip,
+        M::TRACE_MODEL_NAME,
+    )
+    .unwrap_or_else(|e| {
         eprintln!("Error: failed to create tracer: {e}");
         process::exit(1);
     });
@@ -300,14 +194,11 @@ fn run<C: Console>(mut gb: C, args: &Args, model: &str) {
 
     // Discard any startup audio so `--report-audio` measures only the run.
     if args.report_audio {
-        let _ = gb.drain_audio();
+        let _ = gb.drain_audio_samples();
     }
 
     let reference_pix = args.reference.as_ref().map(load_reference);
     let is_tcycle = tracer.trigger() == Trigger::Tcycle;
-    // CGB/AGB output is colour → push RGB555 pixels (matching the header's
-    // pix_format set by Tracer::create); DMG pushes 2-bit shades.
-    let cgb = model.starts_with("CGB") || model.starts_with("AGB");
 
     let mut frame_count: u32 = 0;
     let mut stop_triggered = false;
@@ -315,7 +206,7 @@ fn run<C: Console>(mut gb: C, args: &Args, model: &str) {
     let mut serial_match_count: u32 = 0;
 
     // Detect serial writes by watching SC bit 7 (transfer start)
-    let mut prev_sc_high = (gb.peek(0xFF02) & 0x80) != 0;
+    let mut prev_sc_high = (gb.peek_range(0xFF02, 1)[0] & 0x80) != 0;
 
     // Time-based safety budget: bounds the run even when the LCD never turns on
     // and `frame_count` can't advance. One frame of slack keeps it from ever
@@ -359,20 +250,30 @@ fn run<C: Console>(mut gb: C, args: &Args, model: &str) {
         }
 
         let (new_screen, tcycles) = if is_tcycle && !gb.speed_switch_in_progress() {
-            step_tcycle(&mut gb, &mut tracer, cgb)
+            // The shared dot-by-dot driver: captures at every T-cycle, pushes
+            // pixels in the model's native encoding, marks frames, and resolves
+            // STOP / VRAM-DMA holds at the boundary.
+            let result = trace::step_instruction_tcycle(&mut gb, &mut tracer);
+            (result.new_screen, result.tcycles as u64)
         } else {
             // During a CGB speed-switch blackout the tcycle driver can't advance
-            // the frozen CPU (`execute_tcycle_observed` never re-engages it);
-            // only `step()`/`step_blackout_chunk` drains it. Fall back to
-            // instruction stepping for the blackout, then resume tcycle capture.
-            step_instruction(&mut gb, &mut tracer)
+            // the frozen CPU; only `step()` drains it. Fall back to instruction
+            // stepping for the blackout, then resume tcycle capture. (Also the
+            // steady-state path for instruction-triggered profiles.)
+            tracer.capture(&gb).unwrap();
+            let result = gb.step();
+            tracer.advance(result.tcycles);
+            if result.new_screen {
+                tracer.mark_frame().unwrap();
+            }
+            (result.new_screen, result.tcycles as u64)
         };
         total_tcycles += tcycles;
 
         if !stop_triggered {
             if let Some(opcode) = args.stop_opcode {
                 let pc = gb.cpu().pc;
-                if gb.peek(pc) == opcode {
+                if gb.peek_range(pc, 1)[0] == opcode {
                     eprintln!("Stop condition met: opcode 0x{opcode:02X} at PC=0x{pc:04X}");
                     stop_triggered = true;
                     remaining_extra = Some(args.extra_frames);
@@ -380,7 +281,7 @@ fn run<C: Console>(mut gb: C, args: &Args, model: &str) {
             }
 
             for sw in &args.stop_when {
-                let actual = gb.peek(sw.addr);
+                let actual = gb.peek_range(sw.addr, 1)[0];
                 let hit = if sw.negate { actual != sw.value } else { actual == sw.value };
                 if hit {
                     let op = if sw.negate { "!=" } else { "==" };
@@ -392,9 +293,9 @@ fn run<C: Console>(mut gb: C, args: &Args, model: &str) {
             }
 
             if let Some(serial_byte) = args.stop_on_serial {
-                let sc_high = (gb.peek(0xFF02) & 0x80) != 0;
+                let sc_high = (gb.peek_range(0xFF02, 1)[0] & 0x80) != 0;
                 if sc_high && !prev_sc_high {
-                    let sb = gb.peek(0xFF01);
+                    let sb = gb.peek_range(0xFF01, 1)[0];
                     if sb == serial_byte {
                         serial_match_count += 1;
                         if serial_match_count >= args.stop_serial_count {
@@ -415,7 +316,7 @@ fn run<C: Console>(mut gb: C, args: &Args, model: &str) {
         // updated yet when serial/opcode triggers).
         if new_screen {
             if let Some(ref reference) = reference_pix {
-                let current = framebuffer_to_rgb555(&gb);
+                let current = raw_frame_rgb555(&M::raw_frame(&gb));
                 if rgb555_match(&current, reference) {
                     if !stop_triggered {
                         stop_triggered = true;
@@ -440,20 +341,24 @@ fn run<C: Console>(mut gb: C, args: &Args, model: &str) {
     // one frame — this is the screen the gambatte hex/blank check reads.
     if args.until_tcycle.is_some() {
         tracer.mark_frame().unwrap();
-        for y in 0..144 {
-            for x in 0..160 {
-                if cgb {
-                    tracer.push_pixel_rgb555(rgb555_u16(&gb, x as u8, y as u8));
-                } else {
-                    tracer.push_pixel(gb.shade_at(x, y));
+        match M::raw_frame(&gb) {
+            RawFrame::Shade2 { pixels, .. } => {
+                for shade in pixels {
+                    tracer.push_pixel(shade);
                 }
             }
+            RawFrame::Rgb555 { pixels, .. } => {
+                for word in pixels {
+                    tracer.push_pixel_rgb555(word);
+                }
+            }
+            _ => unreachable!("GB consoles emit Shade2 or Rgb555 frames"),
         }
         tracer.capture(&gb).unwrap();
     }
 
     if args.report_audio {
-        let samples = gb.drain_audio();
+        let samples = gb.drain_audio_samples();
         let has_audio = last_frame_has_audio(&samples, frame_count.max(1));
         eprintln!("AUDIO={}", if has_audio { 1 } else { 0 });
     }
@@ -464,94 +369,4 @@ fn run<C: Console>(mut gb: C, args: &Args, model: &str) {
     });
 
     eprintln!("Trace written: {frame_count} frames");
-}
-
-/// RGB555 (15-bit) value of the screen pixel at (x, y), packed for the pix field.
-fn rgb555_u16<C: Console>(gb: &C, x: u8, y: u8) -> u16 {
-    let [r, g, b] = gb.rgb555_at(x as usize, y as usize); // each channel 0-31
-    ((r as u16) << 10) | ((g as u16) << 5) | (b as u16)
-}
-
-/// Step one instruction via T-cycle phases, capturing at each dot.
-/// Returns `(new_screen, tcycles_captured)`. `cgb` selects the pix encoding:
-/// RGB555 colour (CGB) vs 2-bit shade (DMG).
-///
-/// Mirrors missingno's own `trace::step_instruction_tcycle`: at single speed we
-/// capture once per T-cycle (after the fall, OR-ing both edges' frame flag); at
-/// CGB double speed the CPU runs at 2× the dot clock, so we capture after every
-/// master edge and may retire mid-pair — the `Break` defers the unpaired fall to
-/// the next `observe_tcycle` call.
-fn step_tcycle<C: Console>(gb: &mut C, tracer: &mut Tracer, cgb: bool) -> (bool, u64) {
-    let mut new_screen = false;
-    let mut tcycles: u64 = 0;
-
-    gb.take_instruction_boundary();
-    let double_speed = gb.steps_per_dot() == 2;
-
-    loop {
-        let mut first_new_screen = false;
-        let mut is_first = true;
-        gb.observe_tcycle(|gb, result| {
-            new_screen |= result.new_screen;
-            if let Some(pixel) = result.pixel {
-                if cgb {
-                    tracer.push_pixel_rgb555(rgb555_u16(&*gb, pixel.x, pixel.y));
-                } else {
-                    tracer.push_pixel(pixel.shade);
-                }
-            }
-            if double_speed {
-                // Capture after every edge; the pair may retire on the rise.
-                if result.new_screen {
-                    tracer.mark_frame().unwrap();
-                }
-                tracer.capture(&*gb).unwrap();
-                tracer.advance_dot();
-                tcycles += 1;
-                if gb.cpu().at_instruction_boundary() {
-                    return ControlFlow::Break(());
-                }
-            } else if is_first {
-                // Single speed: defer capture to the fall, OR-ing the rise's flag.
-                first_new_screen = result.new_screen;
-                is_first = false;
-            } else {
-                if first_new_screen || result.new_screen {
-                    tracer.mark_frame().unwrap();
-                }
-                tracer.capture(&*gb).unwrap();
-                tracer.advance_dot();
-                tcycles += 1;
-            }
-            ControlFlow::Continue(())
-        });
-
-        if gb.cpu().at_instruction_boundary() {
-            break;
-        }
-    }
-
-    // Mirror `step`/missingno's `trace::step_instruction_tcycle`: settle a
-    // landed STOP (arm the CGB speed-switch blackout) and engage/release a
-    // VRAM-DMA CPU hold at the boundary, so traced runs progress past STOP and
-    // run their GDMA/HDMA like untraced ones. Without this, `_ds_` tests never
-    // re-engage (blank screen) and `dma__*` transfers never run.
-    gb.resolve_stop(tcycles as u32);
-    gb.manage_dma_hold();
-
-    (new_screen, tcycles)
-}
-
-/// Step one instruction, capture once.
-/// Returns `(new_screen, tcycles_consumed)`.
-fn step_instruction<C: Console>(gb: &mut C, tracer: &mut Tracer) -> (bool, u64) {
-    tracer.capture(&*gb).unwrap();
-    let result = gb.step_instr();
-    tracer.advance(result.tcycles);
-
-    if result.new_screen {
-        tracer.mark_frame().unwrap();
-    }
-
-    (result.new_screen, result.tcycles as u64)
 }
