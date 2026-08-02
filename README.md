@@ -6,10 +6,6 @@ morepork records what happens inside an emulated system — every instruction, r
 
 The core is one binary trace format and one toolchain shared across systems, plus per-emulator **adapters** that drive each emulator and emit traces. Running the same test ROM through adapters for emulators with independent lineages turns disagreement between traces into a precise, entry-level diff.
 
-## Origins
-
-morepork began life as **gbtrace**, a Game Boy trace tool, and grew into the multi-system tool it is now. Two large pieces from that era were retired once they stopped being maintained and are **available in git history**: the WASM-powered **web viewer** (`web/` + `crates/morepork-wasm`, hosted on GitHub Pages), and the **pre-captured trace library** — the in-repo test-ROM suites (~600 ROMs across 17 suites in `test-suites/`), the `scripts/` trace-generation pipeline, and the CI that built and hosted the trace corpus. The Game Boy *systems and adapters* remain fully supported. morepork no longer runs full-suite trace generation itself; how outside projects drive the adapters is up to them.
-
 ## Supported systems
 
 Each trace is tagged with a **`system`** (which machine) and an **`isa`** (which CPU). The `isa` selects the disassembler and flag vocabulary; the `system` selects the field catalogue and query phrases. Everything else is self-described by the trace header, so the format and CLI stay system-agnostic.
@@ -87,3 +83,7 @@ make adapters   # build the adapters (vendored emulator sources are fetched/clon
 ```
 
 morepork is a Rust workspace; `cargo build --release --features cli` is equivalent to `make cli`, and `cargo test -p morepork` runs the library tests. See `docs/multi-system.md` for the architecture and what adding a system involves.
+
+## Origins
+
+morepork began life as **gbtrace**, a Game Boy trace tool, and grew into the multi-system tool it is now. Two large pieces from that era were retired once they stopped being maintained and are **available in git history**: the WASM-powered **web viewer** (`web/` + `crates/morepork-wasm`, hosted on GitHub Pages), and the **pre-captured trace library** — the in-repo test-ROM suites (~600 ROMs across 17 suites in `test-suites/`), the `scripts/` trace-generation pipeline, and the CI that built and hosted the trace corpus. The Game Boy *systems and adapters* remain fully supported. morepork no longer runs full-suite trace generation itself; how outside projects drive the adapters is up to them.
