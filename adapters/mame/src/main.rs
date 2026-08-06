@@ -440,7 +440,13 @@ fn run(sys: &SysDef, args: &Args) -> Result<()> {
         sys.trace_syms
     ));
     g.mon(&format!("wpset 0x{},1,w,{{(wpdata==0xa5)||(wpdata==0x5a)}}", sys.result_addr));
-    g.stream.set_read_timeout(Some(Duration::from_secs(30)))?;
+    // The wall-clock read timeout must cover the whole emulated budget:
+    // per-instruction tracing runs MAME well below realtime (observed
+    // ~0.5x on sg1000), so scale generously. MAME's own -seconds_to_run
+    // exit closes the stream and unblocks the read long before this cap
+    // when the ROM never latches a verdict.
+    let wall = std::cmp::max(30, seconds as u64 * 12);
+    g.stream.set_read_timeout(Some(Duration::from_secs(wall)))?;
     g.cmd("c"); // run full-speed to the verdict (or seconds_to_run)
     // read the RESULT bytes at the stop (per-instruction memory in the trace
     // format breaks tracelog, so we grab the final verdict here).
