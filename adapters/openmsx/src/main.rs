@@ -206,7 +206,7 @@ fn usage() -> ! {
          \x20 -out <path>       output .morepork path (default trace.morepork)\n\
          \x20 -machine <name>   openMSX machine (default C-BIOS_MSX1_JP)\n\
          \x20 -spec NTSC        TV spec (C-BIOS_MSX1_JP is NTSC-only)\n\
-         \x20 -frames <n>       cap: emulated seconds = max(5, frames/60 + 3) (default 30)\n\
+         \x20 -frames <n>       cap: emulated seconds = max(5, frames/50 + 3) (default 30)\n\
          \x20 -frame[=bool]     capture a final frame snapshot (default true)"
     );
     std::process::exit(2);
@@ -310,9 +310,15 @@ fn run(args: &Args) -> Result<()> {
 
     // Wait for the verdict, capped in emulated seconds (throttle is off,
     // so the cap is reached in moments of real time if the ROM never
-    // latches a verdict).
-    let cap_seconds = std::cmp::max(5, args.frames / 60 + 3) as f64;
-    let deadline = Instant::now() + Duration::from_secs(120);
+    // latches a verdict). Frames convert at 50 Hz: the emulated MSX1 is
+    // a PAL machine, and a 60 Hz conversion undercuts long frame-counted
+    // ROMs (vram/retention's 3600 waited frames = 72 emulated seconds).
+    let cap_seconds = std::cmp::max(5, args.frames / 50 + 3) as f64;
+    // The wall deadline must cover the emulated budget: the tracing
+    // callbacks run openMSX well below realtime (observed ~0.35x), so
+    // allow 5 wall-seconds per emulated second, floor 120.
+    let deadline = Instant::now()
+        + Duration::from_secs(std::cmp::max(120, cap_seconds as u64 * 5));
     let verdict_seen = loop {
         if o.cmd("info exists ::verdict")? == "1" {
             break true;
@@ -329,7 +335,11 @@ fn run(args: &Args) -> Result<()> {
     if !verdict_seen {
         // Tear the trace down so the file is flushed and parseable.
         o.cmd("if {[info exists ::cond]} { debug remove_condition $::cond; unset ::cond }; catch { close $::fh }")?;
-        eprintln!("warning: no verdict within {cap_seconds}s emulated; capturing state as-is");
+        let emu: f64 = o.cmd("machine_info time")?.parse().unwrap_or(0.0);
+        eprintln!(
+            "warning: no verdict (cap {cap_seconds}s emulated, reached {emu:.0}s); \
+             capturing state as-is"
+        );
     }
     let block = o.cmd(
         "list [debug read memory 0xE000] [debug read memory 0xE001] \
