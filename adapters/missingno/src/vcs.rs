@@ -36,37 +36,37 @@ const MAX_INSTRUCTIONS: u64 = 50_000_000;
 const CART_TYPES: &[(&str, CartType)] = &[
     ("2K", CartType::Plain2K),
     ("4K", CartType::Plain4K),
-    ("F8", CartType::F8),
-    ("F8SC", CartType::F8Sc),
-    ("F6", CartType::F6),
-    ("F6SC", CartType::F6Sc),
-    ("F4", CartType::F4),
-    ("F4SC", CartType::F4Sc),
-    ("FA", CartType::Fa),
-    ("E0", CartType::E0),
-    ("E7", CartType::E7),
-    ("CV", CartType::Cv),
-    ("UA", CartType::Ua),
-    ("3F", CartType::ThreeF),
-    ("FE", CartType::Fe),
+    ("F8", CartType::Atari8K),
+    ("F8SC", CartType::Atari8KSuperchip),
+    ("F6", CartType::Atari16K),
+    ("F6SC", CartType::Atari16KSuperchip),
+    ("F4", CartType::Atari32K),
+    ("F4SC", CartType::Atari32KSuperchip),
+    ("FA", CartType::CbsRamPlus),
+    ("E0", CartType::ParkerBros),
+    ("E7", CartType::MNetwork),
+    ("CV", CartType::Commavid),
+    ("UA", CartType::UaLtd),
+    ("3F", CartType::Tigervision { rom: None }),
+    ("FE", CartType::Activision),
     ("DPC", CartType::Dpc),
-    ("AR", CartType::Ar),
-    ("F0", CartType::F0),
+    ("AR", CartType::Supercharger),
+    ("F0", CartType::Megaboy),
     ("JANE", CartType::Jane),
-    ("WF8", CartType::Wf8),
-    ("WD", CartType::Wd),
-    ("FC", CartType::Fc),
-    ("0FA0", CartType::ZeroFa0),
-    ("03E0", CartType::Zero3E0),
-    ("3E", CartType::ThreeE),
-    ("3E+", CartType::ThreeEPlus),
-    ("EF", CartType::Ef),
-    ("DF", CartType::Df),
-    ("BF", CartType::Bf),
-    ("SB", CartType::Sb),
-    ("0840", CartType::Zero840),
+    ("WF8", CartType::ColecoWf8),
+    ("WD", CartType::WicksteadDesign),
+    ("FC", CartType::AmigaPowerPlay),
+    ("0FA0", CartType::Fotomania),
+    ("03E0", CartType::ParkerBrosBrazil),
+    ("3E", CartType::TigervisionRam { rom: None }),
+    ("3E+", CartType::TigervisionRamPlus { rom: None }),
+    ("EF", CartType::Atari64K),
+    ("DF", CartType::Atari128K),
+    ("BF", CartType::Atari256K),
+    ("SB", CartType::Superbanking),
+    ("0840", CartType::Econobanking),
     ("X07", CartType::X07),
-    ("MDM", CartType::Mdm),
+    ("MDM", CartType::MenuDrivenMegacart),
 ];
 
 struct Args {
@@ -146,8 +146,8 @@ fn spec_to_standard(spec: &str) -> Result<TvStandard, String> {
 
 fn canonical_palette(standard: TvStandard) -> &'static [[u8; 3]; 256] {
     match standard {
-        TvStandard::Ntsc => &vcs_palette::CANONICAL_NTSC,
-        TvStandard::Pal => &vcs_palette::CANONICAL_PAL,
+        TvStandard::Ntsc | TvStandard::Ntsc50 | TvStandard::PalM => &vcs_palette::CANONICAL_NTSC,
+        TvStandard::Pal | TvStandard::Pal60 => &vcs_palette::CANONICAL_PAL,
         TvStandard::Secam => &vcs_palette::CANONICAL_SECAM,
     }
 }
@@ -156,11 +156,11 @@ fn canonical_palette(standard: TvStandard) -> &'static [[u8; 3]; 256] {
 /// consumed (WSYNC parks the CPU, so one store can span most of a line).
 fn step_instruction_counted(vcs: &mut Vcs) -> u16 {
     let mut cycles = 0u16;
-    while vcs.cpu.at_instruction_boundary() && !vcs.cpu.halted() {
+    while vcs.cpu.at_instruction_boundary() && !vcs.cpu.jammed() {
         vcs.step_cpu_cycle();
         cycles += 1;
     }
-    while !vcs.cpu.at_instruction_boundary() && !vcs.cpu.halted() {
+    while !vcs.cpu.at_instruction_boundary() && !vcs.cpu.jammed() {
         vcs.step_cpu_cycle();
         cycles += 1;
     }
@@ -217,9 +217,9 @@ fn run(args: &Args) -> Result<(), String> {
     let detected = args.cart_type.or(match rom.len() {
         0x800 => Some(CartType::Plain2K),
         0x1000 => Some(CartType::Plain4K),
-        0x2000 => Some(CartType::F8),
-        0x4000 => Some(CartType::F6),
-        0x8000 => Some(CartType::F4),
+        0x2000 => Some(CartType::Atari8K),
+        0x4000 => Some(CartType::Atari16K),
+        0x8000 => Some(CartType::Atari32K),
         _ => None,
     });
     let id = detected
@@ -311,11 +311,7 @@ fn run(args: &Args) -> Result<(), String> {
 }
 
 fn standard_name(standard: TvStandard) -> &'static str {
-    match standard {
-        TvStandard::Ntsc => "NTSC",
-        TvStandard::Pal => "PAL",
-        TvStandard::Secam => "SECAM",
-    }
+    standard.display_name()
 }
 
 fn main() -> ExitCode {

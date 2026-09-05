@@ -387,9 +387,10 @@ fn capture_frame(o: &mut OpenMsx) -> Result<FrameData> {
     let shot = tempfile::Builder::new().prefix("morepork-openmsx-").suffix(".png").tempfile()?;
     o.cmd(&format!("screenshot -raw {}", shot.path().display()))?;
 
-    let decoder = png::Decoder::new(std::fs::File::open(shot.path())?);
+    let decoder = png::Decoder::new(BufReader::new(std::fs::File::open(shot.path())?));
     let mut reader = decoder.read_info()?;
-    let mut buf = vec![0; reader.output_buffer_size()];
+    let size = reader.output_buffer_size().ok_or("screenshot too large to decode")?;
+    let mut buf = vec![0; size];
     let info = reader.next_frame(&mut buf)?;
     let (w, h) = (info.width as usize, info.height as usize);
     let channels = match info.color_type {

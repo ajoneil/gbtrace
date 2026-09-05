@@ -329,9 +329,6 @@ use missingno_core::isa::{Flow, Instruction, InstructionSet, OperandClass};
 struct ToySm83;
 
 impl InstructionSet for ToySm83 {
-    fn id(&self) -> &'static str {
-        "sm83"
-    }
     fn max_len(&self) -> usize {
         3
     }
@@ -375,8 +372,8 @@ fn disassemble_sm83_through_shared_isa() {
 
 #[test]
 fn disassemble_6502_through_real_decoder() {
-    // The real missingno-6502 decoder, driven by the same shared trait.
-    let isa = missingno_6502::Mos6502;
+    // The real missingno-mos-6502 decoder, driven by the same shared trait.
+    let isa = missingno_mos_6502::Mos6502;
     // lda #$7f ; sta $02 ; jmp $8000
     let rom = [0xA9u8, 0x7F, 0x85, 0x02, 0x4C, 0x00, 0x80];
     let rows = morepork::disasm::disassemble_rows(&isa, &rom, 0, 3);

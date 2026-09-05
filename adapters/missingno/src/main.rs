@@ -155,7 +155,10 @@ fn main() {
         process::exit(1);
     });
 
-    let cartridge = Cartridge::new(rom_data, None);
+    let cartridge = Cartridge::new(rom_data, None, None).unwrap_or_else(|e| {
+        eprintln!("Error: {}: {e}", args.rom.display());
+        process::exit(1);
+    });
 
     let is_cgb = matches!(args.model.to_ascii_lowercase().as_str(), "cgb" | "gbc");
     if is_cgb {
