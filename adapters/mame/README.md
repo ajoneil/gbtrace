@@ -136,9 +136,15 @@ against MAME 0.288:
   datasheet palette exactly — and the `indexed8` frame stamps that
   16-entry palette with the 8:7 NTSC pixel aspect. Index 0 (transparent)
   renders as backdrop and never appears in a capture.
-- **NTSC only**: the `sg1000` machine carries a TMS9918A. TMS9929A (PAL)
-  capture would need a different driver (`sc3000` etc.); the suite treats
-  PAL behaviour as provisional anyway.
+- **Sega machines are NTSC only**: the `sg1000`/`sc3000` machines carry a
+  TMS9918A and MAME has no PAL sibling for them; `-spec PAL` is refused.
+- **`-system coleco -spec PAL` runs `colecop`**, MAME's PAL ColecoVision
+  (TMS9929A, 313 lines, and the board's one-wait-per-M1 bus — measured:
+  a 35 T poll loop counts 39 T there). Its BIOS romset member is
+  `colecop/r72114a_8317.u2`; the NTSC dump staged under that name boots
+  with a checksum warning. The taller PAL screen crops through the same
+  centred 256×192 path and gives a frame pixel-identical to `coleco`'s
+  (verified on the suite's `modes/graphic1`, 2026-09-05).
 
 The suite's ColecoVision (`.col`, RESULT at `$7000`) and MSX1 (`.mx1`,
 RESULT at `$E000`, VDP ports `$98/$99`) builds map onto future `systems`

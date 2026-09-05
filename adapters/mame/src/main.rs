@@ -68,6 +68,11 @@ struct SysDef {
     machine: fn(&str) -> Result<&'static str>,
 }
 
+/// Fields per second for the frame budget: 50 on a PAL machine, 60 otherwise.
+fn field_rate(spec: &str) -> i64 {
+    if spec.to_uppercase().starts_with("PAL") { 50 } else { 60 }
+}
+
 fn vcs_machine(spec: &str) -> Result<&'static str> {
     // MAME has no SECAM Atari 2600 machine (only a2600 / a2600p), so it
     // cannot capture a real SECAM field. Reject rather than silently emit
@@ -78,9 +83,9 @@ fn vcs_machine(spec: &str) -> Result<&'static str> {
     Ok(if spec == "PAL" { "a2600p" } else { "a2600" })
 }
 
-/// The TI VDP machines are NTSC TMS9918A drivers; TMS9929A (PAL) capture
-/// would need different machines, and the suite treats PAL as provisional
-/// anyway.
+/// The Sega machines are NTSC TMS9918A drivers; MAME has no PAL SG-1000 or
+/// SC-3000 machine, so a PAL capture request is refused rather than tagged
+/// wrongly.
 fn ntsc_only(machine: &'static str, spec: &str) -> Result<&'static str> {
     if !spec.eq_ignore_ascii_case("NTSC") {
         return Err(format!("MAME {machine} capture is NTSC-only (TMS9918A); -spec {spec} is not supported").into());
@@ -96,7 +101,15 @@ fn sc3000_machine(spec: &str) -> Result<&'static str> {
     ntsc_only("sc3000", spec)
 }
 
+/// `coleco` carries a TMS9928A (262 lines); `colecop` is MAME's PAL
+/// ColecoVision with a TMS9929A (313 lines). Both need their BIOS romset
+/// on the -rompath: coleco/313_10031-4005_73108a.u2 and
+/// colecop/r72114a_8317.u2. The screen crop centres the 256x192 active
+/// area, so the taller PAL screen maps through the same path.
 fn coleco_machine(spec: &str) -> Result<&'static str> {
+    if spec.eq_ignore_ascii_case("PAL") {
+        return Ok("colecop");
+    }
     ntsc_only("coleco", spec)
 }
 
@@ -290,8 +303,8 @@ fn usage() -> ! {
          \x20 -system vcs|sg1000|sc3000|coleco   target system (default vcs)\n\
          \x20 -rom <path>          ROM (.bin/.a26 for vcs; .sg/.col for the TI VDP machines)\n\
          \x20 -out <path>          output .morepork path (default trace.morepork)\n\
-         \x20 -spec NTSC|PAL       TV spec (vcs: a2600 vs a2600p; TI VDP machines: NTSC only)\n\
-         \x20 -frames <n>          cap: seconds_to_run = max(2, frames/60) (default 30)\n\
+         \x20 -spec NTSC|PAL       TV spec (vcs: a2600 vs a2600p; coleco: coleco vs colecop; sg1000/sc3000: NTSC only)\n\
+         \x20 -frames <n>          cap: seconds_to_run = max(2, frames/60, or /50 on PAL) (default 30)\n\
          \x20 -port <n>            gdbstub port (0 = auto-pick, default)\n\
          \x20 -swchb <n>           vcs console switches (default 0x48)\n\
          \x20 -frame[=bool]        capture a final frame snapshot (default true)\n\
@@ -403,7 +416,10 @@ fn run(sys: &SysDef, args: &Args) -> Result<()> {
     let trace_log = tempfile::Builder::new().prefix("morepork-mame-trace-").suffix(".log").tempfile()?;
     let cfg_path = cfg.path().to_string_lossy().into_owned();
 
-    let seconds = std::cmp::max(2, args.frames / 60);
+    // the budget is in frames; a PAL machine delivers 50 a second, so
+    // a 60 Hz conversion under-runs it by a sixth (the suite's PAL
+    // retention soaks timed out on colecop, 2026-09-05)
+    let seconds = std::cmp::max(2, args.frames / field_rate(&args.spec));
     let lua_path = lua.path().to_string_lossy().into_owned();
     let port_arg = port.to_string();
     let seconds_arg = seconds.to_string();
@@ -555,7 +571,7 @@ fn capture_frame(sys: &SysDef, machine: &str, args: &Args) -> Result<FrameData> 
 
     let target = std::cmp::max(max_frames, 8); // let a static image settle
     std::fs::write(lua.path(), frame_lua(target, dump.path()))?;
-    let seconds = target / 60 + 2;
+    let seconds = target / field_rate(spec) + 2;
 
     let lua_path = lua.path().to_string_lossy().into_owned();
     let seconds_arg = seconds.to_string();
